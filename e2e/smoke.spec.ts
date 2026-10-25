@@ -76,6 +76,8 @@ interface BalanceSceneView {
 const devUrl = `http://localhost:${Number(process.env.SMOKE_DEV_PORT ?? 5181)}`;
 
 test('Dev-Szene balance: zeigt den Bericht, simuliert neu und kehrt zurück, ohne Konsolenfehler', async ({ page }) => {
+  // Zwei Läufe mit je 1000 Matches, blockweise über Frames verteilt.
+  test.setTimeout(100_000);
   const errors: string[] = [];
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push(message.text());
@@ -87,9 +89,9 @@ test('Dev-Szene balance: zeigt den Bericht, simuliert neu und kehrt zurück, ohn
   await page.waitForFunction(() => window.game?.scene.isActive('balance'));
   const report = () =>
     page.evaluate(() => (window.game!.scene.getScene('balance') as unknown as BalanceSceneView).current);
-  await expect.poll(report, { timeout: 20_000 }).not.toBeNull();
+  await expect.poll(report, { timeout: 40_000 }).not.toBeNull();
   const first = (await report())!;
-  expect(first.totalMatches).toBe(200);
+  expect(first.totalMatches).toBe(1000);
   expect(first.cards.length).toBeGreaterThan(0);
 
   const box = (await page.locator('#game canvas').boundingBox())!;
@@ -98,7 +100,7 @@ test('Dev-Szene balance: zeigt den Bericht, simuliert neu und kehrt zurück, ohn
 
   // „Neu simulieren“: anderer Seed-Bereich.
   await click(90, 612);
-  await expect.poll(async () => (await report())?.startSeed, { timeout: 20_000 }).toBe(first.startSeed + 200);
+  await expect.poll(async () => (await report())?.startSeed, { timeout: 40_000 }).toBe(first.startSeed + 1000);
 
   // „Zurück“ startet die main-Szene.
   await click(270, 612);
