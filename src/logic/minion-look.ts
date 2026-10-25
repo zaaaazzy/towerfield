@@ -32,12 +32,23 @@ export function minionRadius(maxHp: number): number {
   return MIN_RADIUS + (MAX_RADIUS - MIN_RADIUS) * Math.min(1, Math.max(0, t));
 }
 
-/** Blickrichtung in y: Spielereinheiten schauen nach oben (-1), Bot-Einheiten nach unten (1). */
+/** Blickrichtung in x: Spielereinheiten laufen nach rechts (1), Bot-Einheiten nach links (-1). */
 export function facing(owner: number): -1 | 1 {
-  return owner === 0 ? -1 : 1;
+  return owner === 0 ? 1 : -1;
 }
 
-/** Senkrechter Versatz beim Laufen; von der Zeit abhängig, nicht von Frames. Jeder Minion hat eine eigene Phase. */
+/** Abstand in Pixeln, um den benachbarte Minions quer zur Lane gegeneinander versetzt gezeichnet werden. */
+export const STAGGER_STEP = 9;
+
+/**
+ * Querversatz (y) eines Minions auf seiner Lane: drei feste Bahnen (oberhalb, auf, unterhalb der Lane-Mitte) nach
+ * Minion-ID. So stehen Minions auf engen Slots nicht aufeinander und rücken auch beim Laufen nicht um. Reine Darstellung.
+ */
+export function laneStagger(minionId: number): number {
+  return ((minionId % 3) - 1) * STAGGER_STEP;
+}
+
+/** Senkrechter Versatz (Wippen) beim Laufen; von der Zeit abhängig, nicht von Frames. Jeder Minion hat eine eigene Phase. */
 export function bobOffset(timeMs: number, minionId: number, moving: boolean): number {
   if (!moving) return 0;
   const phase = (timeMs / BOB_PERIOD_MS + minionId * 0.37) * Math.PI * 2;

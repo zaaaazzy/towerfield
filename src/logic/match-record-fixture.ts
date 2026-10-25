@@ -3,7 +3,8 @@
  * Mensch zieht (spielen, verschieben, zurücknehmen, bereit) und der Bot per `botPlanRecorded` mitschreibt.
  */
 import { getCardDef } from './cards';
-import { advance, createMatch, LINE_COUNT, type MatchState } from './match';
+import { unlockedLanes } from './lanes';
+import { advance, createMatch, type MatchState } from './match';
 import {
   type ActionBody,
   botPlanRecorded,
@@ -29,13 +30,17 @@ export function playScriptedMatch(seed: number): PlayedMatch {
   };
   for (let guard = 0; guard < 1000 && state.phase !== 'over'; guard += 1) {
     if (state.phase === 'planning') {
+      // Nur freie Lanes (aufsteigend nach Index); das Feld wächst, sobald „Lane ausbauen“ gespielt wird.
+      const freeLanes = () => unlockedLanes(state.players[0].level).sort((a, b) => a - b);
       for (const cardId of [...state.players[0].hand]) {
         const def = getCardDef(cardId);
-        act({ type: 'play', cardId, line: def.target === 'line' ? state.round % LINE_COUNT : null });
+        const lanes = freeLanes();
+        act({ type: 'play', cardId, line: def.target === 'line' ? lanes[state.round % lanes.length]! : null });
       }
       const placements = state.players[0].placements;
       if (placements.length > 0) {
-        act({ type: 'move', minionId: placements[0]!.minionId, line: (state.round + 1) % LINE_COUNT, slot: 0 });
+        const lanes = freeLanes();
+        act({ type: 'move', minionId: placements[0]!.minionId, line: lanes[(state.round + 1) % lanes.length]!, slot: 0 });
       }
       if (state.round % 2 === 0 && placements.length > 1) {
         act({ type: 'undo', minionId: placements[placements.length - 1]!.minionId });

@@ -192,7 +192,7 @@ describe('describeEvent für Aufzeichnungen', () => {
 
   it('beschreibt Verschieben, Zurücknehmen und Bereit mit Spieler und Runde', () => {
     const move = describeEvent({ ...base, action: 'move', cardId: 'summon-archer', line: 1, slot: 2 });
-    expect(move).toBe('Runde 3 · Blau verschiebt Bogenschütze auf Line 2, Platz 3');
+    expect(move).toBe('Runde 3 · Blau verschiebt Bogenschütze auf Lvl 2 oben, Platz 3');
     const undo = describeEvent({ ...base, player: 1, action: 'undo', cardId: 'summon-minion', line: null });
     expect(undo).toBe('Runde 3 · Orange nimmt Minion zurück');
     expect(describeEvent({ ...base, action: 'ready', cardId: '', line: null })).toBe('Runde 3 · Blau ist bereit');
@@ -236,8 +236,18 @@ describe('describeEvent', () => {
     }
   });
 
-  it('nennt die Line 1-basiert, nur wenn die Karte eine hat', () => {
-    expect(describeEvent({ round: 1, player: 0, cardId: 'summon-minion', line: 0 })).toContain('Line 1');
-    expect(describeEvent({ round: 1, player: 0, cardId: 'minion-upgrade-all', line: null })).not.toContain('Line');
+  it('nennt die Lane mit ihrem Namen, nur wenn die Karte eine hat', () => {
+    const on = (line: number) => describeEvent({ round: 1, player: 0, cardId: 'summon-minion', line });
+    expect(on(0)).toContain('auf Start-Lane');
+    expect(on(1)).toContain('auf Lvl 2 oben');
+    expect(on(2)).toContain('auf Lvl 2 unten');
+    expect(on(3)).toContain('auf Lvl 3 oben');
+    expect(on(4)).toContain('auf Lvl 3 unten');
+    expect(describeEvent({ round: 1, player: 0, cardId: 'minion-upgrade-all', line: null })).not.toContain('Lane');
+  });
+
+  it('beschreibt den Abbruch auf einer gesperrten Lane verständlich', () => {
+    expect(describeAbort({ reason: 'invalid-line', index: 2 })).toContain('Lane');
+    expect(describeAbort({ reason: 'line-full', index: 2 })).toContain('Lane');
   });
 });

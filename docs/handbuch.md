@@ -50,7 +50,7 @@ Frühere Änderung (Replay gespielter Matches):
 | Thema | Vorher | Jetzt | Datei |
 |---|---|---|---|
 | Aufzeichnung | keine | `MainScene` zeichnet jede erfolgreiche Aktion beider Spieler auf (außerhalb von `MatchState`) | `match-record.ts`, `main-scene.ts` |
-| Format | – | kompakter String `v1…` aus Seed und Aktionen, `encodeMatch`/`decodeMatch` mit Versionskennung | `match-record.ts` |
+| Format | – | kompakter String `v2…` aus Seed und Aktionen, `encodeMatch`/`decodeMatch` mit Versionskennung | `match-record.ts` |
 | URL | `?replay=<seed>` (nur Bot) | zusätzlich `?replay=<seed>&moves=<kodiert>`; ohne `moves` weiter Bot-Replay | `seed.ts`, `replay-scene.ts` |
 | Replay-Quelle | nur Bots | Bots oder vorgegebene Aktionen; `ReplayEvent` kennt Verschieben, Zurücknehmen, Bereit | `replay.ts` |
 | Ende-Bild | Statistik, Tippen = neues Spiel | zeigt zusätzlich Teilen-URL und Knopf „Link kopieren“ | `main-scene.ts`, `share.ts` |
@@ -158,15 +158,15 @@ Minion-Tempo, Balance-Szene, E2E, Minion-Statistik, Replay, Kartenfilter, Heiler
 
 | Thema | Regel |
 |---|---|
-| Spielfeld | 3 Lines, pro Spieler und Line 1 Tower am eigenen Ende. Spieler 0 (Mensch) unten, Spieler 1 (Bot) oben. |
+| Spielfeld | Waagrechte Lanes (`src/logic/lanes.ts`, Details in [anwendung-horizontale-lane.md](anwendung-horizontale-lane.md)): Lvl 1 nur die Start-Lane mit 3 Towern je Spieler, Lvl 2 je eine Lane oben und unten (1 Tower), Lvl 3 je eine weitere. Spieler 0 (Mensch) links, Spieler 1 (Bot) rechts. `PlayerState.lines` hat immer 5 Einträge, gesperrte Lanes haben keine Tower. |
 | Start | 5 identische Handkarten (`START_HAND`). |
 | Ziehen | Ab Runde 2 dieselben 3 Karten für beide (`DRAW_PER_ROUND`). |
 | Handlimit | `HAND_LIMIT = 10`; nach dem Ziehen werden die zuletzt gezogenen Karten am Ende der Hand abgeschnitten (keine Ablage). Sie zählen als gezogen. |
 | Runden | Planung, dann Kampf, höchstens `MAX_ROUNDS = 8`. |
 | Energie | `min(MAX_ENERGY, BASE_ENERGY + (Runde - 1) * ENERGY_PER_ROUND)` = `min(8, 3 + (Runde - 1))`: 3, 4, 5, 6, 7, 8, 8, 8. Wird je Runde neu gesetzt; Unverbrauchtes verfällt. |
 | Kampf | `COMBAT_TICKS = 400` Ticks à `TICK_MS = 50` ms (20 s), über `delta` in festen Ticks. |
-| Überlebende | Zu Rundenbeginn (`respawnSurvivors`) auf die niedrigsten freien Slots ihrer Line gesetzt, nach `id` aufsteigend; HP, Werte und Line bleiben. Sie zählen zur Line-Kapazität, aber nicht zu `placements` (nicht verschieb- oder zurücknehmbar). |
-| Sieg | Nach jedem Kampf-Tick: hat ein Spieler keinen lebenden Tower mehr, endet das Match sofort; der andere gewinnt. Haben beide in demselben Tick keinen mehr, ist es unentschieden. Nach den 400 Ticks von Runde 8 gewinnt, wer mehr Tower-LP (Summe aller 3 Lines) hat; gleiche Summe ist unentschieden. Vor Runde 8 zählt der Tower-LP-Vergleich nie. |
+| Überlebende | Zu Rundenbeginn (`respawnSurvivors`) auf die niedrigsten freien Slots ihrer Lane gesetzt, nach `id` aufsteigend; HP, Werte und Lane bleiben, Tote entfallen. Sie zählen zur Lane-Kapazität, aber nicht zu `placements` (nicht verschieb- oder zurücknehmbar). |
+| Sieg | Nach jedem Kampf-Tick: hat ein Spieler keinen lebenden Tower mehr, endet das Match sofort; der andere gewinnt. Haben beide in demselben Tick keinen mehr, ist es unentschieden. Nach den 400 Ticks von Runde 8 gewinnt, wer mehr Tower-LP (Summe aller Tower aller freien Lanes) hat; gleiche Summe ist unentschieden. Vor Runde 8 zählt der Tower-LP-Vergleich nie. |
 
 Deck-Länge: `START_HAND + DRAW_PER_ROUND * (MAX_ROUNDS - 1)` = 26 Karten, Mischung per Seed (Fisher-Yates). Der Vorrat
 besteht aus Durchgängen der Kopienzahlen (je 17 Karten); die 26 Karten sind ein voller Durchgang plus die ersten 9
@@ -181,7 +181,7 @@ Bogenschütze 4, Heiler 2, die übrigen Karten wie in der Tabelle. Beide Spieler
 | `summon-brute` | Brocken | 2 | 80 LP, 12 Schaden/s | 4 | 8 | 2 |
 | `summon-archer` | Bogenschütze | 2 | 20 LP, 7 Schaden/s | 14 | 10 | 2 |
 | `summon-healer` | Heiler | 2 | 20 LP, heilt 5 LP/s (`damage`), greift nie an | 10 | 10 | 1 |
-| `line-upgrade` | Line +1 | 2 | Stufe +1 (max. 5), ein Slot mehr | – | – | 2 |
+| `line-upgrade` | Lane +1 | 2 | Feld-Stufe +1 (max. 3, ohne Ziel): je eine neue Lane oben und unten, ein Slot mehr je Lane | – | – | 2 |
 | `tower-hp` | Tower Leben | 1 | +30 max. LP und +30 LP | – | – | 2 |
 | `tower-damage` | Tower Schaden | 2 | +4 Schaden/s | – | – | 1 |
 | `minion-upgrade-line` | Minions Line | 1 | +10 LP, +2 Schaden für künftige Minions der Line | – | – | 2 |
@@ -213,7 +213,10 @@ Kartenwerte, Reichweiten und Tempo stimmen sonst mit dem Designkonzept überein.
 
 ### Kampfmodell (`src/logic/combat.ts`)
 
-- Line-Länge `LINE_LENGTH = 100`; Position 0 am eigenen, 100 am gegnerischen Tower.
+- Lane-Länge `LINE_LENGTH = 100` (waagrecht); Position 0 am eigenen (linken) Ende, 100 am gegnerischen (rechten). Ein
+  `Tower` hat optional `offset` (Standort vom eigenen Ende, Start-Lane 0/8/16); `lines[i].towers` ist die Tower-Liste der
+  Lane (leer = nicht frei). Statt `100 − Position` gilt für Tower `towerDistance = 100 − Position − offset`, ein Minion
+  greift den **nächsten lebenden** Tower seiner Lane an.
 - Pflichtfelder eines `Minion`: `id`, `line`, `position`, `hp`, `damage`, `range`, `speed`. Standardwerte
   `MINION_RANGE = 4`, `MINION_SPEED = 10`. Neue `Minion`-Literale in Tests brauchen `range` und `speed`.
 - Abstand zweier gegnerischer Minions: `gap = 100 − Position(a) − Position(b)`.
@@ -314,7 +317,7 @@ Bot-gegen-Bot-Match zum Seed; gleicher Seed ergibt denselben Endzustand und dies
 | `stepReplay(replay, deltaMs)` | neuer Zustand nach `deltaMs`; Ende oder `deltaMs <= 0` liefern den Zustand unverändert |
 | `isReplayOver(replay)` | `match.phase === 'over'` |
 | `combatDelta(deltaMs)` | `deltaMs * SLOWMO_FACTOR`, Spielzeit der Kampfphase |
-| `describeEvent(event)` | Text, z. B. „Runde 2 · Blau spielt Minion auf Line 3“ (Line 1-basiert, 0-basiert gespeichert) |
+| `describeEvent(event)` | Text, z. B. „Runde 2 · Blau spielt Minion auf Lvl 2 oben“ (Lane-Name aus `laneName`) |
 | `playerName(player)` | `Blau` (0), `Orange` (1) |
 
 - **Planung:** Sobald `pauseMs` den Wert `PLAY_PAUSE_MS` erreicht, zieht der Spieler am Zug mit `botStep`. Gibt es
@@ -364,16 +367,16 @@ sie, spielt die Replay-Szene beide Seiten Zug für Zug nach, mit Kommentaren (�
 dazu „verschiebt …“, „nimmt … zurück“, „ist bereit“). Takt `PLAY_PAUSE_MS`, Kampf mit `SLOWMO_FACTOR`; Pause, Spulen und
 Geschwindigkeitswahl gibt es nicht.
 
-**Format `moves` (Version 1):** Nur die Zeichen `0-9 a-z . -`. Aufbau `v1` und je Aktion ein Token mit `.` davor.
+**Format `moves` (Version 2, seit dem Lane-Umbau; Links der Version 1 sind ungültig):** Nur die Zeichen `0-9 a-z . -`. Aufbau `v2` und je Aktion ein Token mit `.` davor.
 
 | Aktion | Token | Felder |
 |---|---|---|
-| Karte spielen | `p<R><P>-<Karte>[-<Line>]` | Karte = Index in `CARD_DEFS`, Line 0–2 (bei Karten ohne Ziel weggelassen) |
-| Minion verschieben | `m<R><P>-<Minion>-<Line>-<Slot>` | Minion-Id, Ziel-Line, Slot |
+| Karte spielen | `p<R><P>-<Karte>[-<Lane>]` | Karte = Index in `CARD_DEFS`, Lane 0–4 (bei Karten ohne Ziel weggelassen, auch bei „Lane +1“) |
+| Minion verschieben | `m<R><P>-<Minion>-<Lane>-<Slot>` | Minion-Id, Ziel-Lane, Slot |
 | Beschwörung zurücknehmen | `u<R><P>-<Minion>` | Minion-Id |
 | Bereit | `r<R><P>` | – |
 
-`<R>` ist die Runde (1–8), `<P>` der Spieler (0 Blau, 1 Orange). Beispiel: `v1.p10-3-1.m10-1-2-0.r10`. Grenzen beim
+`<R>` ist die Runde (1–8), `<P>` der Spieler (0 Blau, 1 Orange). Beispiel: `v2.p10-3-0.m10-1-0-2.r10`. Grenzen beim
 Lesen: 4000 Zeichen und 800 Aktionen.
 
 **Ungültige Links** führen nie zu Absturz oder `console.error`:
@@ -536,7 +539,7 @@ Funktionen: `createStats`, `recordSummon`, `recordUndo`, `recordMove`, `recordDa
   `>>> 0` auf 32 Bit gekürzt; ungültige Werte ergeben `null`.
 - URL-Parameter `&moves=<kodiert>` (zusammen mit `replay`) spielt aufgezeichnete Züge ab; Format und Grenzen siehe
   „Teilen und Abspielen gespielter Matches“. `main.ts` liest nur `replay`, `moves` liest die Szene.
-- `RECORD_VERSION` (`match-record.ts`): Formatversion der Aufzeichnung, aktuell 1.
+- `RECORD_VERSION` (`match-record.ts`): Formatversion der Aufzeichnung, aktuell 2.
 - Die Szene `balance` ist nur im Dev-Server registriert, nicht im Produktions-Build.
 
 ## 5. Betrieb und Entwicklung

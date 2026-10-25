@@ -5,19 +5,21 @@ Karten (Hochformat, Touch, `Scale.FIT`). Aktuell spielt man lokal gegen einen de
 
 ## Spielkonzept
 
-- 3 Lines, jede gehört je zur Hälfte beiden Spielern; pro Spieler und Line genau 1 Tower.
+- Waagrechte Lanes: Das Feld startet mit einer Start-Lane (links der Mensch, rechts der Bot, je 3 Tower
+  nebeneinander). Pro Ausbaustufe (Lvl 2, Lvl 3) kommen je eine Lane oberhalb und unterhalb dazu, siehe
+  [`docs/anwendung-horizontale-lane.md`](docs/anwendung-horizontale-lane.md).
 - Beide Spieler ziehen aus derselben, per Seed gemischten Kartenreihenfolge: 5 Startkarten, ab Runde 2 je 3 neue
   Karten (identisch für beide). Kein Zufall im Kampf, keine Trefferchancen.
 - Eine Runde = Planung (beide spielen gleichzeitig Karten, begrenzt durch Energie) und Kampf (Minions und Tower,
   Zeit nur über `delta`).
-- Kartentypen: Line ausbauen, Tower ausbauen, Minion beschwören, Minion verbessern (wirkt nur auf künftige Minions).
+- Kartentypen: Lane ausbauen (Feld +1 Stufe, ohne Ziel), Tower ausbauen, Minion beschwören, Minion verbessern (wirkt nur auf künftige Minions).
 - Sieg: alle drei gegnerischen Tower zerstört, oder nach der Rundengrenze (8) mehr Tower-Lebenspunkte. Gleichstand =
   Unentschieden.
 
 Basiswerte (in `src/logic/match.ts` und `combat.ts`, nur Startwerte, kein Balancing): `HAND_LIMIT = 10`
 (bestätigt, greift erst in Runde 3: 5 + 3 = 8, dann 11; überzählige Karten verfallen am Ende der Hand; es gilt die
 Reihenfolge der Ankunft), `MAX_ROUNDS = 8`,
-Energie 3 + 1 pro Runde (max. 8), Line-Höchststufe 5, Kapazität 2 + Stufe, Tower 100 HP / 8 Schaden.
+Energie 3 + 1 pro Runde (max. 8), Feld-Höchststufe 3, Kapazität je Lane 2 + Stufe, Tower 100 HP / 8 Schaden.
 
 Das verbindliche Designkonzept (Karten, Minions, Slot-Platzierung, Iso-Karte, Mobile-Layout, Folgeaufträge) steht in
 [`docs/designkonzept.md`](docs/designkonzept.md). Die Anwendung der Iso-Umrechnung, der Kamera-Begrenzung und der

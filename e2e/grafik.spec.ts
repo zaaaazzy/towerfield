@@ -42,7 +42,7 @@ test('Kampf zeigt Schadenszahlen und Effekte ohne Konsolenfehler', async ({ page
   const errors = collectErrors(page);
   await openGame(page);
   const state = await readState(page);
-  // Alle bezahlbaren Beschwörungen auf Line 1 spielen, damit es Kämpfe gibt.
+  // Alle bezahlbaren Beschwörungen auf die Start-Lane spielen, damit es Kämpfe gibt.
   const hand = state.players[0].hand;
   let energy = state.players[0].energy;
   for (let index = 0; index < hand.length; index += 1) {
@@ -50,7 +50,7 @@ test('Kampf zeigt Schadenszahlen und Effekte ohne Konsolenfehler', async ({ page
     if (def.type !== 'summon' || def.cost > energy) continue;
     energy -= def.cost;
     await tapCard(page, index - (hand.length - (await readState(page)).players[0].hand.length));
-    await tapLine(page, 1);
+    await tapLine(page, 0);
   }
   await tapReady(page);
   await expect.poll(async () => (await readState(page)).phase).toBe('combat');

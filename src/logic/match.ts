@@ -17,9 +17,11 @@ import {
   towersAlive,
 } from './combat';
 import { createStats, type MatchStats, recordDamage, recordMove, recordSummon, recordUndo } from './match-stats';
+import { isLaneUnlocked, LANE_COUNT, laneTowerOffsets, MAX_FIELD_LEVEL } from './lanes';
 import { firstFreeSlot, isSlotFree, isValidSlot, slotPosition } from './placement';
 
-export const LINE_COUNT = 3;
+/** Zahl der Lanes des voll ausgebauten Feldes (Lvl 3); `PlayerState.lines` hat immer so viele Einträge. */
+export const LINE_COUNT = LANE_COUNT;
 export const START_HAND = 5;
 export const DRAW_PER_ROUND = 3;
 /** Handlimit (bestätigt, siehe docs/designkonzept.md): Karten über dem Limit verfallen am Ende der Hand. */
@@ -28,7 +30,6 @@ export const MAX_ROUNDS = 8;
 export const BASE_ENERGY = 3;
 export const ENERGY_PER_ROUND = 1;
 export const MAX_ENERGY = 8;
-export const MAX_LINE_LEVEL = 5;
 export const BASE_CAPACITY = 2;
 export const TOWER_HP = 100;
 export const TOWER_DAMAGE = 8;
@@ -42,14 +43,16 @@ export type Phase = 'planning' | 'combat' | 'over';
 export type Outcome = 'player0' | 'player1' | 'draw';
 export type PlayerIndex = 0 | 1;
 
+/** Eine Lane (siehe `lanes.ts`). Ist sie noch nicht frei, hat sie keine Tower. */
 export interface LineState {
-  level: number;
-  tower: Tower;
-  /** Dauerhafter Bonus für künftig beschworene Minions dieser Line. */
+  towers: Tower[];
+  /** Dauerhafter Bonus für künftig beschworene Minions dieser Lane. */
   bonus: { hp: number; damage: number };
 }
 
 export interface PlayerState extends CombatPlayer {
+  /** Ausbaustufe des Feldes (1 bis `MAX_FIELD_LEVEL`); bestimmt, welche Lanes frei sind, und die Kapazität je Lane. */
+  level: number;
   energy: number;
   /** Karten-IDs in der Reihenfolge, in der sie auf die Hand kamen. */
   hand: string[];
@@ -90,9 +93,25 @@ export type PlayError =
 
 export type PlayResult = { ok: true; state: MatchState } | { ok: false; state: MatchState; reason: PlayError };
 
-/** Maximale Zahl lebender Minions einer Line des Levels `level`. */
+/** Maximale Zahl lebender Minions je freier Lane bei Ausbaustufe `level`. */
 export function lineCapacity(level: number): number {
   return BASE_CAPACITY + level;
+}
+
+/** Slot-Zahl je Lane-Index bei Ausbaustufe `level`: `lineCapacity` für freie Lanes, 0 für noch gesperrte. */
+export function laneSlotCounts(level: number): number[] {
+  return Array.from({ length: LANE_COUNT }, (_, lane) => (isLaneUnlocked(level, lane) ? lineCapacity(level) : 0));
+}
+
+/** Frische Tower einer Lane (Start-Lane: drei nebeneinander, sonst einer). */
+export function createLaneTowers(lane: number): Tower[] {
+  return laneTowerOffsets(lane).map((offset) => ({ offset, hp: TOWER_HP, maxHp: TOWER_HP, damage: TOWER_DAMAGE }));
+}
+
+/** Tower, den ein Tower-Upgrade der Lane trifft: der lebende mit den wenigsten LP (bei Gleichstand der hintere), sonst der erste. */
+function upgradeTarget(towers: Tower[]): Tower {
+  const alive = towers.filter((tower) => tower.hp > 0);
+  return alive.reduce((best, tower) => (tower.hp < best.hp ? tower : best), alive[0] ?? towers[0]!);
 }
 
 export function energyForRound(round: number): number {
@@ -101,14 +120,14 @@ export function energyForRound(round: number): number {
 
 function createPlayer(): PlayerState {
   return {
+    level: 1,
     energy: 0,
     hand: [],
     nextMinionId: 1,
     placements: [],
     minions: [],
-    lines: Array.from({ length: LINE_COUNT }, () => ({
-      level: 1,
-      tower: { hp: TOWER_HP, maxHp: TOWER_HP, damage: TOWER_DAMAGE },
+    lines: Array.from({ length: LANE_COUNT }, (_, lane) => ({
+      towers: isLaneUnlocked(1, lane) ? createLaneTowers(lane) : [],
       bonus: { hp: 0, damage: 0 },
     })),
   };
@@ -125,7 +144,7 @@ export function respawnSurvivors(player: PlayerState): void {
   const placed: Minion[] = [];
   const positions = new Map<number, number>();
   for (const minion of [...alive].sort((a, b) => a.id - b.id)) {
-    const slotCount = Math.max(lineCapacity(player.lines[minion.line]!.level), alive.length);
+    const slotCount = Math.max(lineCapacity(player.level), alive.length);
     let slot = firstFreeSlot(placed, minion.line, slotCount);
     if (slot === undefined) {
       slot = slotCount - 1;
@@ -200,12 +219,9 @@ export function playCard(
   if (current.energy < def.cost) return reject(state, 'not-enough-energy');
   let summonSlot = 0;
   if (def.target === 'line') {
-    if (lineIndex === undefined || !Number.isInteger(lineIndex) || lineIndex < 0 || lineIndex >= LINE_COUNT) {
-      return reject(state, 'invalid-line');
-    }
-    const line = current.lines[lineIndex]!;
+    if (lineIndex === undefined || !isLaneUnlocked(current.level, lineIndex)) return reject(state, 'invalid-line');
     if (def.type === 'summon') {
-      const slotCount = lineCapacity(line.level);
+      const slotCount = lineCapacity(current.level);
       if (current.minions.filter((m) => m.line === lineIndex).length >= slotCount) return reject(state, 'line-full');
       if (slot === undefined) {
         const free = firstFreeSlot(current.minions, lineIndex, slotCount);
@@ -217,8 +233,8 @@ export function playCard(
         summonSlot = slot;
       }
     }
-    if (def.type === 'line-upgrade' && line.level >= MAX_LINE_LEVEL) return reject(state, 'max-level');
   }
+  if (def.type === 'line-upgrade' && current.level >= MAX_FIELD_LEVEL) return reject(state, 'max-level');
 
   const next = structuredClone(state);
   const player = next.players[playerIndex];
@@ -227,13 +243,19 @@ export function playCard(
   const line = def.target === 'line' ? player.lines[lineIndex!]! : undefined;
   switch (def.type) {
     case 'line-upgrade':
-      line!.level += 1;
+      // Neue Ausbaustufe: die frisch freien Lanes (je eine oberhalb und unterhalb) bekommen ihre Tower.
+      player.level += 1;
+      player.lines.forEach((lane, index) => {
+        if (isLaneUnlocked(player.level, index) && lane.towers.length === 0) lane.towers = createLaneTowers(index);
+      });
       break;
-    case 'tower-upgrade':
-      line!.tower.maxHp += def.hp;
-      line!.tower.hp += def.hp;
-      line!.tower.damage += def.damage;
+    case 'tower-upgrade': {
+      const tower = upgradeTarget(line!.towers);
+      tower.maxHp += def.hp;
+      tower.hp += def.hp;
+      tower.damage += def.damage;
       break;
+    }
     case 'summon': {
       const minion: Minion = {
         id: player.nextMinionId,
@@ -279,9 +301,9 @@ export function moveMinion(
   if (!current.placements.some((p) => p.minionId === minionId) || !current.minions.some((m) => m.id === minionId)) {
     return reject(state, 'no-such-minion');
   }
-  if (!Number.isInteger(lineIndex) || lineIndex < 0 || lineIndex >= LINE_COUNT) return reject(state, 'invalid-line');
+  if (!isLaneUnlocked(current.level, lineIndex)) return reject(state, 'invalid-line');
   const others = current.minions.filter((m) => m.id !== minionId);
-  const slotCount = lineCapacity(current.lines[lineIndex]!.level);
+  const slotCount = lineCapacity(current.level);
   if (others.filter((m) => m.line === lineIndex).length >= slotCount) return reject(state, 'line-full');
   if (!isValidSlot(slot, slotCount)) return reject(state, 'invalid-slot');
   if (!isSlotFree(others, lineIndex, slot)) return reject(state, 'slot-taken');

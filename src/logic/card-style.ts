@@ -21,7 +21,7 @@ export interface CardTypeStyle {
 export const CARD_TYPE_STYLES: Readonly<Record<CardType, CardTypeStyle>> = {
   summon: { accent: 0xe0584a, dark: 0x6a1f1c, symbol: 'sword', banner: 'BESCHWÖRUNG' },
   'tower-upgrade': { accent: 0x4a90e2, dark: 0x1b3a6a, symbol: 'tower', banner: 'TOWER' },
-  'line-upgrade': { accent: 0x3fb68b, dark: 0x145440, symbol: 'arrow', banner: 'LINE' },
+  'line-upgrade': { accent: 0x3fb68b, dark: 0x145440, symbol: 'arrow', banner: 'LANE' },
   'minion-upgrade': { accent: 0xb06be0, dark: 0x4a2470, symbol: 'gem', banner: 'MINIONS' },
 };
 
@@ -65,11 +65,11 @@ export function cardStats(def: CardDef): CardStats | null {
 export function describeCard(def: CardDef): string {
   switch (def.type) {
     case 'line-upgrade':
-      return 'Line +1 Stufe';
+      return 'Lane +1 Stufe\noben + unten';
     case 'tower-upgrade':
       return [def.hp > 0 ? `+${def.hp} Leben` : '', def.damage > 0 ? `+${def.damage} Schaden` : ''].filter(Boolean).join('\n');
     case 'minion-upgrade':
-      return `${def.scope === 'all' ? 'Alle' : 'Line'}: +${def.hp} Leben\n+${def.damage} Schaden`;
+      return `${def.scope === 'all' ? 'Alle' : 'Lane'}: +${def.hp} Leben\n+${def.damage} Schaden`;
     case 'summon':
       return def.role === 'healer'
         ? `Heilt ${def.damage}/s\n${def.hp} Leben`

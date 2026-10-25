@@ -11,7 +11,7 @@ interface CardBase {
   id: string;
   name: string;
   cost: number;
-  /** `line`: die Karte braucht eine gewählte Line, `none`: sie wirkt ohne Ziel. */
+  /** `line`: die Karte braucht eine gewählte Lane, `none`: sie wirkt ohne Ziel. */
   target: 'line' | 'none';
 }
 
@@ -26,7 +26,7 @@ export const CARD_DEFS: readonly CardDef[] = [
   { id: 'summon-brute', name: 'Brocken', type: 'summon', cost: 2, target: 'line', hp: 80, damage: 12, speed: 8 },
   { id: 'summon-archer', name: 'Bogenschütze', type: 'summon', cost: 2, target: 'line', hp: 20, damage: 7, range: 14, speed: 10 },
   { id: 'summon-healer', name: 'Heiler', type: 'summon', cost: 2, target: 'line', hp: 20, damage: 5, range: 10, speed: MINION_SPEED, role: 'healer' },
-  { id: 'line-upgrade', name: 'Line +1', type: 'line-upgrade', cost: 2, target: 'line' },
+  { id: 'line-upgrade', name: 'Lane +1', type: 'line-upgrade', cost: 2, target: 'none' },
   { id: 'tower-hp', name: 'Tower Leben', type: 'tower-upgrade', cost: 1, target: 'line', hp: 30, damage: 0 },
   { id: 'tower-damage', name: 'Tower Schaden', type: 'tower-upgrade', cost: 2, target: 'line', hp: 0, damage: 4 },
   {
