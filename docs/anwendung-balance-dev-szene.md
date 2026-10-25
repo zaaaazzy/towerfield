@@ -14,8 +14,8 @@ npm run dev
 - Die Szene (Key `balance`) gibt es nur im Dev-Server. `src/main.ts` lädt sie nur bei `import.meta.env.DEV` per
   dynamischem Import. Mit `?scene=balance` startet sie zuerst, sonst bleibt `MainScene` die Startszene.
 - Im Produktions-Build (`npm run build`) ist nur `main` registriert. Es gibt keinen Menüeintrag und keine Dev-Taste.
-- Die Szene simuliert 200 Matches (`MATCH_COUNT`), 4 pro Frame (`MATCHES_PER_FRAME`), und zeigt eine Fortschrittsanzeige.
-- „Neu simulieren“ startet den nächsten Seed-Bereich (`startSeed + 200`), wirkt aber erst nach Abschluss der laufenden
+- Die Szene simuliert 1000 Matches (`MATCH_COUNT`), 4 pro Frame (`MATCHES_PER_FRAME`), und zeigt eine Fortschrittsanzeige.
+- „Neu simulieren“ startet den nächsten Seed-Bereich (`startSeed + 1000`), wirkt aber erst nach Abschluss der laufenden
   Simulation. „Zurück“ startet die Szene `main`.
 - Die Tabelle lässt sich über den Spaltenkopf der Siegquote auf- oder absteigend sortieren.
 - Die Szene hält den fertigen Bericht im lesbaren Feld `current` (`BalanceReport` oder `null` während der Simulation).
@@ -107,7 +107,7 @@ weil `@vitest/coverage-v8` fehlt.
 - **Ablaufsteuerung in der Szene:** `update()` baut die Schleife aus `simulateMatch` und `strategiesForSeed` selbst
   nach, weil die Szene blockweise rechnen muss. `runSimulation` wird von der Szene nicht benutzt, ist aber getestet und
   für Skripte und Tests gedacht. Ändert sich die Ablauflogik (Seed-Zählung), beide Stellen angleichen.
-- **Laufzeit:** 200 Matches brauchen im Test rund 0,7 s. Die Szene verteilt sie auf Frames, der Canvas bleibt bedienbar.
+- **Laufzeit:** 200 Matches brauchen im Test rund 0,7 s; die Szene simuliert 1000 (headless rund 20 s, im Browser rechnerisch etwa 4 s bei 60 fps, nicht gemessen). Sie verteilt sie auf Frames, der Canvas bleibt bedienbar.
 - **Nicht gebaut:** Die optionale JSON-Ausgabe (Zwischenablage oder Konsole) fehlt.
 - **Formatierung:** In `playwright.config.ts` stehen `use: { baseURL: ... }` und `projects: [...]` auf einer Zeile.
   Das hat keine Folgen.

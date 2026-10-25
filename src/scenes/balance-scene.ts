@@ -6,7 +6,7 @@ import { addBackdrop } from './textures';
 import { drawBar, drawButton, FONTS, PALETTE, TEXT } from './theme';
 
 /** Matches pro Simulation (Standard) und pro Frame, damit der Canvas nicht blockiert. */
-const MATCH_COUNT = 200;
+const MATCH_COUNT = 1000;
 const MATCHES_PER_FRAME = 4;
 
 const ROWS_TOP = 164;
