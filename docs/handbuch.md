@@ -1,7 +1,7 @@
 # TowerField – Technisches Handbuch
 
-Stand: Auftrag „Grafische Überarbeitung im Fantasy-Kartenspiel-Stil“ (Version 0.1.0). Der Stand baut auf den
-Aufträgen „Heiler-Karte“, „Kartenfilter für die Hand im Match“, „Replay-Szene“, „Minion-Statistik-Overlay nach Match-Ende“, „Fernkämpfer Bogenschütze“, „Start- und Zieh-Konstanten“, „E2E-Tests“, „Dev-Szene mit Balancing-Statistik“,
+Stand: Auftrag „Replay gespielter Matches per URL-Parameter“ (Version 0.1.0). Der Stand baut auf den
+Aufträgen „Grafische Überarbeitung im Fantasy-Kartenspiel-Stil“, „Heiler-Karte“, „Kartenfilter für die Hand im Match“, „Replay-Szene“, „Minion-Statistik-Overlay nach Match-Ende“, „Fernkämpfer Bogenschütze“, „Start- und Zieh-Konstanten“, „E2E-Tests“, „Dev-Szene mit Balancing-Statistik“,
 „Minion-Tempo“, „Tower-Reichweite 20“, „Energie-Maximum 8“, „Bot-Strategie“, „Handlimit“, „Drag-and-Drop“,
 „Designkonzept“ und „Kern-Logik“ auf.
 
@@ -19,9 +19,27 @@ Aufträgen „Heiler-Karte“, „Kartenfilter für die Hand im Match“, „Rep
 >   Zeichenfunktionen habe ich nicht neu gelesen.
 > - Ich habe keine Tests und keinen Build ausgeführt. Laut Tester: Typecheck grün, Unit-Tests zu `card-style` und
 >   `fx-events` (11) grün, Smoke 17 bestanden; Screenshots wurden nicht geprüft. Der Review war freigegeben.
+> - Teilen und Abspielen von Matches: gegen `docs/anwendung-replay.md` (vom Dokumentierer mit dem Code abgeglichen) und die
+>   Berichte von Entwickler und Reviewer. `match-record.ts`, `share.ts` und die Szenen habe ich nicht selbst neu gelesen.
+>   Laut Tester: Typecheck, 43 Unit-Tests der betroffenen Dateien und 20 Smoke-Fälle grün; der Review war freigegeben.
 > - Nichts committet. Zeilenangaben für `main-scene.ts` sind ungefähr.
 
 ## Änderungen in diesem Stand
+
+| Thema | Vorher | Jetzt | Datei |
+|---|---|---|---|
+| Aufzeichnung | keine | `MainScene` zeichnet jede erfolgreiche Aktion beider Spieler auf (außerhalb von `MatchState`) | `match-record.ts`, `main-scene.ts` |
+| Format | – | kompakter String `v1…` aus Seed und Aktionen, `encodeMatch`/`decodeMatch` mit Versionskennung | `match-record.ts` |
+| URL | `?replay=<seed>` (nur Bot) | zusätzlich `?replay=<seed>&moves=<kodiert>`; ohne `moves` weiter Bot-Replay | `seed.ts`, `replay-scene.ts` |
+| Replay-Quelle | nur Bots | Bots oder vorgegebene Aktionen; `ReplayEvent` kennt Verschieben, Zurücknehmen, Bereit | `replay.ts` |
+| Ende-Bild | Statistik, Tippen = neues Spiel | zeigt zusätzlich Teilen-URL und Knopf „Link kopieren“ | `main-scene.ts`, `share.ts` |
+| Ungültige Links | – | Hinweis „Replay gestoppt“ bzw. „Replay abgebrochen bei Zug N“, kein `console.error` | `replay.ts`, `replay-scene.ts` |
+| Smoke | 17 Fälle | 20 Fälle (gültige Züge, ungültige Zugdaten, Teilen-URL) | `e2e/smoke.spec.ts` |
+
+Nicht geändert (Teilen): `match.ts` und alle Regeln, `MatchState`, `main.ts`, Bot-Replay ohne `moves`, `parseReplaySeed`.
+Details: `docs/anwendung-replay.md`.
+
+Frühere Änderung (Grafik):
 
 | Thema | Vorher | Jetzt | Datei |
 |---|---|---|---|
@@ -106,6 +124,7 @@ Minion-Tempo, Balance-Szene, E2E, Minion-Statistik, Replay, Kartenfilter, Heiler
 | Start 5 / Ziehen 3, Handlimit 10, Energie-Max. 8, Tower-Reichweite 20, Minion-Tempo | umgesetzt |
 | Minion-Statistik und Overlay nach Match-Ende | umgesetzt, getestet |
 | Replay-Szene `?replay=<seed>` | umgesetzt, getestet |
+| **Teilen und Abspielen gespielter Matches (`&moves=`)** | **umgesetzt, getestet; „Zurücknehmen“ in der `MainScene` nicht bedienbar** |
 | **Kartenfilter für die Hand** | **umgesetzt, getestet** |
 | Balance-Szene `balance` | nur im Dev-Server, nicht neu bewertet |
 | Drag-and-Drop von Minions | umgesetzt |
@@ -192,12 +211,13 @@ src/
     match.ts       MatchState, playCard, moveMinion, undoSummon, setReady, advance
     match-stats.ts Statistik des eigenen Spielers
     hand-filter.ts Kartenfilter der Hand (Sichtbarkeit je Kartentyp)
-    replay.ts      Bot-gegen-Bot-Replay zu einem Seed, Zeitlupe, Kommentartexte
-    seed.ts        parseSeed, parseReplaySeed
+    replay.ts      Replay (Bots oder aufgezeichnete Züge), Zeitlupe, Kommentartexte
+    match-record.ts Aufzeichnen, encodeMatch/decodeMatch, Nachspielen mit Prüfung
+    seed.ts        parseSeed, parseReplaySeed, parseReplayMoves
     card-style.ts  Kartentyp → Farbe, Symbol, Banner; describeCard (Darstellung, rein)
     fx-events.ts   diffFx: Effekt-Ereignisse aus zwei Spielzuständen (rein)
     placement.ts, iso.ts, bot.ts, balance-sim.ts
-  scenes/  main-scene.ts (Spiel), replay-scene.ts (Replay), balance-scene.ts (Dev)
+  scenes/  main-scene.ts (Spiel), replay-scene.ts (Replay), balance-scene.ts (Dev), share.ts (Teilen-URL)
            theme.ts, textures.ts, card-view.ts, field-view.ts, effects.ts, labels.ts (Phaser-Code, nicht in logic/)
   main.ts  wählt die Start-Szene
 e2e/       smoke.spec.ts, gameplay.spec.ts, grafik.spec.ts (Playwright)
@@ -229,8 +249,10 @@ flowchart TD
   H -- ja --> I[Ergebnis + Teilen-URL, Taste oder Klick = Neustart]
 ```
 
-Ein Seed legt Deck und Bot-Strategien fest, keine menschlichen Züge. „Replay“ ist ein Bot-gegen-Bot-Match zum Seed;
-gleicher Seed ergibt denselben Endzustand und dieselbe Ereignisliste. Aufzeichnung menschlicher Partien gibt es nicht.
+Ein Seed legt Deck und Bot-Strategien fest, keine menschlichen Züge. `?replay=<seed>` ohne `moves` ist ein
+Bot-gegen-Bot-Match zum Seed; gleicher Seed ergibt denselben Endzustand und dieselbe Ereignisliste. Mit
+`&moves=<kodiert>` spielt die Szene stattdessen die aufgezeichneten Züge eines in der `MainScene` gespielten Matches nach
+(Abschnitt „Teilen und Abspielen gespielter Matches“ unten).
 
 **Logik (`src/logic/replay.ts`)**, rein, ohne Phaser/DOM/Canvas:
 
@@ -269,6 +291,66 @@ liefern die Getter `current` und `comments` den Zustand.
 - `ReplayScene.create` fällt bei ungültigem Wert auf Seed 1 zurück; das ist nur eine Absicherung, `main.ts` startet die
   Szene nur bei gültigem Wert.
 - Eine neue Szene, die ohne Eingabe erreichbar ist, gehört in `e2e/smoke.spec.ts`.
+
+### Teilen und Abspielen gespielter Matches (`&moves=`)
+
+```mermaid
+flowchart LR
+  A[MainScene: Spieler spielt] -->|performAction| B[Aufzeichnung]
+  B --> C[encodeMatch: Seed + Züge]
+  C --> D[Ende-Bild: Teilen-URL, Link kopieren]
+  D --> E[ReplayScene liest replay und moves]
+  E --> F{decodeMatch gültig?}
+  F -- ja --> G[stepReplay: createMatch, playCard, moveMinion, undoSummon, setReady, advance]
+  F -- nein --> H[Hinweis Replay gestoppt, Taste = neues Spiel]
+  G -- regelwidrig --> I[Hinweis Replay abgebrochen bei Zug N]
+```
+
+**Für Spieler:** Nach Spielende zeigt die `MainScene` (nach „Schließen“ der Statistik) die Teilen-URL, umgebrochen und bei
+sehr langen Links gekürzt. Der Knopf **Link kopieren** legt die vollständige URL in die Zwischenablage. Öffnet jemand
+sie, spielt die Replay-Szene beide Seiten Zug für Zug nach, mit Kommentaren („Runde 2 · Blau spielt Minion auf Line 3“,
+dazu „verschiebt …“, „nimmt … zurück“, „ist bereit“). Takt `PLAY_PAUSE_MS`, Kampf mit `SLOWMO_FACTOR`; Pause, Spulen und
+Geschwindigkeitswahl gibt es nicht.
+
+**Format `moves` (Version 1):** Nur die Zeichen `0-9 a-z . -`. Aufbau `v1` und je Aktion ein Token mit `.` davor.
+
+| Aktion | Token | Felder |
+|---|---|---|
+| Karte spielen | `p<R><P>-<Karte>[-<Line>]` | Karte = Index in `CARD_DEFS`, Line 0–2 (bei Karten ohne Ziel weggelassen) |
+| Minion verschieben | `m<R><P>-<Minion>-<Line>-<Slot>` | Minion-Id, Ziel-Line, Slot |
+| Beschwörung zurücknehmen | `u<R><P>-<Minion>` | Minion-Id |
+| Bereit | `r<R><P>` | – |
+
+`<R>` ist die Runde (1–8), `<P>` der Spieler (0 Blau, 1 Orange). Beispiel: `v1.p10-3-1.m10-1-2-0.r10`. Grenzen beim
+Lesen: 4000 Zeichen und 800 Aktionen.
+
+**Ungültige Links** führen nie zu Absturz oder `console.error`:
+
+| Fall | Verhalten |
+|---|---|
+| `?replay=abc` oder leer (kein gültiger Seed) | normale `MainScene` |
+| `moves` unlesbar (leer, abgeschnitten, unbekannte Version, Zeichen oder Zahlen außerhalb des Formats, zu lang) | Hinweis „Replay gestoppt – Die Zugdaten sind ungültig.“ |
+| `moves` lesbar, aber regelwidrig (zu wenig Energie, Karte nicht auf der Hand, falsche Runde), Aufzeichnung endet vor Spielende oder enthält danach noch Züge | Replay läuft bis zur letzten gültigen Aktion, dann „Replay abgebrochen bei Zug N: <Grund>“ |
+
+In beiden Hinweisfällen startet eine Taste oder ein Klick ein neues Spiel (`MainScene`).
+
+**Logik (`src/logic/match-record.ts`)**, rein, ohne Phaser/DOM/Canvas: `createRecord`, `performAction` und `botPlanRecorded`
+(Aufzeichnen), `applyAction`, `encodeMatch`/`decodeMatch`, `shareQuery`, `replayRecorded` (Nachspielen mit Prüfung, ohne
+Zeitlupe). `replay.ts` ergänzt `createRecordedReplay`, `createInvalidReplay` und `describeAbort`; Bot-Pfad und
+aufgezeichneter Pfad teilen sich `stepReplay`, den Takt und `describeEvent`. `ReplayEvent` hat das optionale Feld
+`action` (`move`, `undo`, `ready`; ohne Angabe eine gespielte Karte). Karten werden beim Nachspielen über ihre ID in der
+Hand gefunden, nicht über den Handindex. `match.ts` ist unverändert; die Aufzeichnung liegt außerhalb des `MatchState`.
+
+**Auf einen Blick:**
+- **Versionierung:** Ändern sich Regeln oder Kartenliste, muss `RECORD_VERSION` steigen. `match-record.test.ts` hält die
+  Kartenliste fest und erinnert daran. Ohne Versionssprung brechen alte Links an der ersten abweichenden Aktion ab oder
+  enden anders.
+- **Lange Seeds:** `decodeMatch` kürzt Seeds mit bis zu 15 Ziffern auf 32 Bit; Aufzeichnen und Nachspielen verhalten sich
+  gleich, das Replay bleibt konsistent.
+- **Teilen-URL:** aus `window.location.origin` und `pathname` plus `shareQuery` (`src/scenes/share.ts`). Text auf der
+  Leinwand lässt sich nicht markieren, daher der Knopf „Link kopieren“.
+- **Zurücknehmen:** Format und Replay kennen die Aktion (Tests auf Logikebene), die `MainScene` bietet sie noch nicht an.
+- Gespeichert wird nur in der URL, nicht auf einem Server.
 
 ### Grafik
 
@@ -400,6 +482,9 @@ Funktionen: `createStats`, `recordSummon`, `recordUndo`, `recordMove`, `recordDa
 - URL-Parameter `?seed=<1–15 Ziffern>` legt den Seed fest (genutzt von den E2E-Tests).
 - URL-Parameter `?replay=<1–15 Ziffern>` startet die Replay-Szene (Dev und Produktion). Beide Parameter werden mit
   `>>> 0` auf 32 Bit gekürzt; ungültige Werte ergeben `null`.
+- URL-Parameter `&moves=<kodiert>` (zusammen mit `replay`) spielt aufgezeichnete Züge ab; Format und Grenzen siehe
+  „Teilen und Abspielen gespielter Matches“. `main.ts` liest nur `replay`, `moves` liest die Szene.
+- `RECORD_VERSION` (`match-record.ts`): Formatversion der Aufzeichnung, aktuell 1.
 - Die Szene `balance` ist nur im Dev-Server registriert, nicht im Produktions-Build.
 
 ## 5. Betrieb und Entwicklung
@@ -428,8 +513,13 @@ Vor jeder Übergabe müssen `npm run build`, `npm test` und `npm run test:smoke`
 - Replay: `replay.test.ts` (gleicher Seed gleiches Ergebnis, verschiedene Seeds verschiedene Ereignisse, ein Ereignis
   je Karte, `describeEvent` nicht leer, Kampf verbraucht weniger Spielzeit, Ende in `over` mit gültigem `Outcome`),
   `seed.test.ts` (`parseReplaySeed`), `bot.test.ts` (`botPlan` nach dem `botStep`-Umbau unverändert).
+- Teilen: `match-record.test.ts` (Aufzeichnen ändert `MatchState` nicht, `encode`/`decode` Round-Trip mit Seeds von 1 und
+  15 Ziffern, nachgespieltes Match endet im identischen `MatchState`, leere/abgeschnittene/manipulierte Daten und unbekannte
+  Version ergeben `null` oder Fehlerwert, regelwidrige Aktion bricht kontrolliert ab), `replay.test.ts` und `seed.test.ts`
+  (`parseReplayMoves`). Smoke: gültige Züge, ungültige Zugdaten, Teilen-URL der `MainScene` öffnet dasselbe Match.
+  `match-record-fixture.ts` ist nur eine Testhilfe.
 - Grafik: `card-style.test.ts` (vier Typen unterscheidbar), `fx-events.test.ts` (6 Fälle für `diffFx`),
-  `e2e/grafik.spec.ts` (Hover/Auswahl über `lifts`). Smoke gesamt: 17 Fälle.
+  `e2e/grafik.spec.ts` (Hover/Auswahl über `lifts`). Smoke gesamt laut letztem Lauf: 20 Fälle.
 - `e2e/smoke.spec.ts`: Canvas zeichnet, keine Konsolenfehler, Dev-Szene `balance`, Drag eines Minions, `?replay=`
   (Canvas, Kommentar, Ende mit Ergebnis und Teilen-URL, Neustart per Taste) und ungültiges `?replay=` fällt auf
   `MainScene` zurück.
@@ -446,6 +536,8 @@ Vor jeder Übergabe müssen `npm run build`, `npm test` und `npm run test:smoke`
 - Test „volle Line“ im Browser (in Runde 1 ist keine vierte Beschwörung bezahlbar).
 - Replay: sehr lange Laufzeit (bis etwa 450 s) bei vollen Runden; falls gewünscht, später Geschwindigkeitswahl
   (laut Auftrag ausgeschlossen).
+- Teilen: „Zurücknehmen“ ist in der `MainScene` nicht bedienbar. Nach jeder Regeländerung `RECORD_VERSION` prüfen, sonst
+  geben alte Links ein anderes Match wieder oder brechen ab.
 - Smoke-Test „Drag eines beschworenen Minions“: überspringt sich per `test.skip`, wenn die Starthand keinen Minion
   enthält (`smoke.spec.ts`, ca. Zeile 261). Im letzten Lauf liefen alle 17 Smoke-Fälle.
 - Heiler: Balance (Werte sind Startwerte) und Stehenbleiben hinter Verbündeten sind nicht Teil des Auftrags. Der Panel-

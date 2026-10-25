@@ -1,5 +1,4 @@
 import Phaser from 'phaser';
-import { botPlan } from '../logic/bot';
 import { cardTypeStyle } from '../logic/card-style';
 import { getCardDef } from '../logic/cards';
 import { diffFx } from '../logic/fx-events';
@@ -11,9 +10,8 @@ import {
   MAX_ROUNDS,
   lineCapacity,
   moveMinion,
-  playCard,
-  setReady,
 } from '../logic/match';
+import { botPlanRecorded, createRecord, performAction, type RecordedMatch } from '../logic/match-record';
 import { HAND_FILTER_NAMES, type HandFilter, isCardVisible, nextHandFilter } from '../logic/hand-filter';
 import { parseSeed } from '../logic/seed';
 import { type DropTarget, dropTargetAt, slotPosition } from '../logic/placement';
@@ -32,6 +30,7 @@ import {
   towerPoint,
 } from './field-view';
 import { type LabelFn, LabelPool } from './labels';
+import { copyToClipboard, shareUrl, shareUrlLines } from './share';
 import { addBackdrop } from './textures';
 import { drawButton, drawPanel, PALETTE, TEXT } from './theme';
 
@@ -72,6 +71,10 @@ const LAYOUT = {
 
 const STATS_PANEL = { x: 20, y: 60, width: 320, height: 500 };
 const STATS_CLOSE = { x: 120, y: 504, width: 120, height: 40 };
+/** Ende-Bild mit Teilen-URL (nach dem Schließen der Statistik) und der Knopf zum Kopieren des Links. */
+const SHARE_PANEL = { x: 20, y: 150, width: 320, height: 360 };
+const SHARE_COPY = { x: 110, y: 424, width: 140, height: 36 };
+const SHARE_LINE_HEIGHT = 12;
 
 /** Trefferradius zum Greifen eines Minions; größer als die gezeichnete Fläche, damit Touch trifft. */
 const GRAB_RADIUS = 18;
@@ -115,6 +118,8 @@ function inside(rect: { x: number; y: number; width: number; height: number }, x
  */
 export class MainScene extends Phaser.Scene {
   private state: MatchState = createMatch(1);
+  /** Alle Aktionen beider Spieler seit Matchbeginn; daraus entsteht die Teilen-URL. Reine Mitschrift, ohne Regeln. */
+  private record: RecordedMatch = createRecord(1);
   private graphics!: Phaser.GameObjects.Graphics;
   private pool!: LabelPool;
   private effects!: Effects;
@@ -142,6 +147,11 @@ export class MainScene extends Phaser.Scene {
     return this.state;
   }
 
+  /** Aufzeichnung des laufenden Matches (nur lesen, z. B. für E2E-Tests). */
+  get currentRecord(): RecordedMatch {
+    return this.record;
+  }
+
   /** Index der angetippten Handkarte, die auf eine Line wartet (nur lesen, z. B. für E2E-Tests). */
   get selectedCard(): number | null {
     return this.selected;
@@ -149,6 +159,7 @@ export class MainScene extends Phaser.Scene {
 
   create(): void {
     this.state = createMatch(parseSeed(window.location.search) ?? Date.now() >>> 0);
+    this.record = createRecord(this.state.seed);
     this.fxState = this.state;
     addBackdrop(this, VIEW.width, VIEW.height, BACKDROP_FIELD);
     this.pool = new LabelPool(this);
@@ -175,7 +186,9 @@ export class MainScene extends Phaser.Scene {
 
   update(_time: number, deltaMs: number): void {
     if (this.state.phase === 'planning' && !this.state.ready[BOT]) {
-      this.state = botPlan(this.state, BOT);
+      const planned = botPlanRecorded(this.state, this.record, BOT);
+      this.state = planned.state;
+      this.record = planned.record;
     }
     this.state = advance(this.state, deltaMs);
     if (this.state.phase !== 'planning') {
@@ -276,13 +289,15 @@ export class MainScene extends Phaser.Scene {
       this.message = '';
       return;
     }
-    const result = moveMinion(this.state, HUMAN, drag.minionId, target.line, target.slot ?? -1);
-    if (result.ok) {
-      this.state = result.state;
-      this.message = '';
-    } else {
-      this.message = this.explain(result.reason);
-    }
+    const done = performAction(this.state, this.record, HUMAN, {
+      type: 'move',
+      minionId: drag.minionId,
+      line: target.line,
+      slot: target.slot ?? -1,
+    });
+    this.state = done.result.state;
+    this.record = done.record;
+    this.message = done.result.ok ? '' : this.explain(done.result.reason);
   }
 
   private targetAt(x: number, y: number): DropTarget | null {
@@ -296,6 +311,10 @@ export class MainScene extends Phaser.Scene {
         if (inside(STATS_CLOSE, x, y)) this.statsClosed = true;
         return;
       }
+      if (inside(SHARE_COPY, x, y)) {
+        copyToClipboard(shareUrl(this.record));
+        return;
+      }
       this.scene.restart();
       return;
     }
@@ -303,7 +322,9 @@ export class MainScene extends Phaser.Scene {
     if (inside(LAYOUT.button, x, y)) {
       this.selected = null;
       this.message = '';
-      this.state = setReady(this.state, HUMAN);
+      const done = performAction(this.state, this.record, HUMAN, { type: 'ready' });
+      this.state = done.result.state;
+      this.record = done.record;
       return;
     }
     if (inside(LAYOUT.filterButton, x, y)) {
@@ -338,11 +359,14 @@ export class MainScene extends Phaser.Scene {
 
   private play(handIndex: number, line?: number): void {
     const cardId = this.state.players[HUMAN].hand[handIndex];
-    const result = playCard(this.state, HUMAN, handIndex, line);
+    if (cardId === undefined) return;
+    const done = performAction(this.state, this.record, HUMAN, { type: 'play', cardId, line: line ?? null });
+    const result = done.result;
     this.state = result.state;
+    this.record = done.record;
     this.selected = null;
     this.message = result.ok ? '' : this.explain(result.reason);
-    if (result.ok && cardId !== undefined) {
+    if (result.ok) {
       const def = getCardDef(cardId);
       this.effects.cardPlayed(cardRect(handIndex), def.name, cardTypeStyle(def.type).accent);
       this.lifts.splice(handIndex, 1);
@@ -464,11 +488,24 @@ export class MainScene extends Phaser.Scene {
       this.renderStats(state);
     } else if (state.phase === 'over') {
       g.fillStyle(PALETTE.black, 0.55).fillRect(0, 0, VIEW.width, VIEW.height);
-      drawPanel(g, 20, 215, 320, 150, { metal: 'gold' });
+      const panel = SHARE_PANEL;
+      drawPanel(g, panel.x, panel.y, panel.width, panel.height, { metal: 'gold' });
       const text =
         state.outcome === 'draw' ? 'Unentschieden' : state.outcome === 'player0' ? 'Du gewinnst!' : 'Du verlierst';
-      this.label(text, VIEW.width / 2, 270, { size: 26, font: 'heading', bold: true, color: TEXT.gold, stroke: 3 });
-      this.label('Tippen für ein neues Spiel', VIEW.width / 2, 320, { size: 13, color: TEXT.dim });
+      this.label(text, VIEW.width / 2, panel.y + 36, { size: 26, font: 'heading', bold: true, color: TEXT.gold, stroke: 3 });
+      this.label('Replay zum Teilen:', VIEW.width / 2, panel.y + 78, { size: 12, color: TEXT.dim });
+      const lines = shareUrlLines(shareUrl(this.record));
+      this.label(lines.join('\n'), VIEW.width / 2, panel.y + 96 + (lines.length * SHARE_LINE_HEIGHT) / 2, {
+        size: 9,
+        stroke: 1,
+      });
+      drawButton(g, SHARE_COPY);
+      this.label('Link kopieren', SHARE_COPY.x + SHARE_COPY.width / 2, SHARE_COPY.y + SHARE_COPY.height / 2, {
+        size: 13,
+        font: 'heading',
+        bold: true,
+      });
+      this.label('Tippen für ein neues Spiel', VIEW.width / 2, panel.y + panel.height - 28, { size: 13, color: TEXT.dim });
     }
 
     this.pool.hideUnused();
