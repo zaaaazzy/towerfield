@@ -1,20 +1,76 @@
 # TowerField – Technisches Handbuch
 
-Stand: Auftrag „Minion-Statistik-Overlay nach Match-Ende“ (Version 0.1.0). Der Stand baut auf den Aufträgen
-„Fernkämpfer Bogenschütze“, „Start- und Zieh-Konstanten“, „E2E-Tests“, „Dev-Szene mit Balancing-Statistik“,
+Stand: Auftrag „Grafische Überarbeitung im Fantasy-Kartenspiel-Stil“ (Version 0.1.0). Der Stand baut auf den
+Aufträgen „Heiler-Karte“, „Kartenfilter für die Hand im Match“, „Replay-Szene“, „Minion-Statistik-Overlay nach Match-Ende“, „Fernkämpfer Bogenschütze“, „Start- und Zieh-Konstanten“, „E2E-Tests“, „Dev-Szene mit Balancing-Statistik“,
 „Minion-Tempo“, „Tower-Reichweite 20“, „Energie-Maximum 8“, „Bot-Strategie“, „Handlimit“, „Drag-and-Drop“,
 „Designkonzept“ und „Kern-Logik“ auf.
 
 > **Quellenlage**
 > - Geprüft gegen den Code: `package.json` (Skripte), `src/logic/combat.ts`, `src/logic/match.ts` (Kopf, Konstanten,
->   Typen), `src/logic/match-stats.ts`.
+>   Typen), `src/logic/match-stats.ts`, `src/logic/replay.ts`, `src/logic/seed.ts`, `src/scenes/replay-scene.ts`,
+>   `src/main.ts`, `src/logic/hand-filter.ts`, die Filter-Stellen in `src/scenes/main-scene.ts`. `bot.ts` nur an den
+>   Schnittstellen (`botStep`, `botPlan`).
 > - Aus dem bisherigen Handbuch und den Einzeldokumenten übernommen, nicht neu gegen den Code geprüft: Kartenwerte,
->   Rundenablauf, Platzierung, Szenen, Tests.
-> - Ich habe keine Tests und keinen Build ausgeführt. Laut Tester: Typecheck grün, Vitest grün, Smoke 10 von 10 grün.
->   Der Review war freigegeben.
+>   Rundenablauf, Platzierung, `main-scene.ts`, Tests.
+> - Heiler: gegen `cards.ts`, `combat.ts` (Felder `maxHp`, `heals`, Heilformel) und `match.ts` (Beschwören) geprüft sowie
+>   gegen `docs/anwendung-heiler.md`.
+> - Grafik: gegen `docs/grafik-stil.md`, `docs/anwendung-grafik-ueberarbeitung.md`, die Dateiliste der Szenen und die
+>   Exporte von `field-view.ts`, `labels.ts`, `effects.ts`, `card-view.ts`, `textures.ts` geprüft. Das Innenleben der
+>   Zeichenfunktionen habe ich nicht neu gelesen.
+> - Ich habe keine Tests und keinen Build ausgeführt. Laut Tester: Typecheck grün, Unit-Tests zu `card-style` und
+>   `fx-events` (11) grün, Smoke 17 bestanden; Screenshots wurden nicht geprüft. Der Review war freigegeben.
 > - Nichts committet. Zeilenangaben für `main-scene.ts` sind ungefähr.
 
 ## Änderungen in diesem Stand
+
+| Thema | Vorher | Jetzt | Datei |
+|---|---|---|---|
+| Stil | Farben verstreut (`COLORS` in `main-scene.ts`) | zentral: Palette, Schriften, Rahmen, Panel/Balken/Knopf | `theme.ts` |
+| Hintergrund, Boden, Partikel | einfarbige Flächen | Texturen zur Laufzeit (Verlauf, Vignette, Wege, Holztisch) | `textures.ts` |
+| Handkarten | einfache Rechtecke | Rahmen, Name, Kosten-Kristall, Bild, Text, Banner; Typ durch Farbe und Symbol | `card-view.ts`, `card-style.ts` |
+| Hover/Auswahl | – | Anheben (bis 110 %), Schatten, Leuchten; Ausspielen animiert | `card-view.ts`, `main-scene.ts` |
+| Feld | flach | Tower, Minions, Bauplätze mit Schatten, Leuchten, Teamfarben | `field-view.ts` |
+| Effekte | keine | Partikel, Ringe, Schadenszahlen, Kamerawackeln; Ereignisse aus `diffFx` | `effects.ts`, `fx-events.ts` |
+| Hilfsmodule | `LabelPool`, `drawBoard`, `drawMinions` in `main-scene.ts` | `labels.ts` und `field-view.ts` | `src/scenes/` |
+| E2E | – | `e2e/grafik.spec.ts` liest das Feld `lifts` der Szene | `e2e/grafik.spec.ts` |
+
+Nicht geändert (Grafik): Regeln, Kartenwerte, Bot, Seed, alle bestehenden Unit-Tests. Keine Fremdassets,
+`public/assets/` bleibt leer. Details: `docs/grafik-stil.md`, `docs/anwendung-grafik-ueberarbeitung.md`.
+
+Frühere Änderung (Heiler):
+
+| Thema | Vorher | Jetzt | Datei |
+|---|---|---|---|
+| Heiler-Karte | keine | `summon-healer`: Kosten 2, 20 LP, 5 Heilung/s, Reichweite 10, 1 Kopie im Deck | `cards.ts` |
+| Heilung im Kampf | keine | `combatTick` heilt pro Tick einen verwundeten Verbündeten derselben Line | `combat.ts` |
+| `Minion` | ohne `maxHp`, `heals` | optionale Felder `maxHp` und `heals`; `match.ts` setzt sie beim Beschwören | `combat.ts`, `match.ts` |
+| Bot | Prioritätsliste ohne Heiler | `summon-healer` direkt hinter `summon-archer` | `bot.ts` |
+| Anzeige | – | Heiler mit grünem Punkt in der Mitte | `main-scene.ts` |
+
+Nicht geändert (Heiler): `match-stats.ts` und `DamageCollector` (Heilung zählt nicht als Schaden), Tower-Regeln,
+Szenen, Smoke-Test. Details: `docs/anwendung-heiler.md`.
+
+Frühere Änderung (Kartenfilter):
+
+| Thema | Vorher | Jetzt | Datei |
+|---|---|---|---|
+| Kartenfilter | keiner | Taste schaltet Alle → Beschwörung → Upgrade → Tower; nicht passende Karten abgedunkelt und tot | `hand-filter.ts`, `main-scene.ts` |
+| Smoke-Test | – | Fall „Kartenfilter“ (Reihenfolge, Abwahl, tote Karten, echter Hand-Index) | `e2e/smoke.spec.ts` |
+
+Nicht geändert (Kartenfilter): `match.ts`, `combat.ts`, `bot.ts`, `cards.ts`, Bot, Match-Ablauf, Statistik-Overlay.
+(Gilt für den Stand vor dem Heiler.)
+
+Frühere Änderung (Replay):
+
+| Thema | Vorher | Jetzt | Datei |
+|---|---|---|---|
+| Replay | keine | `?replay=<seed>`: Bot gegen Bot, Zeitlupe, Kommentare | `replay.ts`, `replay-scene.ts` |
+| Seed-Parser | `parseSeed` | zusätzlich `parseReplaySeed` | `src/logic/seed.ts` |
+| Bot | `botPlan` mit eigener Schleife | neu `botStep` (ein Zug); `botPlan` ruft es auf, Verhalten gleich | `src/logic/bot.ts` |
+| Zeichnen | privat in `MainScene` | `LabelPool`, `drawBoard`, `drawMinions`, `drawTower` exportiert | `src/scenes/main-scene.ts` |
+| Szenenauswahl | `MainScene` / Dev: `?scene=balance` | gültiges `?replay=` startet `ReplayScene` zuerst (Dev und Produktion) | `src/main.ts` |
+
+Frühere Änderung (Minion-Statistik):
 
 | Thema | Vorher | Jetzt | Datei |
 |---|---|---|---|
@@ -23,29 +79,34 @@ Stand: Auftrag „Minion-Statistik-Overlay nach Match-Ende“ (Version 0.1.0). D
 | Match-Ende | Ergebnistext, Tippen startet neu | Overlay mit zwei Tabellen, erst „Schließen“, dann Tippen | `src/scenes/main-scene.ts` |
 | E2E-Neustart | tippt direkt | prüft Overlay, tippt daneben, schließt, startet neu | `e2e/gameplay.spec.ts` |
 
-Nicht geändert: Balance, Regeln, Kampfablauf, Balance-Szene. Details: `docs/anwendung-minion-statistik.md`.
+Nicht geändert: Balance, Regeln, Kampfablauf, `MatchState`, Balance-Szene. Details: `docs/anwendung-kartenfilter.md`,
+`docs/anwendung-replay.md` und `docs/anwendung-minion-statistik.md`.
 
 ## 1. Zweck
 
 Mobiles 1-gegen-1-Tower-Defense-Spiel mit Karten im Browser (Phaser 3, TypeScript, Vite).
 
 - Hochformat 360 × 640, Touch und Maus, `Phaser.Scale.FIT`.
-- Lokal gegen einen deterministischen Bot. Kein Online-Spiel, keine Accounts, keine finale Grafik oder Töne.
+- Lokal gegen einen deterministischen Bot. Kein Online-Spiel, keine Accounts, keine Töne. Die Grafik entsteht komplett im Code (Abschnitt „Grafik“).
 - Kampf ohne Zufall. Der Seed legt nur die Kartenreihenfolge fest; beide Spieler erhalten dieselben Karten.
 - Phaser bleibt auf Version 3 (API-Doku: https://newdocs.phaser.io/docs/3.90.0).
 
 Weiterführend unter `docs/`: `designkonzept.md` (Soll-Regeln) und die `anwendung-*.md` je Auftrag (Bogenschütze,
 Start-/Zieh-Konstanten, Handlimit, Iso-Platzierung, Drag-and-Drop, Bot-Tests, Energie-Maximum, Tower-Reichweite,
-Minion-Tempo, Balance-Szene, E2E, Minion-Statistik).
+Minion-Tempo, Balance-Szene, E2E, Minion-Statistik, Replay, Kartenfilter, Heiler, Grafik-Überarbeitung; Stil und Lizenzen: `grafik-stil.md`).
 
 ### Umsetzungsstand
 
 | Bereich | Stand |
 |---|---|
 | Kernlogik (Karten, Runden, Kampf, Bot) | fertig, getestet |
+| **Grafik im Fantasy-Kartenspiel-Stil** | **umgesetzt, getestet (ohne Screenshot-Prüfung)** |
 | Reichweite je Minion, Bogenschütze | umgesetzt |
+| **Heiler (`summon-healer`)** | **umgesetzt, getestet** |
 | Start 5 / Ziehen 3, Handlimit 10, Energie-Max. 8, Tower-Reichweite 20, Minion-Tempo | umgesetzt |
-| **Minion-Statistik und Overlay nach Match-Ende** | **umgesetzt, getestet** |
+| Minion-Statistik und Overlay nach Match-Ende | umgesetzt, getestet |
+| Replay-Szene `?replay=<seed>` | umgesetzt, getestet |
+| **Kartenfilter für die Hand** | **umgesetzt, getestet** |
 | Balance-Szene `balance` | nur im Dev-Server, nicht neu bewertet |
 | Drag-and-Drop von Minions | umgesetzt |
 | `iso.ts` (Iso-Umrechnung, Kamera) | fertig, von der Szene nicht genutzt |
@@ -74,6 +135,7 @@ Deck-Länge: `START_HAND + DRAW_PER_ROUND * (MAX_ROUNDS - 1)` = 26 Karten, Misch
 | `summon-minion` | Minion | 1 | 30 LP, 6 Schaden/s | 4 | 10 | 4 |
 | `summon-brute` | Brocken | 2 | 80 LP, 12 Schaden/s | 4 | 8 | 2 |
 | `summon-archer` | Bogenschütze | 2 | 20 LP, 7 Schaden/s | 14 | 10 | 2 |
+| `summon-healer` | Heiler | 2 | 20 LP, heilt 5 LP/s (`damage`), greift nie an | 10 | 10 | 1 |
 | `line-upgrade` | Line +1 | 2 | Stufe +1 (max. 5), ein Slot mehr | – | – | 2 |
 | `tower-hp` | Tower Leben | 1 | +30 max. LP und +30 LP | – | – | 2 |
 | `tower-damage` | Tower Schaden | 2 | +4 Schaden/s | – | – | 1 |
@@ -94,6 +156,25 @@ Eine abgelehnte Karte lässt den Zustand unverändert (`PlayResult.ok === false`
 - Tower (100 LP, 8 Schaden/s) treffen den am weitesten vorgerückten Gegner innerhalb `TOWER_RANGE = 20`.
 - Beide Seiten werden pro Tick aus demselben Zustand berechnet und gleichzeitig angewendet.
 - Minions mit `hp <= 1e-9` werden nach dem Tick entfernt.
+- Optionale Felder: `maxHp` (fehlt es, gilt `hp` als Maximum) und `heals` (Heiler-Merkmal). Literale in Tests brauchen
+  beide nicht.
+
+#### Heilung
+
+- `CardDef` für `summon` hat das optionale Feld `role?: 'healer'`. Beim Beschwören setzt `playCard` `maxHp = def.hp +
+  Line-Bonus` und bei `role === 'healer'` zusätzlich `heals: true`.
+- Ein Heiler heilt pro Tick `damage * deltaSeconds` auf **einen** Verbündeten: gleiche Line, Abstand
+  `|position − heiler.position| <= range`, lebend, verwundet (`hp < maxHp`), nicht er selbst. Gewählt wird der niedrigste
+  HP-Anteil, bei Gleichstand der kleinere Index (kein Zufall).
+- Der Heiler greift nie an, weder Minion noch Tower, auch ohne Ziel. Er läuft immer mit seinem Tempo weiter.
+- Heilung wird wie Schaden aus dem Zustand vor dem Tick berechnet und danach angewendet:
+  `hp = min(maxHp, hp − Schaden + Heilung)`. Wer im selben Tick auf `hp <= 1e-9` fällt, wird entfernt; Heilung belebt
+  nicht wieder. Das Ergebnis hängt nicht von der Spielerreihenfolge ab.
+- Minion-Upgrades wirken nur über den Line-Bonus beim Beschwören; bereits stehende Minions und ihr `maxHp` ändern sich
+  nicht.
+- Heilung erscheint nicht in `DamageCollector` und `match-stats.ts`. Eine Heilstatistik wäre eine eigene Änderung.
+- Mehrere Heiler wirken gleichzeitig aus demselben Vorzustand und können dasselbe Ziel gemeinsam heilen.
+- Das Deck hat eine Karte mehr im Pool, die Kartenreihenfolge je Seed ändert sich (bleibt deterministisch).
 
 ### Platzierung
 
@@ -110,10 +191,17 @@ src/
     combat.ts      combatTick, Tower, Minion
     match.ts       MatchState, playCard, moveMinion, undoSummon, setReady, advance
     match-stats.ts Statistik des eigenen Spielers
+    hand-filter.ts Kartenfilter der Hand (Sichtbarkeit je Kartentyp)
+    replay.ts      Bot-gegen-Bot-Replay zu einem Seed, Zeitlupe, Kommentartexte
+    seed.ts        parseSeed, parseReplaySeed
+    card-style.ts  Kartentyp → Farbe, Symbol, Banner; describeCard (Darstellung, rein)
+    fx-events.ts   diffFx: Effekt-Ereignisse aus zwei Spielzuständen (rein)
     placement.ts, iso.ts, bot.ts, balance-sim.ts
-  scenes/  main-scene.ts (Spiel), balance-scene.ts (Dev)
-e2e/       smoke.spec.ts, gameplay.spec.ts (Playwright)
-docs/      designkonzept.md, anwendung-*.md, handbuch.md
+  scenes/  main-scene.ts (Spiel), replay-scene.ts (Replay), balance-scene.ts (Dev)
+           theme.ts, textures.ts, card-view.ts, field-view.ts, effects.ts, labels.ts (Phaser-Code, nicht in logic/)
+  main.ts  wählt die Start-Szene
+e2e/       smoke.spec.ts, gameplay.spec.ts, grafik.spec.ts (Playwright)
+docs/      designkonzept.md, grafik-stil.md, anwendung-*.md, handbuch.md
 ```
 
 Grundsätze (aus `AGENTS.md`):
@@ -124,6 +212,136 @@ Grundsätze (aus `AGENTS.md`):
 - Zeit nur über `delta`, Zufall nur über den Seed (`nextRandom` in `game-state.ts`).
 - Assets unter `public/assets/`, im `preload()` ohne führendes `public/` laden.
 - Keine `console.error` für erwartete Fälle (der Smoke-Test wertet sie als Fehler).
+
+### Replay (`?replay=<seed>`)
+
+```mermaid
+flowchart TD
+  A[URL ?replay=seed] --> B{parseReplaySeed gültig?}
+  B -- nein --> M[MainScene wie bisher]
+  B -- ja --> C[ReplayScene]
+  C --> D[createReplay: createMatch + strategiesForSeed]
+  D --> E[Planung: botStep, abwechselnd alle PLAY_PAUSE_MS]
+  E --> F[ReplayEvent je Karte, describeEvent]
+  E --> G[Kampf: advance mit delta x SLOWMO_FACTOR]
+  G --> H{Phase over?}
+  H -- nein --> E
+  H -- ja --> I[Ergebnis + Teilen-URL, Taste oder Klick = Neustart]
+```
+
+Ein Seed legt Deck und Bot-Strategien fest, keine menschlichen Züge. „Replay“ ist ein Bot-gegen-Bot-Match zum Seed;
+gleicher Seed ergibt denselben Endzustand und dieselbe Ereignisliste. Aufzeichnung menschlicher Partien gibt es nicht.
+
+**Logik (`src/logic/replay.ts`)**, rein, ohne Phaser/DOM/Canvas:
+
+| Name | Aufgabe |
+|---|---|
+| `createReplay(seed)` | `ReplayState`: `match`, `strategies`, `events`, `pauseMs`, `turn` |
+| `stepReplay(replay, deltaMs)` | neuer Zustand nach `deltaMs`; Ende oder `deltaMs <= 0` liefern den Zustand unverändert |
+| `isReplayOver(replay)` | `match.phase === 'over'` |
+| `combatDelta(deltaMs)` | `deltaMs * SLOWMO_FACTOR`, Spielzeit der Kampfphase |
+| `describeEvent(event)` | Text, z. B. „Runde 2 · Blau spielt Minion auf Line 3“ (Line 1-basiert, 0-basiert gespeichert) |
+| `playerName(player)` | `Blau` (0), `Orange` (1) |
+
+- **Planung:** Sobald `pauseMs` den Wert `PLAY_PAUSE_MS` erreicht, zieht der Spieler am Zug mit `botStep`. Gibt es
+  keinen Zug mehr, wird er mit `setReady` bereit gemeldet. Jede gespielte Karte erzeugt genau ein `ReplayEvent`
+  (`round`, `player`, `cardId`, `line | null`).
+- **Kampf:** `advance(match, combatDelta(deltaMs))`. Beim Wechsel zurück in die Planung werden `pauseMs` und `turn`
+  zurückgesetzt (Spieler 0 beginnt).
+- Keine neue Regel: Karten, Energie und Kampf kommen unverändert aus `match.ts`; `botStep` kommt aus `bot.ts`.
+  `botPlan` ruft `botStep` in einer Schleife auf und verhält sich wie zuvor.
+
+**Szene (`src/scenes/replay-scene.ts`, Key `replay`):** `update` ruft nur `stepReplay`, dann zeichnet `render()` mit
+`drawBoard`, `drawMinions` (`field-view.ts`) und `LabelPool` (`labels.ts`). Das Kommentarband zeigt die letzten 6 Ereignisse
+(Blau blau, Orange orange). Bei `over` erscheinen Ergebnis und Teilen-URL (`origin` + `pathname` + `?replay=<seed>`).
+Taste oder Klick starten das Replay nur nach `over` neu (`scene.restart`); sonst gibt es keine Eingabe. Für Tests
+liefern die Getter `current` und `comments` den Zustand.
+
+**Szenenauswahl (`src/main.ts`):** Bei gültigem `?replay=` ist `ReplayScene` die erste Szene, im Dev-Build vor
+`MainScene` und `BalanceScene`, im Produktions-Build vor `MainScene`. Sonst unverändert (`MainScene`,
+`?scene=balance` im Dev-Server). Ungültige Werte (`abc`, leer) fallen ohne Konsolenfehler auf `MainScene` zurück.
+
+**Auf einen Blick:**
+- Ein Replay über alle Runden kann in echter Zeit bis etwa 450 s dauern. Pause, Spulen und Geschwindigkeitswahl gibt es
+  bewusst nicht.
+- `LabelPool` (`labels.ts`) sowie `drawBoard`, `drawMinions` und `drawTower` (`field-view.ts`) nutzen `MainScene` und `ReplayScene` gemeinsam. Bei
+  Änderungen beide Szenen prüfen (Smoke-Tests Gameplay, Drag, Replay).
+- `ReplayScene.create` fällt bei ungültigem Wert auf Seed 1 zurück; das ist nur eine Absicherung, `main.ts` startet die
+  Szene nur bei gültigem Wert.
+- Eine neue Szene, die ohne Eingabe erreichbar ist, gehört in `e2e/smoke.spec.ts`.
+
+### Grafik
+
+Reine Darstellung; Regeln, Werte und Seed bleiben unverändert. Ausführlich: `docs/grafik-stil.md`.
+
+```mermaid
+flowchart LR
+  Logic["src/logic"] --> Scene["main-scene.ts"]
+  Logic --> FxE["fx-events.ts diffFx"] --> Effects["effects.ts"]
+  Logic --> CS["card-style.ts"] --> Cards["card-view.ts"]
+  Theme["theme.ts"] --> Scene
+  Theme --> Cards
+  Theme --> Other["balance-scene / replay-scene"]
+  Tex["textures.ts"] --> Scene
+  Scene --> Field["field-view.ts"]
+  Scene --> Effects
+```
+
+| Modul | Aufgabe |
+|---|---|
+| `theme.ts` | `PALETTE`, `TEXT`, `FONTS`, `FRAME`; `fillGradient`, `drawPanel`, `drawBar`, `drawButton`. Einzige Quelle für Farben und Schriften. |
+| `textures.ts` | `ensureTextures`, `addBackdrop`: Hintergrund, Vignette, Boden, Wege, Partikeltexturen (`backdrop`, `spark`, `glow`) per Canvas-Textur; eigener fester Zeichen-Zufall, nicht der Spiel-Seed. |
+| `card-view.ts` | `drawCard`: Rahmen, Kopfzeile, Kosten-Kristall, Bildfläche mit Symbol, Textfeld, Typ-Banner. |
+| `field-view.ts` | `drawBoard`, `drawMinions`, `drawTower`, `drawMinionBody`; Blau = du, Orange = Gegner. Minion-Form nach Rolle: Kreis, Raute (Fernkämpfer), Kreuz (Heiler). |
+| `effects.ts` | Klasse `Effects`: Partikel, Leuchtringe, Schadenszahlen, Kamerawackeln beim Tower-Fall, Animation beim Ausspielen. |
+| `card-style.ts` | `cardTypeStyle` (Typ → Rahmenfarbe, Symbol, Banner) und `describeCard` (Kurztext); mit Test. |
+| `fx-events.ts` | `diffFx` leitet Treffer, Tod, Beschwörung und Turmschaden aus zwei Zuständen ab; mit Test. |
+
+Kartentypen: `summon` Rot/Schwert, `tower-upgrade` Blau/Turm, `line-upgrade` Grün/Pfeil, `minion-upgrade` Violett/Edelstein.
+
+**Regeln für Änderungen:**
+- Farben und Schriften nur aus `theme.ts`. Neue Szenen nutzen `ensureTextures`/`addBackdrop`.
+- Bewegung, Anheben und Effekte über `delta` bzw. Phaser-Tweens, nie über Frames. Bei Zeitsprüngen über 500 ms
+  (Tab im Hintergrund) entfallen Effekte.
+- Obergrenzen: höchstens 20 Schadenszahlen und 150 lebende Partikel je Emitter gleichzeitig.
+- Neue Effekt-Auslöser gehören als reine Regel nach `fx-events.ts` mit Test, nicht in `update()`.
+- Schriften sind Systemschriften mit Fallback (Georgia/Palatino für Überschriften, Trebuchet/Segoe UI/Verdana für Text),
+  kein Webfont; Labels werden mit doppelter Auflösung gerendert.
+- Assets: keine Fremddateien, `public/assets/` bleibt leer. Kommen Dateien hinzu, im `preload()` ohne `public/` laden und
+  in `grafik-stil.md` mit Quelle und Lizenz eintragen. Keine Originalgrafiken oder Logos von MTG, Hearthstone oder HotS.
+- `e2e/grafik.spec.ts` liest das Szenenfeld `lifts`; bei Umbenennung den Test anpassen. Die Felder `state`,
+  `handFilter` und `selected` bleiben für die E2E-Tests stabil.
+
+### Kartenfilter (`src/logic/hand-filter.ts`)
+
+Reine Darstellungs- und Eingabehilfe für die Hand des Menschen (Handlimit 10). Keine Regel ändert sich.
+
+| Name | Aufgabe |
+|---|---|
+| `HandFilter` | `'all'`, `'summon'`, `'upgrade'`, `'tower'` |
+| `HAND_FILTERS`, `HAND_FILTER_NAMES` | Reihenfolge und Anzeigenamen (Alle, Beschwörung, Upgrade, Tower) |
+| `nextHandFilter(filter)` | nächster Filter, nach Tower wieder Alle |
+| `isCardVisible(type, filter)` | ist eine Karte dieses `CardType` beim Filter sichtbar |
+
+Zuordnung: `summon` → Beschwörung; `line-upgrade` und `minion-upgrade` → Upgrade; `tower-upgrade` → Tower.
+
+**Szene (`main-scene.ts`):**
+- `LAYOUT.filterButton`: x 122, y 592, 102 × 40, links neben der Taste bei 230/592 und unter den Handkarten (bis ca.
+  y 572). Beschriftung „Filter: X (n)“, `n` ist die Zahl der passenden Handkarten.
+- Feld `handFilter`, in `create()` auf `'all'` gesetzt, nicht gespeichert.
+- Die Karten bleiben auf ihren festen Slots (`cardRect(index)`). Eine Abbildung Anzeige-Slot → Hand-Index gibt es
+  nicht; `handleTap` und `playCard` nutzen den echten Hand-Index. Nicht passende Karten sind abgedunkelt, ohne Text und
+  nicht antippbar.
+- Wird die gewählte Karte durch den Wechsel ausgeblendet, ist `selected` danach `null`. Das Feld heißt `selected`, nicht
+  `selectedCard`.
+- Die Taste reagiert nur in der Planung (`handleTap` kehrt sonst vorher zurück). Ein gesetzter Filter bleibt im Kampf
+  aktiv.
+
+**Auf einen Blick:**
+- Neuer `CardType` in `cards.ts`: die Zuordnung `GROUPS` in `hand-filter.ts` ergänzen. Der Typ `Record<CardType, …>`
+  meldet das Fehlen beim Typecheck.
+- Der Meldungstext unten (`this.message`) hat keine Breitenbegrenzung; ein sehr langer Text kann unter die Filtertaste
+  ragen.
 
 ### Minion-Statistik
 
@@ -177,8 +395,11 @@ Funktionen: `createStats`, `recordSummon`, `recordUndo`, `recordMove`, `recordDa
 | `LINE_COUNT`, `MAX_LINE_LEVEL`, `BASE_CAPACITY` | 3, 5, 2 | `match.ts` |
 | `TOWER_HP`, `TOWER_DAMAGE`, `COMBAT_TICKS` | 100, 8, 400 | `match.ts` |
 | `LINE_LENGTH`, `TICK_MS`, `MINION_RANGE`, `MINION_SPEED`, `TOWER_RANGE` | 100, 50, 4, 10, 20 | `combat.ts` |
+| `SLOWMO_FACTOR`, `PLAY_PAUSE_MS` | 0,35, 700 | `replay.ts` |
 
-- URL-Parameter `?seed=` legt den Seed fest (genutzt von den E2E-Tests).
+- URL-Parameter `?seed=<1–15 Ziffern>` legt den Seed fest (genutzt von den E2E-Tests).
+- URL-Parameter `?replay=<1–15 Ziffern>` startet die Replay-Szene (Dev und Produktion). Beide Parameter werden mit
+  `>>> 0` auf 32 Bit gekürzt; ungültige Werte ergeben `null`.
 - Die Szene `balance` ist nur im Dev-Server registriert, nicht im Produktions-Build.
 
 ## 5. Betrieb und Entwicklung
@@ -202,7 +423,19 @@ Vor jeder Übergabe müssen `npm run build`, `npm test` und `npm run test:smoke`
   gleicher Seed gleiche `stats`), `combat.test.ts` (Sammler, Tower-Schaden, Ergebnis mit und ohne Sammler gleich).
 - `e2e/gameplay.spec.ts`: vollständige Spielabläufe. Nach Match-Ende zuerst Overlay prüfen, daneben tippen (kein
   Neustart), „Schließen“, dann Neustart. Tests, die direkt neu starten, scheitern sonst.
-- `e2e/smoke.spec.ts`: Canvas zeichnet, keine Konsolenfehler, Dev-Szene `balance`, Drag eines Minions.
+- Kartenfilter: `hand-filter.test.ts` (jeder `CardType` gegen jeden Filter, Umschaltreihenfolge). Smoke-Fall
+  „Kartenfilter“: Tastenreihenfolge, Abwahl der gewählten Karte, tote Karten, Spielen mit echtem Hand-Index.
+- Replay: `replay.test.ts` (gleicher Seed gleiches Ergebnis, verschiedene Seeds verschiedene Ereignisse, ein Ereignis
+  je Karte, `describeEvent` nicht leer, Kampf verbraucht weniger Spielzeit, Ende in `over` mit gültigem `Outcome`),
+  `seed.test.ts` (`parseReplaySeed`), `bot.test.ts` (`botPlan` nach dem `botStep`-Umbau unverändert).
+- Grafik: `card-style.test.ts` (vier Typen unterscheidbar), `fx-events.test.ts` (6 Fälle für `diffFx`),
+  `e2e/grafik.spec.ts` (Hover/Auswahl über `lifts`). Smoke gesamt: 17 Fälle.
+- `e2e/smoke.spec.ts`: Canvas zeichnet, keine Konsolenfehler, Dev-Szene `balance`, Drag eines Minions, `?replay=`
+  (Canvas, Kommentar, Ende mit Ergebnis und Teilen-URL, Neustart per Taste) und ungültiges `?replay=` fällt auf
+  `MainScene` zurück.
+- Heiler: `combat.test.ts` (Heilung pro Tick, Reichweite, Line, Gegner, `maxHp`-Grenze, keine Selbstheilung, Zielwahl,
+  kein Schaden, vertauschte Spielerreihenfolge), `cards.test.ts` (Karte, Deck), `match.test.ts` (`maxHp` mit Line-Bonus),
+  `bot.test.ts` (Heiler nach `PRIORITY`, `botPlan` deterministisch).
 - Fixtures mit `Minion`-Literalen brauchen `range` und `speed`. Das Deck ändert sich bei neuen Karten, feste
   Kartenreihenfolgen in Tests müssen dann angepasst werden.
 
@@ -211,6 +444,16 @@ Vor jeder Übergabe müssen `npm run build`, `npm test` und `npm run test:smoke`
 - Balance Tower (Reichweite 20) gegen Bogenschütze (14) und `balance-sim` mit den aktuellen Werten neu bewerten.
 - Panelhöhe des Overlays an die Zahl der Kartentypen anpassen, falls Karten dazukommen.
 - Test „volle Line“ im Browser (in Runde 1 ist keine vierte Beschwörung bezahlbar).
+- Replay: sehr lange Laufzeit (bis etwa 450 s) bei vollen Runden; falls gewünscht, später Geschwindigkeitswahl
+  (laut Auftrag ausgeschlossen).
+- Smoke-Test „Drag eines beschworenen Minions“: überspringt sich per `test.skip`, wenn die Starthand keinen Minion
+  enthält (`smoke.spec.ts`, ca. Zeile 261). Im letzten Lauf liefen alle 17 Smoke-Fälle.
+- Heiler: Balance (Werte sind Startwerte) und Stehenbleiben hinter Verbündeten sind nicht Teil des Auftrags. Der Panel-
+  und Filtertext der Szene enthält keine Heiler-Sonderfälle; der Typ `summon` fällt unter „Beschwörung“.
+- Grafik: Karten sind klein (66×62 px), der Text hat etwa 6,5 px und ist auf zwei kurze Zeilen gekürzt. Lesbarkeit auf
+  echten Geräten, Rahmen und Effekte sind nicht per Screenshot geprüft.
+- Grafik (Review): einzelne Farben und Maße in `card-view.ts` (z. B. `0x3a3068`) nach `theme.ts`; der Energie-Kristall in
+  `main-scene.ts` ist mit Pixelkoordinaten verdrahtet.
 - Hand-UI, Undo-Knopf, Iso-Szene, Projektile, Tempo-Anzeige auf Karten.
 - Reviewer-Hinweise: lange `hits.push(...)`-Zeilen in `combat.ts` ggf. mit Hilfstyp lesbarer machen; fehlendes
   Leerzeichen in `this.graphics =this.add.graphics();` in `main-scene.ts`.

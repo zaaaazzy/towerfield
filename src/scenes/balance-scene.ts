@@ -2,6 +2,8 @@ import Phaser from 'phaser';
 import { buildReport, type BalanceReport, type MatchResult, simulateMatch, strategiesForSeed } from '../logic/balance-sim';
 import { getCardDef } from '../logic/cards';
 import { VIEW } from './main-scene';
+import { addBackdrop } from './textures';
+import { drawBar, drawButton, FONTS, PALETTE, TEXT } from './theme';
 
 /** Matches pro Simulation (Standard) und pro Frame, damit der Canvas nicht blockiert. */
 const MATCH_COUNT = 200;
@@ -49,16 +51,17 @@ export class BalanceScene extends Phaser.Scene {
 
   create(): void {
     this.dynamicTexts = [];
+    addBackdrop(this, VIEW.width, VIEW.height);
     this.graphics = this.add.graphics();
     this.barGraphics = this.add.graphics();
-    this.text(VIEW.width / 2, 8, 'Balancing (Dev)', 16, '#ffd54a').setOrigin(0.5, 0);
-    this.progressText = this.text(8, 118, '', 11, '#cfd8dc');
+    this.text(VIEW.width / 2, 8, 'Balancing (Dev)', 16, TEXT.gold, 'heading').setOrigin(0.5, 0);
+    this.progressText = this.text(8, 118, '', 11, TEXT.main);
     this.text(
       8,
       ROWS_TOP + 7 * ROW_HEIGHT + 8,
       'Bot-Statistik: beide Seiten spielen denselben Bot mit zufälliger Kartenreihenfolge, kein\nSpielerverhalten. Kartenwerte sind korreliert (gleiches Deck für beide).',
       9,
-      '#90a4ae',
+      TEXT.dim,
     );
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => this.onPointerDown(pointer.worldX, pointer.worldY));
     this.startSimulation(this.nextStartSeed);
@@ -100,16 +103,31 @@ export class BalanceScene extends Phaser.Scene {
     }
   }
 
-  private text(x: number, y: number, content: string, size: number, color = '#ffffff'): Phaser.GameObjects.Text {
-    return this.add.text(x, y, content, { fontFamily: 'sans-serif', fontSize: `${size}px`, color });
+  private text(
+    x: number,
+    y: number,
+    content: string,
+    size: number,
+    color: string = TEXT.main,
+    font: keyof typeof FONTS = 'body',
+  ): Phaser.GameObjects.Text {
+    return this.add
+      .text(x, y, content, {
+        fontFamily: FONTS[font],
+        fontSize: `${size}px`,
+        color,
+        stroke: TEXT.outline,
+        strokeThickness: 2,
+        resolution: 2,
+      })
+      .setDepth(10);
   }
 
   private renderProgress(): void {
     const count = this.results.length;
     this.progressText.setText(`Seeds ${this.startSeed}–${this.startSeed + MATCH_COUNT - 1}   ${count}/${MATCH_COUNT} Matches`);
     this.barGraphics.clear();
-    this.barGraphics.fillStyle(0x1d2333).fillRect(8, 134, 344, 4);
-    this.barGraphics.fillStyle(0x66bb6a).fillRect(8, 134, (344 * count) / MATCH_COUNT, 4);
+    drawBar(this.barGraphics, 8, 133, 344, 6, count / MATCH_COUNT, { top: 0x9af0a0, bottom: PALETTE.goodDark });
   }
 
   private renderTable(): void {
@@ -118,7 +136,7 @@ export class BalanceScene extends Phaser.Scene {
     g.clear();
     for (const text of this.dynamicTexts) text.destroy();
     this.dynamicTexts = [];
-    const add = (x: number, y: number, content: string, size = 11, color = '#ffffff', right = false) => {
+    const add = (x: number, y: number, content: string, size = 11, color: string = TEXT.main, right = false) => {
       const text = this.text(x, y, content, size, color);
       if (right) text.setOrigin(1, 0);
       this.dynamicTexts.push(text);
@@ -134,15 +152,14 @@ export class BalanceScene extends Phaser.Scene {
       add(8, 80, `Ende durch Tower: ${percent(report.towerKillShare)}   nach Rundengrenze: ${percent(report.roundLimitShare)}`);
       add(8, 96, `Basis-Siegquote (je Spieler): ${percent(report.baselineWinRate)}`);
 
-      add(6, 144, 'Karte', 10, '#90a4ae');
+      add(6, 144, 'Karte', 10, TEXT.dim);
       ['Mat.', 'Eins.', this.sortDescending ? 'Sieg ▼' : 'Sieg ▲', 'Rem.', 'Nied.', 'Δ'].forEach((label, index) =>
-        add(COLUMNS[index]!, 144, label, 10, index === 2 ? '#ffd54a' : '#90a4ae', true),
+        add(COLUMNS[index]!, 144, label, 10, index === 2 ? TEXT.gold : TEXT.dim, true),
       );
       const sorted = [...report.cards].sort((a, b) => (this.sortDescending ? b.winRate - a.winRate : a.winRate - b.winRate));
       sorted.forEach((card, row) => {
         const y = ROWS_TOP + row * ROW_HEIGHT;
-        g.fillStyle(0x2a3350).fillRect(6, y + 16, 100, 3);
-        g.fillStyle(0x4fc3f7).fillRect(6, y + 16, 100 * card.winRate, 3);
+        drawBar(g, 6, y + 15, 100, 4, card.winRate, { top: 0x8fdcff, bottom: PALETTE.humanDark }, 'bronze');
         add(6, y, getCardDef(card.cardId).name, 11);
         const delta = card.deltaToBaseline;
         const values = [
@@ -154,15 +171,15 @@ export class BalanceScene extends Phaser.Scene {
           signed(delta),
         ];
         values.forEach((value, index) =>
-          add(COLUMNS[index]!, y, value, 10, index === 5 ? (delta >= 0 ? '#66bb6a' : '#ef5350') : '#ffffff', true),
+          add(COLUMNS[index]!, y, value, 10, index === 5 ? (delta >= 0 ? TEXT.good : TEXT.bad) : TEXT.main, true),
         );
       });
     }
 
     for (const [key, button] of Object.entries(BUTTONS)) {
       const enabled = key !== 'again' || this.done;
-      g.fillStyle(enabled ? 0x2a3350 : 0x161b2b).fillRect(button.x, button.y, button.width, button.height);
-      add(button.x + button.width / 2 - button.label.length * 3.3, button.y + 12, button.label, 13, enabled ? '#ffffff' : '#607d8b');
+      drawButton(g, button, { enabled });
+      add(button.x + button.width / 2 - button.label.length * 3.3, button.y + 12, button.label, 13, enabled ? TEXT.main : TEXT.dim);
     }
   }
 }

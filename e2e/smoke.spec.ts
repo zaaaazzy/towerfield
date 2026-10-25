@@ -119,6 +119,116 @@ test('Produktions-Build: die Szene balance ist nicht registriert und startet nic
   expect(state.balanceActive).toBeFalsy();
 });
 
+/** Was der Replay-Test von der Szene liest. */
+interface ReplaySceneView {
+  comments: string[];
+  current: { match: { phase: string; round: number }; events: unknown[] };
+  children: { list: { type: string; visible: boolean; text?: string }[] };
+}
+
+test('?replay=<seed>: die Replay-Szene startet ohne Eingabe, zeigt Spielfeld und Kommentare, ohne Konsolenfehler', async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
+  page.on('pageerror', (error) => errors.push(error.message));
+
+  await page.goto('/?replay=42');
+  await expect(page.locator('#game canvas')).toBeVisible();
+  await page.waitForFunction(() => window.game?.scene.isActive('replay') && window.game.loop.frame > 10);
+  expect(await page.evaluate(() => window.game!.scene.isActive('main'))).toBeFalsy();
+
+  const scene = () =>
+    page.evaluate(() => {
+      const view = window.game!.scene.getScene('replay') as unknown as ReplaySceneView;
+      const texts = view.children.list.filter((c) => c.type === 'Text' && c.visible).map((c) => c.text ?? '');
+      return { comments: view.comments, phase: view.current.match.phase, texts };
+    });
+
+  // Nach einigen Sekunden steht mindestens ein Kommentar im Band, und das Spielfeld ist gezeichnet.
+  await expect.poll(async () => (await scene()).comments.length, { timeout: 10_000 }).toBeGreaterThan(0);
+  const state = await scene();
+  expect(state.texts.some((text) => text.includes('spielt'))).toBe(true);
+  expect(state.texts).toContain('Line 1 · Stufe 1');
+
+  const colors = await page.evaluate(
+    () =>
+      new Promise<number>((resolve) => {
+        window.game!.renderer.snapshot((image) => {
+          const source = image as HTMLImageElement;
+          const canvas = document.createElement('canvas');
+          canvas.width = source.width;
+          canvas.height = source.height;
+          const context = canvas.getContext('2d')!;
+          context.drawImage(source, 0, 0);
+          const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+          const seen = new Set<number>();
+          for (let index = 0; index < data.length; index += 4 * 97) {
+            seen.add((data[index]! << 16) | (data[index + 1]! << 8) | data[index + 2]!);
+          }
+          resolve(seen.size);
+        });
+      }),
+  );
+  expect(colors).toBeGreaterThan(3);
+
+  expect(errors).toEqual([]);
+});
+
+test('?replay: am Ende erscheinen Ergebnis und Teilen-URL, ein Tastendruck startet dasselbe Replay neu', async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
+  page.on('pageerror', (error) => errors.push(error.message));
+
+  await page.goto('/?replay=42');
+  await page.waitForFunction(() => window.game?.scene.isActive('replay') && window.game.loop.frame > 10);
+  await page.waitForFunction(() => {
+    const view = window.game!.scene.getScene('replay') as unknown as ReplaySceneView;
+    return view.current.events.length > 0;
+  });
+
+  // Ein echtes Match dauert minutenlang: das Ende wird direkt im Szenenzustand gesetzt.
+  await page.evaluate(() => {
+    const view = window.game!.scene.getScene('replay') as unknown as { replay: { match: Record<string, unknown> } };
+    view.replay.match = { ...view.replay.match, phase: 'over', outcome: 'player0' };
+  });
+  await page.waitForFunction(() => {
+    const view = window.game!.scene.getScene('replay') as unknown as ReplaySceneView;
+    return view.children.list.some((c) => c.type === 'Text' && c.visible && c.text === 'Blau gewinnt');
+  });
+  const texts = await page.evaluate(() => {
+    const view = window.game!.scene.getScene('replay') as unknown as ReplaySceneView;
+    return view.children.list.filter((c) => c.type === 'Text' && c.visible).map((c) => c.text ?? '');
+  });
+  expect(texts.some((text) => text.endsWith('?replay=42'))).toBe(true);
+
+  await page.keyboard.press('Space');
+  await page.waitForFunction(() => {
+    const view = window.game!.scene.getScene('replay') as unknown as ReplaySceneView;
+    return view.current.match.phase === 'planning' && view.current.events.length <= 1;
+  });
+  expect(errors).toEqual([]);
+});
+
+test('?replay mit ungültigem Wert fällt auf die MainScene zurück, ohne Konsolenfehler', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
+  page.on('pageerror', (error) => errors.push(error.message));
+
+  await page.goto('/?replay=abc');
+  await page.waitForFunction(() => window.game?.scene.isActive('main') && window.game.loop.frame > 5);
+  expect(await page.evaluate(() => window.game!.scene.scenes.map((scene) => scene.scene.key))).toEqual(['main']);
+  expect(errors).toEqual([]);
+});
+
 /** Was der Drag-Test von der Szene liest. */
 interface DragSceneView {
   current: { players: { minions: { id: number; line: number; position: number }[] }[] };
@@ -174,6 +284,80 @@ test('ein beschworener Minion lässt sich in der Planung ziehen, danach nicht me
   await drag(at(180 + offset, yOf(6)), at(300, yOf(10)));
   const after = (await humanMinions()).find((m) => m.id === minion.id);
   expect(after?.line).not.toBe(2);
+
+  expect(errors).toEqual([]);
+});
+
+/** Was der Filter-Test von der Szene liest und setzt (Felder sind zur Laufzeit erreichbar). */
+interface FilterSceneView {
+  state: { players: { hand: string[]; energy: number }[] };
+  handFilter: string;
+  selected: number | null;
+}
+
+test('Kartenfilter: Tasten-Reihenfolge, Abwahl, nicht passende Karten tot, echter Hand-Index', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
+  page.on('pageerror', (error) => errors.push(error.message));
+
+  await page.goto('/');
+  const canvas = page.locator('#game canvas');
+  await expect(canvas).toBeVisible();
+  await page.waitForFunction(() => window.game?.scene.isActive('main') && window.game.loop.frame > 10);
+  const box = (await canvas.boundingBox())!;
+  const at = (x: number, y: number) => ({ x: box.x + (x / 360) * box.width, y: box.y + (y / 640) * box.height });
+  const click = (point: { x: number; y: number }) => page.mouse.click(point.x, point.y);
+  const cardPoint = (index: number) => at(7 + (index % 5) * 70 + 33, 440 + Math.floor(index / 5) * 66 + 31);
+  const filterButton = at(173, 612);
+  const read = () =>
+    page.evaluate(() => {
+      const scene = window.game!.scene.getScene('main') as unknown as FilterSceneView;
+      return { filter: scene.handFilter, selected: scene.selected, hand: [...scene.state.players[0]!.hand] };
+    });
+
+  // Start: Filter „Alle“.
+  expect((await read()).filter).toBe('all');
+
+  // Feste Hand und genug Energie, damit das Ergebnis nicht vom Zufall abhängt.
+  await page.evaluate(() => {
+    const scene = window.game!.scene.getScene('main') as unknown as FilterSceneView;
+    const human = scene.state.players[0]!;
+    human.hand = ['tower-hp', 'summon-minion', 'line-upgrade', 'summon-brute'];
+    human.energy = 10;
+  });
+
+  // Minion wählen, auf „Beschwörung“ schalten: Auswahl bleibt, Karte ist sichtbar.
+  await click(cardPoint(1));
+  expect((await read()).selected).toBe(1);
+  await click(filterButton);
+  expect(await read()).toMatchObject({ filter: 'summon', selected: 1 });
+
+  // „Upgrade“: Minion wird ausgeblendet, Auswahl ist null.
+  await click(filterButton);
+  expect(await read()).toMatchObject({ filter: 'upgrade', selected: null });
+
+  // Abgedunkelte Karte (Tower Leben, Index 0) reagiert nicht, Upgrade-Karte (Index 2) schon.
+  await click(cardPoint(0));
+  expect((await read()).selected).toBeNull();
+  await click(cardPoint(2));
+  expect((await read()).selected).toBe(2);
+
+  // Tower → Alle → Beschwörung.
+  await click(filterButton);
+  expect((await read()).filter).toBe('tower');
+  await click(filterButton);
+  expect((await read()).filter).toBe('all');
+  await click(filterButton);
+  expect((await read()).filter).toBe('summon');
+
+  // Bei „Beschwörung“ wird der Brocken mit dem echten Hand-Index 3 gespielt.
+  await click(cardPoint(3));
+  await click(at(60, 300));
+  const after = await read();
+  expect(after.hand).toEqual(['tower-hp', 'summon-minion', 'line-upgrade']);
+  expect(after.selected).toBeNull();
 
   expect(errors).toEqual([]);
 });

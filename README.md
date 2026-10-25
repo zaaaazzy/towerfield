@@ -28,7 +28,8 @@ mit ihren Tests [`docs/anwendung-handlimit.md`](docs/anwendung-handlimit.md). Di
 [`docs/anwendung-tower-reichweite.md`](docs/anwendung-tower-reichweite.md). Das Minion-Tempo (`speed`, Brocken 8)
 beschreibt [`docs/anwendung-minion-tempo.md`](docs/anwendung-minion-tempo.md). Die E2E-Tests für vollständige
 Spielabläufe (fester Seed per `?seed=`, Hilfen, Schnellvorlauf) beschreibt
-[`docs/anwendung-e2e-gameplay.md`](docs/anwendung-e2e-gameplay.md).
+[`docs/anwendung-e2e-gameplay.md`](docs/anwendung-e2e-gameplay.md). Den Kartenfilter für die Hand im Match beschreibt
+[`docs/anwendung-kartenfilter.md`](docs/anwendung-kartenfilter.md).
 
 ## Befehle
 

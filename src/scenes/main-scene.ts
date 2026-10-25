@@ -1,12 +1,12 @@
 import Phaser from 'phaser';
 import { botPlan } from '../logic/bot';
+import { cardTypeStyle } from '../logic/card-style';
 import { getCardDef } from '../logic/cards';
-import { LINE_LENGTH } from '../logic/combat';
+import { diffFx } from '../logic/fx-events';
 import {
   advance,
   createMatch,
   HAND_LIMIT,
-  LINE_COUNT,
   type MatchState,
   MAX_ROUNDS,
   lineCapacity,
@@ -14,53 +14,73 @@ import {
   playCard,
   setReady,
 } from '../logic/match';
+import { HAND_FILTER_NAMES, type HandFilter, isCardVisible, nextHandFilter } from '../logic/hand-filter';
 import { parseSeed } from '../logic/seed';
-import { type DropTarget, dropTargetAt, type LineGeometry, positionToY, slotPosition } from '../logic/placement';
+import { type DropTarget, dropTargetAt, slotPosition } from '../logic/placement';
+import { drawCard } from './card-view';
+import { Effects, type Locator } from './effects';
+import {
+  drawBoard,
+  drawMinionBody,
+  drawMinions,
+  FIELD,
+  GEOMETRY,
+  HUMAN,
+  BOT,
+  lineY,
+  minionPoint,
+  towerPoint,
+} from './field-view';
+import { type LabelFn, LabelPool } from './labels';
+import { addBackdrop } from './textures';
+import { drawButton, drawPanel, PALETTE, TEXT } from './theme';
 
 /** Spielfläche im Hochformat; Phaser skaliert sie per `Scale.FIT` auf den Bildschirm. */
 export const VIEW = { width: 360, height: 640 };
 
-const HUMAN = 0;
-const BOT = 1;
+/** Feld-Geometrie für den Hintergrund (Boden, Wege, Hand-Tisch); auch von der Replay-Szene genutzt. */
+export const BACKDROP_FIELD = {
+  width: VIEW.width,
+  height: VIEW.height,
+  lineCenters: FIELD.lineCenters,
+  topY: FIELD.enemyTowerY,
+  bottomY: FIELD.ownTowerY,
+  pathHalfWidth: FIELD.pathHalfWidth,
+  handTop: 440,
+};
+
+/** Wie Effekte Ereignisse auf Bildschirmpunkte abbilden; auch von der Replay-Szene genutzt. */
+export const FX_LOCATOR: Locator = {
+  minion: (owner, line, position, id) => minionPoint(owner, { id, line, position }),
+  tower: (owner, line) => towerPoint(owner, line),
+};
 
 const LAYOUT = {
-  lineCenters: [60, 180, 300],
-  lineHalfWidth: 50,
-  enemyTowerY: 90,
-  ownTowerY: 400,
+  lineCenters: FIELD.lineCenters,
+  lineHalfWidth: FIELD.lineHalfWidth,
+  enemyTowerY: FIELD.enemyTowerY,
+  ownTowerY: FIELD.ownTowerY,
   cardWidth: 66,
   cardHeight: 62,
   cardGap: 4,
   cardsPerRow: 5,
   handTop: 440,
   button: { x: 230, y: 592, width: 120, height: 40 },
+  /** Filtertaste für die Hand: schaltet bei jedem Tipp weiter, links neben `button`, unter den Karten. */
+  filterButton: { x: 122, y: 592, width: 102, height: 40 },
 };
 
 const STATS_PANEL = { x: 20, y: 60, width: 320, height: 500 };
 const STATS_CLOSE = { x: 120, y: 504, width: 120, height: 40 };
 
-const COLORS = {
-  human: 0x4fc3f7,
-  bot: 0xff7043,
-  line: 0x1d2333,
-  card: 0x2a3350,
-  selected: 0xffd54a,
-  valid: 0x66bb6a,
-  invalid: 0xef5350,
-};
-
-const MINION_RADIUS = 7;
 /** Trefferradius zum Greifen eines Minions; größer als die gezeichnete Fläche, damit Touch trifft. */
 const GRAB_RADIUS = 18;
 /** Bewegung in Spielpixeln, ab der aus einem Antippen ein Ziehen wird. */
 const DRAG_THRESHOLD = 8;
-
-const GEOMETRY: LineGeometry = {
-  lineCenters: LAYOUT.lineCenters,
-  lineHalfWidth: LAYOUT.lineHalfWidth,
-  ownTowerY: LAYOUT.ownTowerY,
-  enemyTowerY: LAYOUT.enemyTowerY,
-};
+/** Zeitkonstante (ms), mit der eine Karte beim Hover/Auswählen nach oben gleitet bzw. zurückfällt. */
+const LIFT_TIME_MS = 70;
+/** Bei größeren Zeitsprüngen (Tab im Hintergrund, Zeitraffer) gibt es keine Effekte. */
+const FX_MAX_DELTA_MS = 500;
 
 /** Zeigerzustand: gedrückt auf einem Minion (noch ein Tippen) oder schon am Ziehen. */
 interface DragState {
@@ -72,14 +92,6 @@ interface DragState {
   dragging: boolean;
   target: DropTarget | null;
   valid: boolean;
-}
-
-/** Mittelpunkt, an dem ein Minion gezeichnet wird. */
-function minionPoint(owner: number, minion: { id: number; line: number; position: number }): { x: number; y: number } {
-  return {
-    x: LAYOUT.lineCenters[minion.line]! + (minion.id % 2 === 0 ? 8 : -8),
-    y: lineY(owner, minion.position),
-  };
 }
 
 function cardRect(index: number): { x: number; y: number; width: number; height: number } {
@@ -97,13 +109,6 @@ function inside(rect: { x: number; y: number; width: number; height: number }, x
   return x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height;
 }
 
-/** Y-Koordinate einer Position (0 bis `LINE_LENGTH`) vom Tower des jeweiligen Spielers aus. */
-function lineY(owner: number, position: number): number {
-  if (owner === HUMAN) return positionToY(position, GEOMETRY);
-  const span = LAYOUT.ownTowerY - LAYOUT.enemyTowerY;
-  return LAYOUT.enemyTowerY + (position / LINE_LENGTH) * span;
-}
-
 /**
  * Spielbare Basis-Szene: liest Touch/Maus, ruft die Match-Logik auf und zeichnet das Ergebnis.
  * Spieler 0 (unten) ist der Mensch, Spieler 1 (oben) der lokale Bot.
@@ -111,14 +116,22 @@ function lineY(owner: number, position: number): number {
 export class MainScene extends Phaser.Scene {
   private state: MatchState = createMatch(1);
   private graphics!: Phaser.GameObjects.Graphics;
-  private texts: Phaser.GameObjects.Text[] = [];
-  private textCursor = 0;
+  private pool!: LabelPool;
+  private effects!: Effects;
+  /** Zustand des letzten Bilds; der Vergleich mit dem aktuellen liefert die Effekte. */
+  private fxState: MatchState = this.state;
   /** Index der angetippten Karte, die auf eine Line wartet. */
   private selected: number | null = null;
+  /** Karte unter dem Mauszeiger (nur Darstellung). */
+  private hovered: number | null = null;
+  /** Anhebung je Handkarte (0 bis 1), gleitet über `delta`. */
+  private lifts: number[] = [];
   private message = '';
   private drag: DragState | null = null;
   /** Statistik-Overlay nach Match-Ende wurde geschlossen. */
   private statsClosed = false;
+  /** Kartenfilter der Hand; reiner Darstellungs- und Eingabezustand, wird nicht gespeichert. */
+  private handFilter: HandFilter = 'all';
 
   constructor() {
     super('main');
@@ -136,17 +149,26 @@ export class MainScene extends Phaser.Scene {
 
   create(): void {
     this.state = createMatch(parseSeed(window.location.search) ?? Date.now() >>> 0);
-    this.texts = [];
+    this.fxState = this.state;
+    addBackdrop(this, VIEW.width, VIEW.height, BACKDROP_FIELD);
+    this.pool = new LabelPool(this);
+    this.effects = new Effects(this, FX_LOCATOR);
     this.selected = null;
+    this.hovered = null;
+    this.lifts = [];
     this.message = '';
     this.drag = null;
     this.statsClosed = false;
-    this.graphics =this.add.graphics();
+    this.handFilter = 'all';
+    this.graphics = this.add.graphics();
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => this.onPointerDown(pointer.worldX, pointer.worldY));
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => this.onPointerMove(pointer.worldX, pointer.worldY));
     this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => this.onPointerUp(pointer.worldX, pointer.worldY));
     this.input.on('pointerupoutside', () => {
       this.drag = null;
+    });
+    this.input.on('gameout', () => {
+      this.hovered = null;
     });
     this.render();
   }
@@ -156,9 +178,34 @@ export class MainScene extends Phaser.Scene {
       this.state = botPlan(this.state, BOT);
     }
     this.state = advance(this.state, deltaMs);
-    if (this.state.phase !== 'planning') this.selected = null;
+    if (this.state.phase !== 'planning') {
+      this.selected = null;
+      this.hovered = null;
+    }
     if (this.state.phase !== 'planning' || this.state.ready[HUMAN]) this.drag = null;
+    this.updateLifts(deltaMs);
+    this.updateEffects(deltaMs);
     this.render();
+  }
+
+  /** Gleitet jede Handkarte zur Ziel-Anhebung (Hover oder Auswahl). */
+  private updateLifts(deltaMs: number): void {
+    const factor = 1 - Math.exp(-deltaMs / LIFT_TIME_MS);
+    const count = this.state.players[HUMAN].hand.length;
+    for (let index = 0; index < count; index += 1) {
+      const target = this.selected === index || this.hovered === index ? 1 : 0;
+      const current = this.lifts[index] ?? 0;
+      this.lifts[index] = current + (target - current) * factor;
+    }
+    this.lifts.length = count;
+  }
+
+  /** Vergleicht mit dem letzten Bild: Treffer, Tod, Beschwörung und Turmschaden lösen Effekte aus. */
+  private updateEffects(deltaMs: number): void {
+    const previous = this.fxState;
+    this.fxState = this.state;
+    if (deltaMs <= FX_MAX_DELTA_MS) this.effects.play(diffFx(previous, this.state));
+    this.effects.update(deltaMs);
   }
 
   /** Id des eigenen, verschiebbaren Minions unter dem Punkt, sonst `null`. */
@@ -180,6 +227,16 @@ export class MainScene extends Phaser.Scene {
     return best;
   }
 
+  /** Index der sichtbaren Handkarte unter dem Punkt (nur in der Planung), sonst `null`. */
+  private cardIndexAt(x: number, y: number): number | null {
+    if (this.state.phase !== 'planning') return null;
+    const hand = this.state.players[HUMAN].hand;
+    for (let index = 0; index < hand.length; index += 1) {
+      if (inside(cardRect(index), x, y)) return this.isVisibleInHand(index) ? index : null;
+    }
+    return null;
+  }
+
   private onPointerDown(x: number, y: number): void {
     const minionId = this.grabbableMinionAt(x, y);
     if (minionId === null) {
@@ -191,6 +248,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   private onPointerMove(x: number, y: number): void {
+    this.hovered = this.cardIndexAt(x, y);
     const drag = this.drag;
     if (!drag) return;
     drag.x = x;
@@ -248,9 +306,16 @@ export class MainScene extends Phaser.Scene {
       this.state = setReady(this.state, HUMAN);
       return;
     }
+    if (inside(LAYOUT.filterButton, x, y)) {
+      this.handFilter = nextHandFilter(this.handFilter);
+      const selected = this.selected;
+      if (selected !== null && !this.isVisibleInHand(selected)) this.selected = null;
+      return;
+    }
     const hand = this.state.players[HUMAN].hand;
     for (let index = 0; index < hand.length; index += 1) {
       if (!inside(cardRect(index), x, y)) continue;
+      if (!this.isVisibleInHand(index)) return;
       this.message = '';
       const def = getCardDef(hand[index]!);
       if (def.target === 'none') {
@@ -265,11 +330,23 @@ export class MainScene extends Phaser.Scene {
     if (line >= 0 && y >= LAYOUT.enemyTowerY - 30 && y <= LAYOUT.handTop - 4) this.play(this.selected, line);
   }
 
+  /** Ist die Handkarte mit diesem Hand-Index beim aktiven Filter sichtbar und antippbar? */
+  private isVisibleInHand(handIndex: number): boolean {
+    const id = this.state.players[HUMAN].hand[handIndex];
+    return id !== undefined && isCardVisible(getCardDef(id).type, this.handFilter);
+  }
+
   private play(handIndex: number, line?: number): void {
+    const cardId = this.state.players[HUMAN].hand[handIndex];
     const result = playCard(this.state, HUMAN, handIndex, line);
     this.state = result.state;
     this.selected = null;
     this.message = result.ok ? '' : this.explain(result.reason);
+    if (result.ok && cardId !== undefined) {
+      const def = getCardDef(cardId);
+      this.effects.cardPlayed(cardRect(handIndex), def.name, cardTypeStyle(def.type).accent);
+      this.lifts.splice(handIndex, 1);
+    }
   }
 
   private explain(reason: string): string {
@@ -290,76 +367,38 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
-  private label(
-    text: string,
-    x: number,
-    y: number,
-    options: { size?: number; color?: string; origin?: number; width?: number } = {},
-  ): void {
-    let object = this.texts[this.textCursor];
-    if (!object) {
-      object = this.add.text(0, 0, '', { fontFamily: 'sans-serif', align: 'center' });
-      this.texts.push(object);
-    }
-    this.textCursor += 1;
-    object
-      .setText(text)
-      .setPosition(x, y)
-      .setFontSize(options.size ?? 12)
-      .setColor(options.color ?? '#ffffff')
-      .setOrigin(options.origin ?? 0.5, 0.5)
-      .setWordWrapWidth(options.width ?? 0)
-      .setVisible(true);
-  }
+  private label: LabelFn = (text, x, y, options) => this.pool.label(text, x, y, options);
 
   private render(): void {
     const g = this.graphics;
     g.clear();
-    this.textCursor = 0;
+    this.pool.reset();
     const state = this.state;
     const human = state.players[HUMAN];
     const bot = state.players[BOT];
 
-    g.fillStyle(0x10141f, 1).fillRect(0, 0, VIEW.width, VIEW.height);
+    drawBoard(g, this.label, state, this.selected !== null);
 
     const phaseText =
       state.phase === 'planning' ? 'Planung' : state.phase === 'combat' ? 'Kampf' : 'Ende';
-    this.label(`Runde ${state.round}/${MAX_ROUNDS} · ${phaseText}`, VIEW.width / 2, 16, { size: 14 });
-    this.label(`Gegner: ${bot.hand.length} Karten`, VIEW.width / 2, 40, { size: 11, color: '#9aa4bf' });
-
-    for (let line = 0; line < LINE_COUNT; line += 1) {
-      const center = LAYOUT.lineCenters[line]!;
-      g.fillStyle(COLORS.line, 1).fillRect(
-        center - 14,
-        LAYOUT.enemyTowerY,
-        28,
-        LAYOUT.ownTowerY - LAYOUT.enemyTowerY,
-      );
-      if (this.selected !== null) {
-        g.lineStyle(2, COLORS.selected, 0.6).strokeRect(
-          center - LAYOUT.lineHalfWidth,
-          LAYOUT.enemyTowerY - 30,
-          LAYOUT.lineHalfWidth * 2,
-          LAYOUT.ownTowerY - LAYOUT.enemyTowerY + 60,
-        );
-      }
-      this.drawTower(center, LAYOUT.enemyTowerY, bot.lines[line]!, COLORS.bot, -1);
-      this.drawTower(center, LAYOUT.ownTowerY, human.lines[line]!, COLORS.human, 1);
-      this.label(`Line ${line + 1} · Stufe ${human.lines[line]!.level}`, center, LAYOUT.ownTowerY + 38, {
-        size: 10,
-        color: '#9aa4bf',
-      });
-    }
+    drawPanel(g, 80, 3, 200, 26, { metal: 'gold', radius: 10 });
+    this.label(`Runde ${state.round}/${MAX_ROUNDS} · ${phaseText}`, VIEW.width / 2, 16, {
+      size: 14,
+      font: 'heading',
+      bold: true,
+    });
+    this.label(`Gegner: ${bot.hand.length} Karten`, VIEW.width / 2, 40, { size: 11, color: TEXT.dim });
 
     const drag = this.drag?.dragging ? this.drag : null;
     if (drag?.target) {
-      const color = drag.valid ? COLORS.valid : COLORS.invalid;
+      const color = drag.valid ? PALETTE.good : PALETTE.bad;
       const center = LAYOUT.lineCenters[drag.target.line]!;
-      g.lineStyle(2, color, 0.8).strokeRect(
+      g.lineStyle(2, color, 0.8).strokeRoundedRect(
         center - LAYOUT.lineHalfWidth,
         LAYOUT.enemyTowerY - 30,
         LAYOUT.lineHalfWidth * 2,
         LAYOUT.ownTowerY - LAYOUT.enemyTowerY + 42,
+        8,
       );
       if (drag.target.slot !== null) {
         const slotY = lineY(HUMAN, slotPosition(drag.target.slot));
@@ -367,71 +406,92 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
-    for (const owner of [BOT, HUMAN]) {
-      for (const minion of state.players[owner]!.minions) {
-        if (owner === HUMAN && drag?.minionId === minion.id) continue;
-        const point = minionPoint(owner, minion);
-        g.fillStyle(owner === HUMAN ? COLORS.human : COLORS.bot, 1).fillCircle(point.x, point.y, MINION_RADIUS);
-      }
-    }
-    if (drag) g.fillStyle(COLORS.human, 0.85).fillCircle(drag.x, drag.y, MINION_RADIUS + 2);
+    drawMinions(g, state, drag?.minionId);
+    if (drag) drawMinionBody(g, drag.x, drag.y, HUMAN, undefined, 0.85);
 
-    // Handkarten
-    human.hand.slice(0, HAND_LIMIT).forEach((id, index) => {
-      const def = getCardDef(id);
-      const rect = cardRect(index);
-      const affordable = human.energy >= def.cost;
-      g.fillStyle(COLORS.card, affordable ? 1 : 0.45).fillRoundedRect(rect.x, rect.y, rect.width, rect.height, 6);
-      if (this.selected === index) {
-        g.lineStyle(3, COLORS.selected, 1).strokeRoundedRect(rect.x, rect.y, rect.width, rect.height, 6);
-      }
-      this.label(`${def.cost}`, rect.x + 9, rect.y + 9, { size: 12, color: '#ffd54a' });
-      this.label(def.name, rect.x + rect.width / 2, rect.y + rect.height / 2 + 6, {
-        size: 10,
-        width: rect.width - 6,
+    // Handkarten: die am höchsten angehobenen zuletzt, damit sie oben liegen.
+    const cards = human.hand.slice(0, HAND_LIMIT).map((id, index) => ({ def: getCardDef(id), index }));
+    cards
+      .slice()
+      .sort((a, b) => (this.lifts[a.index] ?? 0) - (this.lifts[b.index] ?? 0))
+      .forEach(({ def, index }) => {
+        drawCard(g, this.label, cardRect(index), def, {
+          lift: this.lifts[index] ?? 0,
+          selected: this.selected === index,
+          affordable: human.energy >= def.cost,
+          visible: isCardVisible(def.type, this.handFilter),
+        });
       });
-    });
 
-    // Leiste unten
-    this.label(`Energie ${human.energy}`, 70, 612, { size: 16, color: '#ffd54a' });
-    if (this.message) this.label(this.message, 70, 632, { size: 10, color: '#ff8a80' });
+    const matching = cards.filter(({ def }) => isCardVisible(def.type, this.handFilter)).length;
+    const filterButton = LAYOUT.filterButton;
+    drawButton(
+      g,
+      filterButton,
+      this.handFilter === 'all' ? { top: 0x4a4570, bottom: 0x2a2548 } : { top: 0x5a82d0, bottom: 0x28427f },
+    );
+    this.label(
+      `Filter: ${HAND_FILTER_NAMES[this.handFilter]} (${matching})`,
+      filterButton.x + filterButton.width / 2,
+      filterButton.y + filterButton.height / 2,
+      { size: 10, width: filterButton.width - 8 },
+    );
+
+    // Leiste unten: Energie im Bronzerahmen mit Kristall, Bereit-Knopf.
+    drawPanel(g, 6, 597, 108, 27, { metal: 'bronze', radius: 8 });
+    const crystal = [
+      new Phaser.Geom.Point(22, 603),
+      new Phaser.Geom.Point(28, 611),
+      new Phaser.Geom.Point(22, 619),
+      new Phaser.Geom.Point(16, 611),
+    ];
+    g.fillStyle(PALETTE.energy, 0.3).fillCircle(22, 611, 11);
+    g.fillStyle(PALETTE.goldDark, 1).fillPoints(crystal, true);
+    g.fillStyle(PALETTE.energy, 1).fillPoints(crystal.map((p) => new Phaser.Geom.Point(22 + (p.x - 22) * 0.75, 611 + (p.y - 611) * 0.75)), true);
+    g.fillStyle(PALETTE.white, 0.45).fillPoints([crystal[0]!, new Phaser.Geom.Point(26, 610), new Phaser.Geom.Point(22, 611)], true);
+    this.label(`Energie ${human.energy}`, 72, 612, { size: 16, color: TEXT.gold, font: 'heading', bold: true });
+    if (this.message) this.label(this.message, 70, 632, { size: 10, color: TEXT.bad });
     const button = LAYOUT.button;
     const waiting = state.phase !== 'planning' || state.ready[HUMAN];
-    g.fillStyle(waiting ? 0x3a4256 : 0x2e7d32, 1).fillRoundedRect(button.x, button.y, button.width, button.height, 8);
+    drawButton(g, button, { enabled: !waiting });
     this.label(waiting ? 'Kampf läuft' : 'Bereit', button.x + button.width / 2, button.y + button.height / 2, {
       size: 14,
+      font: 'heading',
+      bold: true,
     });
 
     if (state.phase === 'over' && !this.statsClosed) {
       this.renderStats(state);
     } else if (state.phase === 'over') {
-      g.fillStyle(0x000000, 0.7).fillRect(0, 220, VIEW.width, 140);
+      g.fillStyle(PALETTE.black, 0.55).fillRect(0, 0, VIEW.width, VIEW.height);
+      drawPanel(g, 20, 215, 320, 150, { metal: 'gold' });
       const text =
         state.outcome === 'draw' ? 'Unentschieden' : state.outcome === 'player0' ? 'Du gewinnst!' : 'Du verlierst';
-      this.label(text, VIEW.width / 2, 270, { size: 26 });
-      this.label('Tippen für ein neues Spiel', VIEW.width / 2, 320, { size: 13, color: '#9aa4bf' });
+      this.label(text, VIEW.width / 2, 270, { size: 26, font: 'heading', bold: true, color: TEXT.gold, stroke: 3 });
+      this.label('Tippen für ein neues Spiel', VIEW.width / 2, 320, { size: 13, color: TEXT.dim });
     }
 
-    for (let index = this.textCursor; index < this.texts.length; index += 1) this.texts[index]!.setVisible(false);
+    this.pool.hideUnused();
   }
 
   /** Overlay nach Match-Ende: Ergebnis, Karten pro Line und Schaden je Minion-Typ (liest nur `state.stats`). */
   private renderStats(state: MatchState): void {
     const g = this.graphics;
     const { x, y, width, height } = STATS_PANEL;
-    g.fillStyle(0x000000, 0.88).fillRect(0, 0, VIEW.width, VIEW.height);
-    g.fillStyle(COLORS.card, 1).fillRoundedRect(x, y, width, height, 8);
+    g.fillStyle(PALETTE.black, 0.85).fillRect(0, 0, VIEW.width, VIEW.height);
+    drawPanel(g, x, y, width, height, { metal: 'gold' });
     const text =
       state.outcome === 'draw' ? 'Unentschieden' : state.outcome === 'player0' ? 'Du gewinnst!' : 'Du verlierst';
-    this.label(text, VIEW.width / 2, y + 22, { size: 20 });
+    this.label(text, VIEW.width / 2, y + 22, { size: 20, font: 'heading', bold: true, color: TEXT.gold, stroke: 3 });
+    g.fillStyle(PALETTE.gold, 0.6).fillRect(x + 12, y + 38, width - 24, 1);
 
     const left = x + 12;
     const columns = [x + 150, x + 200, x + 250];
     let row = y + 54;
-    this.label('Karten pro Line', left, row, { size: 12, color: '#ffd54a', origin: 0 });
-    columns.forEach((column, line) => this.label(`L${line + 1}`, column, row, { size: 11, color: '#9aa4bf' }));
+    this.label('Karten pro Line', left, row, { size: 12, color: TEXT.gold, origin: 0, font: 'heading', bold: true });
+    columns.forEach((column, line) => this.label(`L${line + 1}`, column, row, { size: 11, color: TEXT.dim }));
     const played = Object.entries(state.stats.played);
-    if (played.length === 0) this.label('Keine Beschwörungen', left, (row += 18), { size: 11, color: '#9aa4bf', origin: 0 });
+    if (played.length === 0) this.label('Keine Beschwörungen', left, (row += 18), { size: 11, color: TEXT.dim, origin: 0 });
     for (const [cardId, counts] of played) {
       row += 18;
       this.label(getCardDef(cardId).name, left, row, { size: 11, origin: 0 });
@@ -439,11 +499,11 @@ export class MainScene extends Phaser.Scene {
     }
 
     row += 34;
-    this.label('Schaden je Typ', left, row, { size: 12, color: '#ffd54a', origin: 0 });
-    this.label('Minions', x + 190, row, { size: 11, color: '#9aa4bf' });
-    this.label('Tower', x + 260, row, { size: 11, color: '#9aa4bf' });
+    this.label('Schaden je Typ', left, row, { size: 12, color: TEXT.gold, origin: 0, font: 'heading', bold: true });
+    this.label('Minions', x + 190, row, { size: 11, color: TEXT.dim });
+    this.label('Tower', x + 260, row, { size: 11, color: TEXT.dim });
     const damage = Object.entries(state.stats.damage);
-    if (damage.length === 0) this.label('Kein Schaden', left, (row += 18), { size: 11, color: '#9aa4bf', origin: 0 });
+    if (damage.length === 0) this.label('Kein Schaden', left, (row += 18), { size: 11, color: TEXT.dim, origin: 0 });
     for (const [cardId, entry] of damage) {
       row += 18;
       this.label(getCardDef(cardId).name, left, row, { size: 11, origin: 0 });
@@ -452,23 +512,11 @@ export class MainScene extends Phaser.Scene {
     }
 
     const button = STATS_CLOSE;
-    g.fillStyle(0x2e7d32, 1).fillRoundedRect(button.x, button.y, button.width, button.height, 8);
-    this.label('Schließen', button.x + button.width / 2, button.y + button.height / 2, { size: 14 });
-  }
-
-  private drawTower(
-    x: number,
-    y: number,
-    line: { tower: { hp: number; maxHp: number } },
-    color: number,
-    direction: 1 | -1,
-  ): void {
-    const g = this.graphics;
-    const { hp, maxHp } = line.tower;
-    const top = y - 12;
-    g.fillStyle(hp > 0 ? color : 0x444b5e, 1).fillRect(x - 28, top, 56, 24);
-    g.fillStyle(0x000000, 0.5).fillRect(x - 28, top + (direction === 1 ? 26 : -8), 56, 5);
-    g.fillStyle(0x66bb6a, 1).fillRect(x - 28, top + (direction === 1 ? 26 : -8), 56 * (hp / maxHp), 5);
-    this.label(`${Math.ceil(hp)}`, x, y, { size: 12, color: '#10141f' });
+    drawButton(g, button);
+    this.label('Schließen', button.x + button.width / 2, button.y + button.height / 2, {
+      size: 14,
+      font: 'heading',
+      bold: true,
+    });
   }
 }
