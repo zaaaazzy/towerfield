@@ -1,23 +1,19 @@
 /**
  * Zeichnet eine Handkarte im Kartenspiel-Look: Rahmen in der Farbe des Kartentyps, Kopfzeile mit Namen,
- * Kosten-Kristall, Bildfläche mit Typ-Symbol, Textfeld und Typ-Banner. Hover/Auswahl hebt die Karte an
- * (Skalierung, Schatten, Leuchten). Trefferfläche und Layout der Hand bleiben bei `cardRect` der Szene.
+ * Kosten-Kristall, Bildfläche mit Kartenbild (Rückfall: Typ-Symbol) und Werten, Textfeld und Typ-Banner.
+ * Jede Karte ist ein eigener Container, der in lokalen Koordinaten um den Mittelpunkt zeichnet. Position,
+ * Neigung, Skalierung und Tiefe kommen aus `CardPose` (`src/logic/hand-layout.ts`); so liegt auch der Text
+ * zusammen mit seiner Karte in der richtigen Reihenfolge.
  */
 import Phaser from 'phaser';
-import { type CardSymbol, cardTypeStyle, describeCard } from '../logic/card-style';
+import { type CardSymbol, cardArtKey, cardStats, cardTypeStyle, describeCard } from '../logic/card-style';
 import type { CardDef } from '../logic/cards';
-import type { LabelFn } from './labels';
+import { type CardPose, HAND_FAN } from '../logic/hand-layout';
+import { LabelPool } from './labels';
 import { fillGradient, lerpColor, PALETTE, TEXT } from './theme';
 
-export interface Rect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
 export interface CardLook {
-  /** 0 (flach) bis 1 (voll angehoben). */
+  /** 0 (flach) bis 1 (voll angehoben): steuert Schatten und Leuchten. */
   lift: number;
   selected: boolean;
   affordable: boolean;
@@ -25,8 +21,11 @@ export interface CardLook {
   visible: boolean;
 }
 
-const LIFT_SCALE = 0.1;
-const LIFT_PIXELS = 9;
+/** Tiefe der Karten: über Feld, Beschriftungen und Leiste, unter den Effekten (ab 19). */
+const CARD_DEPTH = 11;
+const WIDTH = HAND_FAN.cardWidth;
+const HEIGHT = HAND_FAN.cardHeight;
+const RADIUS = 6;
 
 /** Kleines Typ-Symbol, zentriert auf (cx, cy) mit Radius r. */
 function drawSymbol(g: Phaser.GameObjects.Graphics, symbol: CardSymbol, cx: number, cy: number, r: number, color: number): void {
@@ -66,96 +65,161 @@ function drawSymbol(g: Phaser.GameObjects.Graphics, symbol: CardSymbol, cx: numb
   }
 }
 
-/** Lebensgroße Schrift in `size` Pixeln, skaliert mit der Karte. */
-const scaled = (size: number, s: number): number => Math.round(size * s * 10) / 10;
+/** Wert-Plakette (Leben oder Schaden) mit kleinem Symbol; (x, y) ist die linke Mitte. */
+function drawStatPill(g: Phaser.GameObjects.Graphics, kind: 'hp' | 'damage', x: number, y: number): void {
+  const color = kind === 'hp' ? 0xc8283c : 0xd87a1e;
+  g.fillStyle(PALETTE.black, 0.55).fillRoundedRect(x, y - 6.5, 30, 13, 6);
+  g.lineStyle(1, color, 1).strokeRoundedRect(x, y - 6.5, 30, 13, 6);
+  const ix = x + 8;
+  if (kind === 'hp') {
+    g.fillStyle(0xff5a6a, 1).fillCircle(ix - 1.8, y - 1.5, 2.3).fillCircle(ix + 1.8, y - 1.5, 2.3);
+    g.fillTriangle(ix - 3.9, y - 0.5, ix + 3.9, y - 0.5, ix, y + 3.8);
+  } else {
+    g.lineStyle(2, 0xffd890, 1).lineBetween(ix - 3, y + 3, ix + 3, y - 3);
+    g.lineStyle(1.6, 0xffb040, 1).lineBetween(ix - 3.5, y - 0.5, ix - 0.5, y + 2.5);
+  }
+}
 
-export function drawCard(g: Phaser.GameObjects.Graphics, label: LabelFn, rect: Rect, def: CardDef, look: CardLook): void {
-  const style = cardTypeStyle(def.type);
-  const lift = look.lift;
-  const s = 1 + LIFT_SCALE * lift;
-  const w = rect.width * s;
-  const h = rect.height * s;
-  const x = rect.x + (rect.width - w) / 2;
-  const y = rect.y + (rect.height - h) / 2 - LIFT_PIXELS * lift;
-  const radius = 6;
+export class CardView {
+  private readonly container: Phaser.GameObjects.Container;
+  private readonly back: Phaser.GameObjects.Graphics;
+  private readonly art: Phaser.GameObjects.Image;
+  private readonly front: Phaser.GameObjects.Graphics;
+  private readonly pool: LabelPool;
 
-  if (!look.visible) {
-    g.fillStyle(PALETTE.panelDark, 0.25).fillRoundedRect(rect.x, rect.y, rect.width, rect.height, radius);
-    g.lineStyle(1, PALETTE.stoneDark, 0.3).strokeRoundedRect(rect.x, rect.y, rect.width, rect.height, radius);
-    return;
+  constructor(private readonly scene: Phaser.Scene) {
+    this.back = scene.add.graphics();
+    this.art = scene.add.image(0, 0, '__DEFAULT').setVisible(false);
+    this.front = scene.add.graphics();
+    this.container = scene.add.container(0, 0, [this.back, this.art, this.front]).setDepth(CARD_DEPTH).setVisible(false);
+    this.pool = new LabelPool(scene, this.container);
   }
 
-  const alpha = look.affordable ? 1 : 0.6;
-  const textAlpha = look.affordable ? 1 : 0.65;
+  hide(): void {
+    this.container.setVisible(false);
+  }
 
-  // Schatten, bei angehobener Karte weiter und weicher.
-  g.fillStyle(PALETTE.black, 0.3).fillRoundedRect(x + 1 + 3 * lift, y + 2 + 5 * lift, w, h, radius);
-  g.fillStyle(PALETTE.black, 0.15 * lift).fillRoundedRect(x + 2 + 5 * lift, y + 4 + 8 * lift, w, h, radius);
+  /** Zeichnet die Karte neu und stellt sie in die Lage `pose`. */
+  update(pose: CardPose, def: CardDef, look: CardLook): void {
+    const container = this.container;
+    // Tiefe ist ein kleiner Bruchteil, damit auch die höchste Karte unter den Effekten bleibt.
+    container
+      .setPosition(pose.x, pose.y)
+      .setRotation(pose.rotation)
+      .setScale(pose.scale)
+      .setDepth(CARD_DEPTH + pose.z * 0.01)
+      .setVisible(true);
+    const { back, front, art, pool } = this;
+    back.clear();
+    front.clear();
+    pool.reset();
+    art.setVisible(false);
 
-  // Leuchten: Auswahl in Gold, Hover in der Typfarbe.
-  const glowColor = look.selected ? PALETTE.gold : style.accent;
-  const glow = look.selected ? Math.max(lift, 0.8) : lift;
-  if (glow > 0.02) {
-    for (let ring = 4; ring >= 1; ring -= 1) {
-      g.lineStyle(ring * 2, glowColor, 0.16 * glow).strokeRoundedRect(x - ring, y - ring, w + ring * 2, h + ring * 2, radius + ring);
+    const x = -WIDTH / 2;
+    const y = -HEIGHT / 2;
+    if (!look.visible) {
+      back.fillStyle(PALETTE.panelDark, 0.25).fillRoundedRect(x, y, WIDTH, HEIGHT, RADIUS);
+      back.lineStyle(1, PALETTE.stoneDark, 0.3).strokeRoundedRect(x, y, WIDTH, HEIGHT, RADIUS);
+      pool.hideUnused();
+      return;
     }
+
+    const style = cardTypeStyle(def.type);
+    const lift = look.lift;
+    const textAlpha = look.affordable ? 1 : 0.7;
+
+    // Schatten, bei angehobener Karte weiter und weicher.
+    back.fillStyle(PALETTE.black, 0.3).fillRoundedRect(x + 1 + 3 * lift, y + 2 + 5 * lift, WIDTH, HEIGHT, RADIUS);
+    back.fillStyle(PALETTE.black, 0.15 * lift).fillRoundedRect(x + 2 + 5 * lift, y + 4 + 8 * lift, WIDTH, HEIGHT, RADIUS);
+
+    // Leuchten: Auswahl in Gold, Hover in der Typfarbe.
+    const glowColor = look.selected ? PALETTE.gold : style.accent;
+    const glow = look.selected ? Math.max(lift, 0.8) : lift;
+    if (glow > 0.02) {
+      for (let ring = 4; ring >= 1; ring -= 1) {
+        back.lineStyle(ring * 2, glowColor, 0.16 * glow).strokeRoundedRect(x - ring, y - ring, WIDTH + ring * 2, HEIGHT + ring * 2, RADIUS + ring);
+      }
+    }
+
+    // Rahmen: Typfarbe außen, Gold/Typfarbe innen, Pergament-Grund.
+    back.fillStyle(lerpColor(style.accent, PALETTE.black, 0.45), 1).fillRoundedRect(x, y, WIDTH, HEIGHT, RADIUS);
+    back.fillStyle(look.selected ? PALETTE.goldLight : style.accent, 1).fillRoundedRect(x + 1, y + 1, WIDTH - 2, HEIGHT - 2, RADIUS - 1);
+    back.fillStyle(PALETTE.panelDark, 1).fillRoundedRect(x + 2, y + 2, WIDTH - 4, HEIGHT - 4, RADIUS - 2);
+
+    // Kopfzeile mit Namen; lange Namen werden kleiner oder brechen um (Platz für zwei Zeilen).
+    fillGradient(back, x + 2.5, y + 2.5, WIDTH - 5, 21.5, lerpColor(style.accent, PALETTE.white, 0.15), style.dark, 1, 5);
+    const longest = Math.max(...def.name.split(' ').map((word) => word.length));
+    pool.label(def.name, x + 46, y + 13.5, {
+      size: longest >= 11 ? 6.5 : longest >= 9 ? 7.5 : 8.5,
+      font: 'heading',
+      bold: true,
+      stroke: 2,
+      width: 50,
+      alpha: textAlpha,
+    });
+
+    // Bildfläche: eigenes Kartenbild, sonst Typ-Symbol.
+    const artX = x + 3.5;
+    const artY = y + 26;
+    const artW = WIDTH - 7;
+    const artH = 36;
+    fillGradient(back, artX, artY, artW, artH, style.dark, lerpColor(style.accent, PALETTE.black, 0.25), 1, 6);
+    const key = cardArtKey(def);
+    if (key && this.scene.textures.exists(key)) {
+      art.setTexture(key).setPosition(artX + artW / 2, artY + artH / 2).setDisplaySize(artW, artH).setVisible(true);
+    } else {
+      back.fillStyle(PALETTE.white, 0.1).fillCircle(artX + artW / 2, artY + artH / 2, artH * 0.6);
+      drawSymbol(back, style.symbol, artX + artW / 2, artY + artH / 2, 12, style.accent);
+    }
+    front.lineStyle(1, PALETTE.goldDark, 1).strokeRect(artX, artY, artW, artH);
+
+    // Werte (Leben links, Schaden rechts) als Plaketten am unteren Bildrand.
+    const stats = cardStats(def);
+    if (stats) {
+      const pillY = artY + artH - 8.5;
+      const prefix = stats.bonus ? '+' : '';
+      if (stats.hp > 0) {
+        drawStatPill(front, 'hp', artX + 2, pillY);
+        pool.label(`${prefix}${stats.hp}`, artX + 2 + 21, pillY + 0.5, { size: 8, bold: true, stroke: 1.5, alpha: textAlpha });
+      }
+      if (stats.damage > 0) {
+        const pillX = artX + artW - 32;
+        drawStatPill(front, 'damage', pillX, pillY);
+        pool.label(`${prefix}${stats.damage}`, pillX + 21, pillY + 0.5, { size: 8, bold: true, stroke: 1.5, alpha: textAlpha });
+      }
+    }
+
+    // Textfeld mit dem Regeltext.
+    const textY = y + 64;
+    const textH = 25;
+    front.fillStyle(0x3a3068, 0.95).fillRect(x + 3.5, textY, WIDTH - 7, textH);
+    front.lineStyle(1, PALETTE.bronze, 0.8).strokeRect(x + 3.5, textY, WIDTH - 7, textH);
+    pool.label(describeCard(def), 0, textY + textH / 2, { size: 7.5, width: WIDTH - 10, stroke: 1, alpha: textAlpha });
+
+    // Typ-Banner.
+    const bannerY = y + 91;
+    fillGradient(front, x + 2.5, bannerY, WIDTH - 5, 10.5, style.accent, style.dark, 1, 4);
+    pool.label(style.banner, 0, bannerY + 5.5, { size: 6.5, bold: true, stroke: 1, alpha: textAlpha });
+
+    // Kosten-Kristall (Raute, überlappt die Ecke).
+    const cx = x + 9;
+    const cy = y + 11;
+    const cr = 9.5;
+    const diamond = [
+      new Phaser.Geom.Point(cx, cy - cr),
+      new Phaser.Geom.Point(cx + cr * 0.85, cy),
+      new Phaser.Geom.Point(cx, cy + cr),
+      new Phaser.Geom.Point(cx - cr * 0.85, cy),
+    ];
+    front.fillStyle(PALETTE.goldDark, 1).fillPoints(diamond, true);
+    const inner = diamond.map((p) => new Phaser.Geom.Point(cx + (p.x - cx) * 0.78, cy + (p.y - cy) * 0.78));
+    front.fillStyle(look.affordable ? PALETTE.energy : PALETTE.stoneDark, 1).fillPoints(inner, true);
+    front.fillStyle(PALETTE.white, 0.4).fillPoints([inner[0]!, inner[1]!, new Phaser.Geom.Point(cx, cy)], true);
+    pool.label(`${def.cost}`, cx, cy + 0.5, { size: 12, font: 'heading', bold: true, color: TEXT.main, alpha: textAlpha });
+
+    // Nicht bezahlbar: Karte abdunkeln (deckend, damit keine Nachbarkarte durchscheint).
+    if (!look.affordable) front.fillStyle(PALETTE.black, 0.38).fillRoundedRect(x, y, WIDTH, HEIGHT, RADIUS);
+
+    pool.hideUnused();
   }
-
-  // Rahmen: Typfarbe außen, Gold/Bronze innen, Pergament-Grund.
-  g.fillStyle(lerpColor(style.accent, PALETTE.black, 0.45), alpha).fillRoundedRect(x, y, w, h, radius);
-  g.fillStyle(look.selected ? PALETTE.goldLight : style.accent, alpha).fillRoundedRect(x + s, y + s, w - 2 * s, h - 2 * s, radius - 1);
-  g.fillStyle(PALETTE.panelDark, alpha).fillRoundedRect(x + 2 * s, y + 2 * s, w - 4 * s, h - 4 * s, radius - 2);
-
-  // Kopfzeile mit Namen.
-  fillGradient(g, x + 2.5 * s, y + 2.5 * s, w - 5 * s, 12 * s, lerpColor(style.accent, PALETTE.white, 0.15), style.dark, alpha, 4);
-  label(def.name, x + w / 2 + 7 * s, y + 8.5 * s, {
-    size: scaled(def.name.length >= 12 ? 6 : def.name.length > 9 ? 7 : 8, s),
-    font: 'heading',
-    bold: true,
-    stroke: 2,
-    alpha: textAlpha,
-  });
-
-  // Bildfläche mit Symbol.
-  const artX = x + 3.5 * s;
-  const artY = y + 16 * s;
-  const artW = w - 7 * s;
-  const artH = 15 * s;
-  fillGradient(g, artX, artY, artW, artH, style.dark, lerpColor(style.accent, PALETTE.black, 0.25), alpha, 4);
-  g.fillStyle(PALETTE.white, 0.1 * alpha).fillCircle(artX + artW / 2, artY + artH / 2, artH * 0.55);
-  g.lineStyle(1, PALETTE.goldDark, alpha).strokeRect(artX, artY, artW, artH);
-  drawSymbol(g, style.symbol, artX + artW / 2, artY + artH / 2, 5.2 * s, style.accent);
-
-  // Textfeld.
-  const textY = y + 32.5 * s;
-  const textH = 17 * s;
-  g.fillStyle(0x3a3068, 0.9 * alpha).fillRect(x + 3.5 * s, textY, w - 7 * s, textH);
-  g.lineStyle(1, PALETTE.bronze, 0.7 * alpha).strokeRect(x + 3.5 * s, textY, w - 7 * s, textH);
-  label(describeCard(def), x + w / 2, textY + textH / 2, {
-    size: scaled(6.5, s),
-    width: w - 11 * s,
-    stroke: 1,
-    alpha: textAlpha,
-  });
-
-  // Typ-Banner.
-  const bannerY = y + h - 11 * s;
-  fillGradient(g, x + 2.5 * s, bannerY, w - 5 * s, 8.5 * s, style.accent, style.dark, alpha, 3);
-  label(style.banner, x + w / 2, bannerY + 4.5 * s, { size: scaled(6, s), bold: true, stroke: 1, alpha: textAlpha });
-
-  // Kosten-Kristall (Raute, überlappt die Ecke).
-  const cx = x + 8 * s;
-  const cy = y + 8.5 * s;
-  const cr = 7.5 * s;
-  const diamond = [
-    new Phaser.Geom.Point(cx, cy - cr),
-    new Phaser.Geom.Point(cx + cr * 0.85, cy),
-    new Phaser.Geom.Point(cx, cy + cr),
-    new Phaser.Geom.Point(cx - cr * 0.85, cy),
-  ];
-  g.fillStyle(PALETTE.goldDark, alpha).fillPoints(diamond, true);
-  const inner = diamond.map((p) => new Phaser.Geom.Point(cx + (p.x - cx) * 0.78, cy + (p.y - cy) * 0.78));
-  g.fillStyle(look.affordable ? PALETTE.energy : PALETTE.stoneDark, alpha).fillPoints(inner, true);
-  g.fillStyle(PALETTE.white, 0.4 * alpha).fillPoints([inner[0]!, inner[1]!, new Phaser.Geom.Point(cx, cy)], true);
-  label(`${def.cost}`, cx, cy + 0.5, { size: scaled(10, s), font: 'heading', bold: true, color: TEXT.main, alpha: textAlpha });
 }

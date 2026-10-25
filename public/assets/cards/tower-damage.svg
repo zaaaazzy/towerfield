@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="134" height="72" viewBox="0 0 134 72">
+  <defs><linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a4a8a"/><stop offset="1" stop-color="#0e1a38"/></linearGradient></defs>
+  <rect width="134" height="72" fill="url(#bg)"/>
+  <rect y="60" width="134" height="12" fill="#0a1226" opacity="0.7"/>
+  <rect x="26" y="18" width="36" height="46" fill="#9aa2b4" stroke="#2a3040" stroke-width="2.5"/>
+  <path d="M22 18 V8 h8 v6 h8 V8 h8 v6 h8 V8 h8 v10 Z" fill="#aab2c4" stroke="#2a3040" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M26 30 H62 M26 42 H62 M26 54 H62" stroke="#6a7286" stroke-width="1.5"/>
+  <path d="M38 64 V50 Q44 42 50 50 V64 Z" fill="#1e2438" stroke="#2a3040" stroke-width="2"/>
+  <path d="M62 16 L112 16" stroke="#ffd860" stroke-width="3" stroke-dasharray="3 4" stroke-linecap="round" opacity="0.8"/>
+  <path d="M94 6 L76 38 H90 L82 66 L116 28 H100 L108 6 Z" fill="#ffd23a" stroke="#8a5a00" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M96 12 L84 36 H96 L90 54 L108 32 H96 L102 12 Z" fill="#fff4b0" opacity="0.65"/>
+</svg>
