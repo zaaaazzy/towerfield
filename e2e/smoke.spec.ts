@@ -67,6 +67,57 @@ test('das Spiel startet, zeichnet in den Canvas und meldet keine Fehler', async 
   expect(errors).toEqual([]);
 });
 
+/** Was der Balance-Test von der Szene liest. */
+interface BalanceSceneView {
+  current: { totalMatches: number; startSeed: number; cards: unknown[] } | null;
+}
+
+const devUrl = `http://localhost:${Number(process.env.SMOKE_DEV_PORT ?? 5181)}`;
+
+test('Dev-Szene balance: zeigt den Bericht, simuliert neu und kehrt zurück, ohne Konsolenfehler', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
+  page.on('pageerror', (error) => errors.push(error.message));
+
+  await page.goto(`${devUrl}/?scene=balance`);
+  await expect(page.locator('#game canvas')).toBeVisible();
+  await page.waitForFunction(() => window.game?.scene.isActive('balance'));
+  const report = () =>
+    page.evaluate(() => (window.game!.scene.getScene('balance') as unknown as BalanceSceneView).current);
+  await expect.poll(report, { timeout: 20_000 }).not.toBeNull();
+  const first = (await report())!;
+  expect(first.totalMatches).toBe(200);
+  expect(first.cards.length).toBeGreaterThan(0);
+
+  const box = (await page.locator('#game canvas').boundingBox())!;
+  const click = (x: number, y: number) =>
+    page.mouse.click(box.x + (x / 360) * box.width, box.y + (y / 640) * box.height);
+
+  // „Neu simulieren“: anderer Seed-Bereich.
+  await click(90, 612);
+  await expect.poll(async () => (await report())?.startSeed, { timeout: 20_000 }).toBe(first.startSeed + 200);
+
+  // „Zurück“ startet die main-Szene.
+  await click(270, 612);
+  await page.waitForFunction(() => window.game?.scene.isActive('main'));
+
+  expect(errors).toEqual([]);
+});
+
+test('Produktions-Build: die Szene balance ist nicht registriert und startet nicht', async ({ page }) => {
+  await page.goto('/?scene=balance');
+  await page.waitForFunction(() => window.game?.scene.isActive('main') && window.game.loop.frame > 5);
+  const state = await page.evaluate(() => ({
+    keys: window.game!.scene.scenes.map((scene) => scene.scene.key),
+    balanceActive: window.game!.scene.isActive('balance'),
+  }));
+  expect(state.keys).toEqual(['main']);
+  // Phaser liefert für einen unbekannten Key `null`, nicht `false`.
+  expect(state.balanceActive).toBeFalsy();
+});
+
 /** Was der Drag-Test von der Szene liest. */
 interface DragSceneView {
   current: { players: { minions: { id: number; line: number; position: number }[] }[] };

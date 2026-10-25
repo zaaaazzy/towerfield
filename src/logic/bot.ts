@@ -45,13 +45,20 @@ function chooseLine(state: MatchState, playerIndex: PlayerIndex, cardId: string)
   }
 }
 
-/** Spielt die Karten des Bots für diese Runde und meldet ihn bereit. */
-export function botPlan(state: MatchState, playerIndex: PlayerIndex): MatchState {
+/**
+ * Spielt die Karten des Bots für diese Runde und meldet ihn bereit. `priority` ist die Kartenreihenfolge
+ * (Standard: `PRIORITY`); Karten, die darin fehlen, spielt der Bot nicht.
+ */
+export function botPlan(
+  state: MatchState,
+  playerIndex: PlayerIndex,
+  priority: readonly string[] = PRIORITY,
+): MatchState {
   let current = state;
   for (;;) {
     const player = current.players[playerIndex];
     let played = false;
-    for (const id of PRIORITY) {
+    for (const id of priority) {
       const handIndex = player.hand.indexOf(id);
       if (handIndex < 0) continue;
       const def = getCardDef(id);

@@ -38,6 +38,17 @@ beschreibt [`docs/anwendung-minion-tempo.md`](docs/anwendung-minion-tempo.md).
 | `npm run test:smoke` | Baut und prüft im Browser (Playwright), dass der Canvas zeichnet und keine Konsolenfehler auftreten |
 | `npm run review` | Baut und liefert den Stand aus (Review-Container von AIdeation, Port aus `REVIEW_FRONTEND_PORT`) |
 
+### Dev-Szene Balancing
+
+Mit `npm run dev` zeigt http://localhost:5180/?scene=balance eine Tabelle aus 200 simulierten Bot-gegen-Bot-Matches
+(Siegquote, Unentschieden und Niederlage pro Karte, Abweichung von der Basisquote, Rundenzahl, Ende durch Tower oder
+Rundengrenze). „Neu simulieren“ nimmt den nächsten Seed-Bereich, „Sieg“ in der Kopfzeile kehrt die Sortierung um,
+„Zurück“ öffnet das Spiel. Die Szene ist nur im Dev-Server registriert, nicht im Produktions-Build.
+
+Aussagekraft: Es sind Bot-Statistiken, kein Spielerverhalten. Beide Seiten nutzen denselben Bot, nur mit je Match
+zufällig gewürfelter Kartenreihenfolge (`botPlan(state, player, priority)`); Karten kommen aus demselben Deck, die
+Werte sind daher korreliert. Die Logik steht in `src/logic/balance-sim.ts`.
+
 Der Smoke-Test braucht Chromium für Playwright: `npx playwright install chromium` (unter Linux einmalig zusätzlich
 `npx playwright install-deps chromium`).
 
@@ -49,9 +60,10 @@ src/
     cards.ts   Kartendefinitionen, Deck-Reihenfolge per Seed
     match.ts   Zustand, Runden, Hand, Energie, Karten ausspielen, Siegbedingung
     combat.ts  Minion-Bewegung und Tower-Schaden (feste Ticks aus delta)
-    bot.ts     deterministischer Gegner
+    bot.ts     deterministischer Gegner (Kartenreihenfolge optional einstellbar)
+    balance-sim.ts  simulierte Bot-Matches und Kennzahlen (Dev-Szene)
     game-state.ts  nextRandom (Seed-Zufall); der alte „Sterne“-Code darin ist ungenutzt
-  scenes/      Phaser-Szenen: Eingabe lesen, Logik aufrufen, Ergebnis zeichnen
+  scenes/      Phaser-Szenen: Eingabe lesen, Logik aufrufen, Ergebnis zeichnen (balance-scene.ts nur im Dev-Server)
   main.ts      Phaser.Game mit Grösse, Skalierung und Szenen
 e2e/           Playwright-Smoke-Test
 ```
