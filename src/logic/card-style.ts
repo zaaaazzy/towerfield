@@ -29,6 +29,38 @@ export function cardTypeStyle(type: CardType): CardTypeStyle {
   return CARD_TYPE_STYLES[type];
 }
 
+/** Karten mit eigenem Bild unter `public/assets/cards/<id>.svg`; alle anderen zeigen das Typ-Symbol als Rückfall. */
+export const CARD_ART_IDS: readonly string[] = [
+  'summon-minion',
+  'summon-brute',
+  'summon-archer',
+  'summon-healer',
+  'line-upgrade',
+  'tower-hp',
+  'tower-damage',
+  'minion-upgrade-line',
+  'minion-upgrade-all',
+];
+
+/** Texturschlüssel des Kartenbilds oder `null`, wenn die Karte nur das Typ-Symbol zeigt. */
+export function cardArtKey(def: CardDef): string | null {
+  return CARD_ART_IDS.includes(def.id) ? `card-art-${def.id}` : null;
+}
+
+export interface CardStats {
+  hp: number;
+  damage: number;
+  /** Upgrades zeigen ihre Werte mit „+“ davor. */
+  bonus: boolean;
+}
+
+/** Leben und Schaden für die Wert-Plaketten auf dem Kartenbild; `null`, wenn die Karte keine Werte hat. */
+export function cardStats(def: CardDef): CardStats | null {
+  if (def.type === 'line-upgrade') return null;
+  if (def.hp <= 0 && def.damage <= 0) return null;
+  return { hp: def.hp, damage: def.damage, bonus: def.type !== 'summon' };
+}
+
 /** Kurzer Regeltext für das Textfeld der Karte, nur aus den Werten der Definition abgeleitet. */
 export function describeCard(def: CardDef): string {
   switch (def.type) {
