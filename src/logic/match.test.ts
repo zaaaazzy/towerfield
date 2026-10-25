@@ -70,10 +70,13 @@ describe('Spielstart', () => {
     }
   });
 
-  it('gibt beiden Spielern exakt 7 identische Karten und gleiche Energie', () => {
+  it('gibt beiden Spielern exakt START_HAND identische Karten und gleiche Energie', () => {
     const state = createMatch(42);
     expect(state.players[0].hand).toHaveLength(START_HAND);
-    expect(START_HAND).toBe(7);
+    expect(START_HAND).toBe(5);
+    expect(DRAW_PER_ROUND).toBe(3);
+    expect(state.deck).toHaveLength(START_HAND + DRAW_PER_ROUND * (MAX_ROUNDS - 1));
+    expect(state.deck).toHaveLength(26);
     expect(state.players[1].hand).toEqual(state.players[0].hand);
     expect(state.players[0].energy).toBe(BASE_ENERGY);
     expect(state.players[1].energy).toBe(BASE_ENERGY);
@@ -95,7 +98,7 @@ describe('Spielstart', () => {
 });
 
 describe('Runden und Ziehen', () => {
-  it('zieht zu Beginn jeder weiteren Runde 5 identische Karten pro Spieler und erhöht die Energie gleich', () => {
+  it('zieht zu Beginn jeder weiteren Runde DRAW_PER_ROUND identische Karten pro Spieler und erhöht die Energie gleich', () => {
     let state = createMatch(3);
     // Alle Karten ausspielen, damit das Handlimit nicht mitspielt: Hand direkt leeren.
     state = structuredClone(state);
@@ -108,20 +111,32 @@ describe('Runden und Ziehen', () => {
     expect(state.phase).toBe('planning');
     expect(state.players[0].hand).toEqual(expected);
     expect(state.players[1].hand).toEqual(expected);
-    expect(state.players[0].hand).toHaveLength(5);
+    expect(state.players[0].hand).toHaveLength(DRAW_PER_ROUND);
     expect(state.players[0].energy).toBe(energyForRound(2));
     expect(state.players[1].energy).toBe(energyForRound(2));
     expect(energyForRound(2)).toBeGreaterThan(energyForRound(1));
   });
 
-  it('lässt überzählige Karten über dem Handlimit verfallen', () => {
+  it('lässt in Runde 2 noch keine Karte über dem Handlimit verfallen', () => {
     let state = createMatch(3);
-    expect(state.players[0].hand).toHaveLength(7);
+    expect(state.players[0].hand).toHaveLength(START_HAND);
     state = setReady(setReady(state, 0), 1);
     state = advance(state, COMBAT_TICKS * TICK_MS);
+    expect(state.round).toBe(2);
+    expect(state.players[0].hand).toHaveLength(8);
+    expect(state.players[1].hand).toHaveLength(8);
+    expect(state.drawn).toBe(START_HAND + DRAW_PER_ROUND);
+  });
+
+  it('kürzt die Hand in Runde 3 auf das Handlimit', () => {
+    let state = createMatch(3);
+    for (let i = 0; i < 2; i += 1) {
+      state = advance(setReady(setReady(state, 0), 1), COMBAT_TICKS * TICK_MS);
+    }
+    expect(state.round).toBe(3);
+    expect(state.drawn).toBe(START_HAND + 2 * DRAW_PER_ROUND);
     expect(state.players[0].hand).toHaveLength(HAND_LIMIT);
     expect(state.players[1].hand).toHaveLength(HAND_LIMIT);
-    expect(state.drawn).toBe(START_HAND + DRAW_PER_ROUND);
   });
 
   it('begrenzt die Energie auf 8', () => {
@@ -162,32 +177,33 @@ describe('Handlimit', () => {
     return copy;
   }
 
-  it('lässt in Runde 1 mit 7 Startkarten nichts verfallen', () => {
+  it('lässt in Runde 1 mit den Startkarten nichts verfallen', () => {
     const state = createMatch(3);
     expect(START_HAND).toBeLessThan(HAND_LIMIT);
     expect(state.players[0].hand).toEqual(state.deck.slice(0, START_HAND));
     expect(state.players[1].hand).toEqual(state.deck.slice(0, START_HAND));
   });
 
-  it('gibt beiden Spielern ab Runde 2 genau HAND_LIMIT Karten', () => {
-    const state = nextRound(createMatch(3));
-    expect(state.round).toBe(2);
-    expect(state.players[0].hand).toHaveLength(HAND_LIMIT);
-    expect(state.players[1].hand).toHaveLength(HAND_LIMIT);
-  });
-
-  it('behält die ersten 10 Karten in Ankunftsreihenfolge und lässt die letzten 2 verfallen', () => {
+  it('gibt beiden Spielern in Runde 2 alle Karten ohne Verfall', () => {
     const initial = createMatch(3);
     const state = nextRound(initial);
+    expect(state.round).toBe(2);
     const arrived = initial.deck.slice(0, START_HAND + DRAW_PER_ROUND);
-    expect(state.players[0].hand).toEqual(arrived.slice(0, HAND_LIMIT));
-    expect(state.players[1].hand).toEqual(arrived.slice(0, HAND_LIMIT));
-    const expired = arrived.slice(HAND_LIMIT);
-    expect(expired).toHaveLength(START_HAND + DRAW_PER_ROUND - HAND_LIMIT);
-    expect(state.players[0].hand.slice(-3)).toEqual(arrived.slice(START_HAND, HAND_LIMIT));
+    expect(state.players[0].hand).toEqual(arrived);
+    expect(state.players[1].hand).toEqual(arrived);
   });
 
-  it('lässt bei genau HAND_LIMIT nach dem Ziehen (5 + 5) nichts verfallen', () => {
+  it('behält in Runde 3 die ersten 10 Karten in Ankunftsreihenfolge und lässt die letzte verfallen', () => {
+    const initial = createMatch(3);
+    const state = nextRound(nextRound(initial));
+    expect(state.round).toBe(3);
+    const arrived = initial.deck.slice(0, START_HAND + 2 * DRAW_PER_ROUND);
+    expect(state.players[0].hand).toEqual(arrived.slice(0, HAND_LIMIT));
+    expect(state.players[1].hand).toEqual(arrived.slice(0, HAND_LIMIT));
+    expect(arrived.slice(HAND_LIMIT)).toHaveLength(START_HAND + 2 * DRAW_PER_ROUND - HAND_LIMIT);
+  });
+
+  it('lässt bei genau HAND_LIMIT nach dem Ziehen (7 + 3) nichts verfallen', () => {
     const initial = withPlayerHand(withPlayerHand(createMatch(3), 0, HAND_LIMIT - DRAW_PER_ROUND), 1, HAND_LIMIT - DRAW_PER_ROUND);
     const state = nextRound(initial);
     const drawn = initial.deck.slice(initial.drawn, initial.drawn + DRAW_PER_ROUND);
@@ -195,7 +211,7 @@ describe('Handlimit', () => {
     expect(state.players[0].hand).toHaveLength(HAND_LIMIT);
   });
 
-  it('nimmt unter dem Limit alle 5 neuen Karten auf die Hand', () => {
+  it('nimmt unter dem Limit alle neuen Karten auf die Hand', () => {
     const initial = withPlayerHand(createMatch(3), 0, 2);
     const state = nextRound(initial);
     const drawn = initial.deck.slice(initial.drawn, initial.drawn + DRAW_PER_ROUND);
@@ -218,7 +234,7 @@ describe('Handlimit', () => {
   });
 
   it('wendet das Limit pro Spieler an: wer weniger Karten hat, wird nicht gekappt', () => {
-    const initial = withPlayerHand(createMatch(3), 0, 3);
+    const initial = withPlayerHand(withPlayerHand(createMatch(3), 0, 3), 1, HAND_LIMIT);
     const state = nextRound(initial);
     expect(state.players[0].hand).toHaveLength(3 + DRAW_PER_ROUND);
     expect(state.players[1].hand).toHaveLength(HAND_LIMIT);

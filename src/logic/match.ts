@@ -17,8 +17,8 @@ import {
 import { firstFreeSlot, isSlotFree, isValidSlot, slotPosition } from './placement';
 
 export const LINE_COUNT = 3;
-export const START_HAND = 7;
-export const DRAW_PER_ROUND = 5;
+export const START_HAND = 5;
+export const DRAW_PER_ROUND = 3;
 /** Handlimit (bestätigt, siehe docs/designkonzept.md): Karten über dem Limit verfallen am Ende der Hand. */
 export const HAND_LIMIT = 10;
 export const MAX_ROUNDS = 8;

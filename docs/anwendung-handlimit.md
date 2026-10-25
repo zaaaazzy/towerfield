@@ -17,8 +17,8 @@ und kürzt die Hand danach auf `HAND_LIMIT`:
 ```mermaid
 flowchart TD
     A[Runde n beginnt: startRound] --> B{Runde 1?}
-    B -- ja --> C[7 Karten ziehen]
-    B -- nein --> D[5 Karten ziehen]
+    B -- ja --> C[5 Karten ziehen]
+    B -- nein --> D[3 Karten ziehen]
     C --> E[state.drawn erhöhen]
     D --> E
     E --> F[Karten ans Ende der Hand]
@@ -27,7 +27,9 @@ flowchart TD
     G -- nein --> I[Hand unverändert]
 ```
 
-Mit den Startwerten (7 Startkarten, 5 Karten pro Runde) greift das Limit schon in Runde 2: 7 + 5 = 12, davon bleiben 10.
+Mit den Werten `START_HAND = 5` und `DRAW_PER_ROUND = 3` (Soll-Werte des Designkonzepts) hat die Hand in Runde 1 5 und in
+Runde 2 8 Karten; es verfällt nichts. Erst in Runde 3 greift das Limit: 8 + 3 = 11, davon bleiben 10. Das Deck hat
+`START_HAND + DRAW_PER_ROUND * (MAX_ROUNDS - 1)` = 26 Karten.
 
 ## Ergebnis des Auftrags
 
@@ -50,11 +52,11 @@ Zufallswerte noch Frame-Zählung.
 
 | Test | Prüft |
 | --- | --- |
-| Runde 1 | 7 Startkarten liegen unter dem Limit, nichts verfällt |
-| Ab Runde 2 | Beide Spieler halten genau `HAND_LIMIT` Karten |
-| Reihenfolge | Die ersten 10 in Ankunftsreihenfolge bleiben (7 Startkarten + die ersten 3 neuen), die letzten 2 verfallen |
-| Genau am Limit | Bei 5 Handkarten vor dem Ziehen (5 + 5 = 10) verfällt nichts |
-| Unter dem Limit | Bei weniger als 5 Handkarten kommen alle 5 neuen Karten auf die Hand |
+| Runde 1 | 5 Startkarten liegen unter dem Limit, nichts verfällt |
+| Runde 2 | Beide Spieler halten 8 Karten, keine verfällt |
+| Runde 3 | Die ersten 10 in Ankunftsreihenfolge bleiben, die letzte (11.) verfällt |
+| Genau am Limit | Bei 7 Handkarten vor dem Ziehen (7 + 3 = 10) verfällt nichts |
+| Unter dem Limit | Bei weniger als 7 Handkarten kommen alle neuen Karten auf die Hand |
 | `drawn` | `state.drawn` steigt auch bei verfallenen Karten um `DRAW_PER_ROUND`; die nächste Runde zieht die nächsten Deckkarten |
 | Pro Spieler | Ein Spieler mit weniger Handkarten wird nicht auf 10 gekappt |
 | Alle Runden | Bis `MAX_ROUNDS` überschreitet keine Hand `HAND_LIMIT` |
@@ -74,9 +76,8 @@ war freigegeben, ohne blockierende Befunde.
 - **Verfallene Karten indirekt geprüft:** Der Reihenfolge-Test prüft die Länge der verfallenen Karten und die
   verbleibende Hand per `toEqual`, nicht ausdrücklich „nicht auf der Hand“.
 - **Formatierung:** Im Test „genau `HAND_LIMIT`“ ist die Zeile mit `withPlayerHand(withPlayerHand(...))` sehr lang.
-- **Soll-Werte im Designkonzept:** Die Tabelle „Soll-Änderungen an Konstanten“ (Abschnitt 3) sieht `START_HAND` 5 und
-  `DRAW_PER_ROUND` 3 vor; dann greift das Limit erst später. Die Tests verwenden die Konstanten, nicht feste Zahlen für
-  die Hand, bleiben aber in einigen Erwartungen (z. B. „letzte 2 verfallen“ im Testtitel) an die Startwerte 7 und 5
-  gebunden. Bei einer Änderung der Konstanten (Folgeauftrag 4) sind diese Tests zu prüfen.
+- **Soll-Werte umgesetzt:** `START_HAND` 5 und `DRAW_PER_ROUND` 3 entsprechen der Tabelle „Soll-Änderungen an
+  Konstanten“ (Abschnitt 3 des Designkonzepts). Das Limit greift dadurch erst in Runde 3. Bei einer weiteren Änderung
+  der Konstanten sind die Tests für Runde 2 und 3 zu prüfen.
 - **Folgeauftrag, falls gewünscht:** Eine Ablage für verfallene Karten gehört nicht zu diesem Auftrag. Sie müsste als
   eigener Auftrag mit Zustandsfeld, Tests und Anzeige umgesetzt werden.
