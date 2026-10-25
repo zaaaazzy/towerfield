@@ -3,7 +3,7 @@
  * Die Zahlen beschreiben den Bot mit zufällig variierter Kartenreihenfolge, nicht menschliches Spielverhalten.
  * Zufall nur über `nextRandom` (Seed), daher ist jede Simulation reproduzierbar.
  */
-import { botPlan } from './bot';
+import { botPlan, ECONOMY_ACTIONS } from './bot';
 import { CARD_DEFS } from './cards';
 import { TICK_MS } from './combat';
 import { nextRandom } from './game-state';
@@ -74,9 +74,9 @@ export interface SimulationOptions {
 
 const ratio = (part: number, whole: number): number => (whole === 0 ? 0 : part / whole);
 
-/** Karten-IDs in zufälliger Reihenfolge (Fisher-Yates über `nextRandom`). */
+/** Karten-IDs und Wirtschaftsaktionen des Bots in zufälliger Reihenfolge (Fisher-Yates über `nextRandom`). */
 export function shuffledPriority(seed: number): string[] {
-  const ids = CARD_DEFS.map((def) => def.id);
+  const ids: string[] = [...CARD_DEFS.map((def) => def.id), ...ECONOMY_ACTIONS];
   let state = seed >>> 0;
   for (let index = ids.length - 1; index > 0; index -= 1) {
     const random = nextRandom(state);

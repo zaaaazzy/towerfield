@@ -3,30 +3,47 @@
  * und entscheidet ohne Zufall.
  */
 import { getCardDef } from './cards';
-import { laneUnlockLevel, unlockedLanes } from './lanes';
+import { laneUnlockLevel } from './lanes';
 import type { Minion } from './combat';
 import {
+  buyLane,
   DISCARD_ENERGY,
   discardCard,
+  DRAW_COST,
+  drawCard,
+  HAND_LIMIT,
+  LANE_COST,
   MAX_ENERGY,
+  MAX_ROUNDS,
   type MatchState,
+  openLanes,
   type PlayerIndex,
   playCard,
   setReady,
   specializeTarget,
   SPECIALIZE_MIN_LEVEL,
+  UPGRADE_COST,
+  upgradeField,
 } from './match';
 import { firstFreeSlot } from './placement';
 
-/** Reihenfolge, in der der Bot Karten bevorzugt. */
+/**
+ * Wirtschaftsaktionen, die neben den Karten-IDs in einer Prioritätsliste stehen dürfen: Feld-Upgrade, Lane kaufen
+ * (die niedrigste kaufbare) und eine Karte ziehen. Fehlen sie in der Liste, nutzt der Bot sie nicht.
+ */
+export const ECONOMY_ACTIONS = ['upgrade', 'buy-lane', 'draw'] as const;
+export type EconomyAction = (typeof ECONOMY_ACTIONS)[number];
+
+/** Reihenfolge, in der der Bot Karten und Wirtschaftsaktionen bevorzugt. */
 const PRIORITY = [
+  'upgrade',
   'summon-minion',
   'summon-archer',
   'summon-healer',
   'summon-destroyer',
   'summon-scout',
   'tower-hp',
-  'line-upgrade',
+  'buy-lane',
   'minion-upgrade-line',
   'summon-brute',
   'summon-mage',
@@ -40,6 +57,7 @@ const PRIORITY = [
   'tower-shield',
   'minion-upgrade-elite',
   'minion-upgrade-all',
+  'draw',
 ];
 
 /** Ziel-Minion einer Karte: der lebende eigene mit dem meisten `maxHp` (bei Gleichstand die kleinste Id), oder `undefined`. */
@@ -57,7 +75,7 @@ function chooseMinion(state: MatchState, playerIndex: PlayerIndex): number | und
 function chooseLine(state: MatchState, playerIndex: PlayerIndex, cardId: string): number | undefined {
   const player = state.players[playerIndex];
   const def = getCardDef(cardId);
-  const lines = unlockedLanes(player.level).sort((a, b) => a - b);
+  const lines = openLanes(player);
   const minions = (line: number) => player.minions.filter((m) => m.line === line).length;
   const pick = (candidates: number[], score: (line: number) => number): number | undefined =>
     candidates.reduce<number | undefined>(
@@ -94,14 +112,43 @@ function chooseLine(state: MatchState, playerIndex: PlayerIndex, cardId: string)
 
 /**
  * Ein einzelner Zug des Bots: gespielte Karte, Zielline und Ziel-Minion (`undefined` ohne Ziel) und der Zustand danach.
- * Mit `discard` hat der Bot die Karte abgeworfen statt gespielt (`line` ist dann `undefined`).
+ * Mit `discard` hat der Bot die Karte abgeworfen statt gespielt (`line` ist dann `undefined`). Mit `economy` war es
+ * eine Wirtschaftsaktion: `cardId` ist dann leer, bei `buy-lane` steht die gekaufte Lane in `line`.
  */
 export interface BotMove {
   cardId: string;
   line: number | undefined;
   minionId?: number;
   discard?: true;
+  economy?: EconomyAction;
   state: MatchState;
+}
+
+/**
+ * Führt die Wirtschaftsaktion `id` aus, falls sie in `priority` vorgesehen und jetzt sinnvoll und legal ist; sonst
+ * `null`. Sinnvoll heißt: Upgrade und Lane-Kauf nur, solange ihr Preis bis zum Spielende wieder hereinkommt; Ziehen nur,
+ * wenn nach dem Ziehen noch Energie für eine Karte bleibt.
+ */
+function tryEconomy(state: MatchState, playerIndex: PlayerIndex, id: string): BotMove | null {
+  const player = state.players[playerIndex];
+  const roundsLeft = MAX_ROUNDS - state.round;
+  const done = (action: EconomyAction, result: ReturnType<typeof upgradeField>, line?: number): BotMove | null =>
+    result.ok ? { cardId: '', line, economy: action, state: result.state } : null;
+  switch (id) {
+    case 'upgrade':
+      return roundsLeft >= UPGRADE_COST ? done('upgrade', upgradeField(state, playerIndex)) : null;
+    case 'buy-lane': {
+      if (roundsLeft < LANE_COST) return null;
+      const lane = player.lines.findIndex((l, index) => !l.bought && player.level >= laneUnlockLevel(index));
+      return lane < 0 ? null : done('buy-lane', buyLane(state, playerIndex, lane), lane);
+    }
+    case 'draw':
+      return player.energy > DRAW_COST && player.hand.length < HAND_LIMIT
+        ? done('draw', drawCard(state, playerIndex))
+        : null;
+    default:
+      return null;
+  }
 }
 
 /** Spielt die Handkarte `id`, falls der Bot sie jetzt legal spielen kann; sonst `null`. */
@@ -155,7 +202,7 @@ export function botStep(
   priority: readonly string[] = PRIORITY,
 ): BotMove | null {
   for (const id of priority) {
-    const move = tryPlay(state, playerIndex, id);
+    const move = tryEconomy(state, playerIndex, id) ?? tryPlay(state, playerIndex, id);
     if (move) return move;
   }
   return discardStep(state, playerIndex, priority);

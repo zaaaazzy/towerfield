@@ -108,8 +108,12 @@ function eventFor(before: MatchState, action: RecordedAction): ReplayEvent {
       return { ...base, action: 'undo', cardId: placed(action.minionId), line: null };
     case 'discard':
       return { ...base, action: 'discard', cardId: action.cardId, line: null };
+    case 'buy-lane':
+      return { ...base, action: 'buy-lane', cardId: '', line: action.line };
+    case 'upgrade':
+    case 'draw':
     case 'ready':
-      return { ...base, action: 'ready', cardId: '', line: null };
+      return { ...base, action: action.type, cardId: '', line: null };
   }
 }
 
@@ -141,6 +145,7 @@ function planStep(replay: ReplayState): ReplayState {
     cardId: move.cardId,
     line: move.line ?? null,
     ...(move.discard ? { action: 'discard' as const } : {}),
+    ...(move.economy ? { action: move.economy } : {}),
   };
   return { ...replay, match: move.state, events: [...replay.events, event], turn: next };
 }
@@ -183,6 +188,9 @@ export function playerName(player: PlayerIndex): string {
 export function describeEvent(event: ReplayEvent): string {
   const prefix = `Runde ${event.round} · ${playerName(event.player)}`;
   if (event.action === 'ready') return `${prefix} ist bereit`;
+  if (event.action === 'upgrade') return `${prefix} baut das Feld aus`;
+  if (event.action === 'draw') return `${prefix} zieht eine Karte`;
+  if (event.action === 'buy-lane') return `${prefix} kauft ${event.line === null ? 'eine Lane' : laneName(event.line)}`;
   // Ein Überlebender früherer Runden hat keine Karte mehr in `placements`: dann steht nur „Einheit“.
   const name = event.cardId === '' ? 'Einheit' : getCardDef(event.cardId).name;
   const target = event.line === null ? '' : ` auf ${laneName(event.line)}`;
@@ -214,7 +222,9 @@ const ABORT_TEXT: Readonly<Record<ReplayAbortReason, string>> = {
   'no-such-minion': 'Den Minion gibt es nicht.',
   'line-full': 'Auf der Lane ist kein Turm-Slot frei.',
   'max-level': 'Das Feld hat die Höchststufe.',
-  'level-too-low': 'Das Lane-Level ist zu niedrig für eine Spezialisierung.',
+  'level-too-low': 'Die Feldstufe ist zu niedrig.',
+  'lane-owned': 'Die Lane ist schon gekauft.',
+  'hand-full': 'Die Hand ist voll.',
   'already-specialized': 'Der Tower ist schon spezialisiert.',
   'invalid-target': 'Der Ziel-Minion ist ungültig.',
 };
