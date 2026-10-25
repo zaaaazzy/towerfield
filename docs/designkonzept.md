@@ -40,8 +40,9 @@ flowchart LR
 
 - **Deck:** ein per Seed gemischtes Deck, für beide Spieler gleich (`buildDeck`); gleiche Reihenfolge, daher fair und
   testbar. Länge = `START_HAND + DRAW_PER_ROUND × (MAX_ROUNDS − 1)`.
-- **Hand:** Reihenfolge = Ankunft. Beim Ziehen über `HAND_LIMIT` hinaus wandern die überzähligen Karten in die Ablage.
-- **Ablage:** gespielte und verfallene Karten. Ist nur Anzeige (kein Nachmischen); Datenfeld folgt in Folgeauftrag 4.
+- **Hand:** Reihenfolge = Ankunft. Beim Ziehen über `HAND_LIMIT` hinaus verfallen die zuletzt gezogenen Karten (am Ende der Hand abgeschnitten, es gibt keine Ablage dafür). Verfallene
+  Karten zählen als gezogen.
+- **Ablage:** gespielte Karten (verfallene kommen nicht hinein; eine Ablage für sie wäre ein Folgeauftrag). Ist nur Anzeige (kein Nachmischen); Datenfeld folgt in Folgeauftrag 4.
   Eine per `undoSummon` zurückgenommene Karte kommt zurück an die Hand (nicht in die Ablage).
 - **Energie:** pro Runde neu gesetzt (`3 + (Runde − 1)`, max. `MAX_ENERGY`), nicht übertragbar.
 - **Ausspielen:** Phase Planung, Spieler nicht bereit, genug Energie, gültiges Ziel. Sonst Fehler (`PlayError`) und
@@ -68,7 +69,7 @@ zurücknehmbar.
 |---|---|---|---|---|
 | `START_HAND` | `match.ts` | 7 | 5 | Mobile Hand passt auf eine Zeile (5 Karten × 64 px = 320 px); weniger Auswahl, schnellere Entscheidungen |
 | `DRAW_PER_ROUND` | `match.ts` | 5 | 3 | Mit 5 + 7 × 3 = 26 Karten im Deck reicht es; Hand wächst langsam, Handlimit wirkt nicht schon in Runde 2 (7 + 5 = 12 > 10) |
-| `HAND_LIMIT` | `match.ts` | 10 | 10 (bestätigt) | Bleibt; überzählige Karten gehen in die Ablage |
+| `HAND_LIMIT` | `match.ts` | 10 | 10 (bestätigt) | Bleibt; überzählige Karten verfallen (keine Ablage) |
 | `MAX_ENERGY` | `match.ts` | 10 | 8 | Energie 3…8 ab Runde 6 hält die Ausgaben begrenzt (günstigste Karte 1, teuerste 3) |
 | `BASE_ENERGY`, `ENERGY_PER_ROUND` | `match.ts` | 3 / 1 | unverändert | Reicht für 1–2 Karten in Runde 1, wächst gleichmäßig |
 | `MAX_ROUNDS`, `COMBAT_TICKS` | `match.ts` | 8 / 400 | unverändert | Spieldauer ca. 8 × (Planung + 20 s) |
