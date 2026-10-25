@@ -2,9 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { buildDeck, CARD_DEFS, getCardDef } from './cards';
 
 describe('Karten', () => {
-  it('deckt alle vier Kartentypen ab', () => {
+  it('deckt alle Kartentypen ab', () => {
     const types = new Set(CARD_DEFS.map((card) => card.type));
-    expect([...types].sort()).toEqual(['line-upgrade', 'minion-upgrade', 'summon', 'tower-upgrade']);
+    expect([...types].sort()).toEqual(['line-upgrade', 'minion-upgrade', 'summon', 'tower-specialize', 'tower-upgrade']);
+  });
+
+  it('definiert Blitz- und Schild-Turm als Spezialisierung mit Ziel Line und passendem Pfad', () => {
+    expect(getCardDef('tower-lightning')).toMatchObject({ type: 'tower-specialize', target: 'line', path: 'lightning' });
+    expect(getCardDef('tower-shield')).toMatchObject({ type: 'tower-specialize', target: 'line', path: 'shield' });
+  });
+
+  it('legt beide Spezialisierungen einmal pro Durchgang ins Deck, deterministisch pro Seed', () => {
+    const deck = buildDeck(9, 18);
+    expect(deck.filter((id) => id === 'tower-lightning')).toHaveLength(1);
+    expect(deck.filter((id) => id === 'tower-shield')).toHaveLength(1);
+    expect(buildDeck(9, 18)).toEqual(deck);
   });
 
   it('hat eindeutige IDs und positive Kosten', () => {

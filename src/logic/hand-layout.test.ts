@@ -38,6 +38,16 @@ describe('sortHand', () => {
     expect(sortHand([])).toEqual([]);
     expect(sortHand(['summon', 'line-upgrade', 'tower-upgrade'])).toEqual([0, 1, 2]);
   });
+
+  it('sortiert Spezialisierungen hinter die Tower-Upgrades', () => {
+    const types: CardType[] = ['tower-specialize', 'tower-upgrade', 'summon', 'tower-specialize'];
+    expect(sortHand(types).map((index) => types[index])).toEqual([
+      'summon',
+      'tower-upgrade',
+      'tower-specialize',
+      'tower-specialize',
+    ]);
+  });
 });
 
 describe('fanLayout', () => {

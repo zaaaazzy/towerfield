@@ -207,56 +207,59 @@ describe('encodeMatch / decodeMatch', () => {
   it('liefert für ungültige Daten null und wirft nie', () => {
     const { record } = playScriptedMatch(5);
     const valid = encodeMatch(record);
+    const v = `v${RECORD_VERSION}`;
     const bad = [
       '',
-      'v2.',
-      'v2..r10',
+      `${v}.`,
+      `${v}..r10`,
       'v0.r10',
       'v1.r10',
-      'v3.r10',
-      '2.r10',
-      'V2.r10',
-      'v2.x10',
-      'v2.r90',
-      'v2.r00',
-      'v2.r12',
-      'v2.r10-1',
-      'v2.r10-',
-      'v2.p10',
-      'v2.p10-',
-      'v2.p10-99',
-      'v2.p10-01',
-      'v2.p10--1',
-      'v2.p10-0-5',
-      'v2.p10-0-1-2',
-      'v2.p10-1.5',
-      'v2.m10-1-1',
-      'v2.m10-1-5-0',
-      'v2.m10-1-1-0-0',
-      'v2.u10',
-      'v2.u10-1-1',
-      'v2.p10-9999999',
-      'v2.p10-0%20',
+      'v2.r10',
+      'v4.r10',
+      '3.r10',
+      `V${RECORD_VERSION}.r10`,
+      `${v}.x10`,
+      `${v}.r90`,
+      `${v}.r00`,
+      `${v}.r12`,
+      `${v}.r10-1`,
+      `${v}.r10-`,
+      `${v}.p10`,
+      `${v}.p10-`,
+      `${v}.p10-99`,
+      `${v}.p10-01`,
+      `${v}.p10--1`,
+      `${v}.p10-0-5`,
+      `${v}.p10-0-1-2`,
+      `${v}.p10-1.5`,
+      `${v}.m10-1-1`,
+      `${v}.m10-1-5-0`,
+      `${v}.m10-1-1-0-0`,
+      `${v}.u10`,
+      `${v}.u10-1-1`,
+      `${v}.p10-9999999`,
+      `${v}.p10-0%20`,
       '<script>',
-      'v2.r10 ',
+      `${v}.r10 `,
       `${valid}.`,
       `${valid}.zz`,
-      'v2'.padEnd(MAX_MOVES_LENGTH + 1, '.'),
-      `v2${'.r10'.repeat(MAX_MOVES_LENGTH)}`,
+      v.padEnd(MAX_MOVES_LENGTH + 1, '.'),
+      `${v}${'.r10'.repeat(MAX_MOVES_LENGTH)}`,
     ];
     for (const text of bad) expect(decodeMatch(1, text), text).toBeNull();
     expect(decodeMatch(1, undefined as unknown as string)).toBeNull();
     expect(decodeMatch(1, null as unknown as string)).toBeNull();
   });
 
-  it('lehnt Links aus der Version 1 (vertikales Layout) ab, nimmt aber alle fünf Lane-Indizes an', () => {
-    expect(RECORD_VERSION).toBe(2);
+  it('lehnt Links aus den Versionen 1 und 2 ab, nimmt aber alle fünf Lane-Indizes an', () => {
+    expect(RECORD_VERSION).toBe(3);
     expect(decodeMatch(1, 'v1.p10-0-0.r10')).toBeNull();
+    expect(decodeMatch(1, 'v2.p10-0-0.r10')).toBeNull();
     for (const lane of [0, 1, 2, 3, 4]) {
-      expect(decodeMatch(1, `v2.p10-0-${lane}`)?.actions).toEqual([
+      expect(decodeMatch(1, `v3.p10-0-${lane}`)?.actions).toEqual([
         { type: 'play', round: 1, player: 0, cardId: 'summon-minion', line: lane },
       ]);
-      expect(decodeMatch(1, `v2.m10-1-${lane}-0`)?.actions).toEqual([
+      expect(decodeMatch(1, `v3.m10-1-${lane}-0`)?.actions).toEqual([
         { type: 'move', round: 1, player: 0, minionId: 1, line: lane, slot: 0 },
       ]);
     }
@@ -289,17 +292,31 @@ describe('encodeMatch / decodeMatch', () => {
 
   it('lehnt einen unzulässigen Seed ab', () => {
     for (const seed of [-1, 1.5, 2 ** 32, Number.NaN, Number.POSITIVE_INFINITY]) {
-      expect(decodeMatch(seed, 'v2')).toBeNull();
+      expect(decodeMatch(seed, `v${RECORD_VERSION}`)).toBeNull();
     }
-    expect(decodeMatch(0, 'v2')).toEqual({ ...createRecord(0) });
+    expect(decodeMatch(0, `v${RECORD_VERSION}`)).toEqual({ ...createRecord(0) });
   });
 
   it('manipulierte, aber lesbare Daten bricht erst das Nachspielen ab', () => {
-    const text = encodeMatch(playScriptedMatch(5).record).replace(/^v2\./, 'v2.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0.');
+    const text = encodeMatch(playScriptedMatch(5).record).replace(/^v3\./, 'v3.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0.');
     const decoded = decodeMatch(5, text);
     expect(decoded).not.toBeNull();
     const result = replayRecorded(decoded!);
     expect(result.ok).toBe(false);
+  });
+
+  it('spielt Spezialisierungen aus der Aufzeichnung und dem Link identisch nach', () => {
+    let found = 0;
+    for (let seed = 1; seed <= 40 && found < 2; seed += 1) {
+      const { state, record } = playScriptedMatch(seed);
+      const specialized = state.players.flatMap((p) => p.lines.flatMap((l) => l.towers)).some((t) => t.specialization);
+      if (!specialized) continue;
+      found += 1;
+      const replayed = replayRecorded(decodeMatch(seed, encodeMatch(record))!);
+      expect(replayed.ok).toBe(true);
+      expect(replayed.state).toEqual(state);
+    }
+    expect(found).toBeGreaterThan(0);
   });
 
   it('hält die Kartenliste fest: Änderungen daran verlangen eine neue Version', () => {
@@ -311,10 +328,12 @@ describe('encodeMatch / decodeMatch', () => {
       'line-upgrade',
       'tower-hp',
       'tower-damage',
+      'tower-lightning',
+      'tower-shield',
       'minion-upgrade-line',
       'minion-upgrade-all',
     ]);
-    expect(RECORD_VERSION).toBe(2);
+    expect(RECORD_VERSION).toBe(3);
   });
 });
 

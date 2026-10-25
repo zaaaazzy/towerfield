@@ -2,18 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { CARD_DEFS, type CardDef, type CardType, getCardDef } from './cards';
 import { CARD_TYPE_STYLES, cardArtKey, cardStats, cardTypeStyle, describeCard } from './card-style';
 
-const TYPES: CardType[] = ['line-upgrade', 'tower-upgrade', 'summon', 'minion-upgrade'];
+const TYPES: CardType[] = ['line-upgrade', 'tower-upgrade', 'tower-specialize', 'summon', 'minion-upgrade'];
 
 describe('cardTypeStyle', () => {
-  it('kennt alle vier Kartentypen', () => {
+  it('kennt alle Kartentypen', () => {
     for (const type of TYPES) expect(cardTypeStyle(type)).toBe(CARD_TYPE_STYLES[type]);
   });
 
   it('unterscheidet die Typen nach Rahmenfarbe und Symbol', () => {
     const accents = new Set(TYPES.map((type) => cardTypeStyle(type).accent));
     const symbols = new Set(TYPES.map((type) => cardTypeStyle(type).symbol));
-    expect(accents.size).toBe(4);
-    expect(symbols.size).toBe(4);
+    expect(accents.size).toBe(TYPES.length);
+    expect(symbols.size).toBe(TYPES.length);
   });
 
   it('gibt jedem Typ ein Banner', () => {
@@ -22,10 +22,13 @@ describe('cardTypeStyle', () => {
 });
 
 describe('cardArtKey', () => {
-  it('gibt jeder Karte der Definition ein eigenes Bild', () => {
-    const keys = CARD_DEFS.map((def) => cardArtKey(def));
+  it('gibt jeder Karte der Definition ein eigenes Bild, außer den Spezialisierungen (nur Typ-Symbol)', () => {
+    const withArt = CARD_DEFS.filter((def) => def.type !== 'tower-specialize');
+    const keys = withArt.map((def) => cardArtKey(def));
     expect(keys.every((key) => key !== null)).toBe(true);
-    expect(new Set(keys).size).toBe(CARD_DEFS.length);
+    expect(new Set(keys).size).toBe(withArt.length);
+    expect(cardArtKey(getCardDef('tower-lightning'))).toBeNull();
+    expect(cardArtKey(getCardDef('tower-shield'))).toBeNull();
   });
 
   it('kennt kein Bild für unbekannte Karten (Rückfall auf das Typ-Symbol)', () => {
@@ -40,8 +43,10 @@ describe('cardStats', () => {
     expect(cardStats(getCardDef('minion-upgrade-all'))).toEqual({ hp: 5, damage: 1, bonus: true });
   });
 
-  it('hat für die Line-Karte keine Werte', () => {
+  it('hat für die Line-Karte und die Spezialisierungen keine Werte', () => {
     expect(cardStats(getCardDef('line-upgrade'))).toBeNull();
+    expect(cardStats(getCardDef('tower-lightning'))).toBeNull();
+    expect(cardStats(getCardDef('tower-shield'))).toBeNull();
   });
 });
 
@@ -68,5 +73,7 @@ describe('describeCard', () => {
     expect(describeCard(getCardDef('minion-upgrade-all'))).toBe('Alle: +5 Leben\n+1 Schaden');
     expect(describeCard(getCardDef('minion-upgrade-line'))).toBe('Lane: +10 Leben\n+2 Schaden');
     expect(describeCard(getCardDef('line-upgrade'))).toBe('Lane +1 Stufe\noben + unten');
+    expect(describeCard(getCardDef('tower-lightning'))).toContain('Trifft alle Gegner');
+    expect(describeCard(getCardDef('tower-shield'))).toContain('Wirft 50 % des Schadens');
   });
 });

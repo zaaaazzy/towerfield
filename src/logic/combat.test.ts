@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   combatTick,
   type CombatPlayer,
+  LIGHTNING_FACTOR,
   LINE_LENGTH,
   MINION_RANGE,
   MINION_SPEED,
+  SHIELD_REFLECT,
   TICK_SECONDS,
   TOWER_RANGE,
   totalTowerHp,
@@ -447,5 +449,116 @@ describe('Mehrere Tower auf einer Lane', () => {
     for (let tick = 0; tick < 40; tick += 1) combatTick(players);
     expect(players[0].minions[0]!.position).toBe(LINE_LENGTH);
     expect(totalTowerHp(players[1])).toBe(300);
+  });
+});
+
+describe('Tower-Spezialisierungen', () => {
+  const firstTower = (p: CombatPlayer, line = 0) => p.lines[line]!.towers[0]!;
+
+  describe('Blitz-Turm', () => {
+    function setup(specialization?: 'lightning'): [CombatPlayer, CombatPlayer] {
+      const players: [CombatPlayer, CombatPlayer] = [player(), player(100, 8)];
+      // Nur Lane 0 des Verteidigers hat einen Tower; so schießt kein anderer Tower auf die Minions.
+      players[1].lines[1]!.towers = [];
+      players[1].lines[2]!.towers = [];
+      if (specialization) firstTower(players[1]).specialization = specialization;
+      // Abstand zum Tower: 10, 15, 20 (Rand der Reichweite) und 30 (außerhalb); dazu ein Minion auf Lane 1.
+      players[0].minions.push(
+        minion(1, 0, 90, 100, 0),
+        minion(2, 0, 85, 100, 0),
+        minion(3, 0, 80, 100, 0),
+        minion(4, 0, 70, 100, 0),
+        minion(5, 1, 90, 100, 0),
+      );
+      return players;
+    }
+
+    it('trifft alle Minions seiner Lane in Reichweite mit LIGHTNING_FACTOR', () => {
+      const players = setup('lightning');
+      combatTick(players, 1);
+      const hp = players[0].minions.map((m) => m.hp);
+      expect(TOWER_RANGE).toBe(20);
+      expect(hp[0]).toBeCloseTo(100 - 8 * LIGHTNING_FACTOR, 9);
+      expect(hp[1]).toBeCloseTo(100 - 8 * LIGHTNING_FACTOR, 9);
+      expect(hp[2]).toBeCloseTo(100 - 8 * LIGHTNING_FACTOR, 9);
+    });
+
+    it('trifft weder Minions außerhalb der Reichweite noch anderer Lanes', () => {
+      const players = setup('lightning');
+      combatTick(players, 1);
+      expect(players[0].minions[3]!.hp).toBe(100);
+      expect(players[0].minions[4]!.hp).toBe(100);
+    });
+
+    it('lässt einen normalen Tower nur den vordersten Minion treffen', () => {
+      const players = setup();
+      combatTick(players, 1);
+      expect(players[0].minions.map((m) => m.hp)).toEqual([92, 100, 100, 100, 100]);
+    });
+
+    it('schießt nicht mehr, wenn er zerstört ist', () => {
+      const players = setup('lightning');
+      firstTower(players[1]).hp = 0;
+      combatTick(players, 1);
+      expect(players[0].minions.every((m) => m.hp === 100)).toBe(true);
+    });
+  });
+
+  describe('Schild-Turm', () => {
+    function setup(minionHp: number, shield = true): [CombatPlayer, CombatPlayer] {
+      const players: [CombatPlayer, CombatPlayer] = [player(), player(100, 0)];
+      if (shield) firstTower(players[1]).specialization = 'shield';
+      // Abstand 2 zum Tower: der Minion schlägt zu (Reichweite 4).
+      players[0].minions.push(minion(1, 0, 98, minionHp, 6));
+      return players;
+    }
+
+    it('wirft SHIELD_REFLECT des Schadens auf den Angreifer zurück', () => {
+      const players = setup(30);
+      combatTick(players, 1);
+      expect(firstTower(players[1]).hp).toBe(94);
+      expect(players[0].minions[0]!.hp).toBeCloseTo(30 - 6 * SHIELD_REFLECT, 9);
+    });
+
+    it('wirft ohne Schild nichts zurück', () => {
+      const players = setup(30, false);
+      combatTick(players, 1);
+      expect(players[0].minions[0]!.hp).toBe(30);
+    });
+
+    it('deckelt den Rückwurf auf die Rest-HP des Angreifers', () => {
+      const players = setup(1);
+      combatTick(players, 1);
+      expect(players[0].minions).toHaveLength(0);
+      expect(firstTower(players[1]).hp).toBe(94);
+    });
+
+    it('wirft pro Tick anteilig zur Tick-Dauer zurück', () => {
+      const players = setup(30);
+      combatTick(players, 0.5);
+      expect(players[0].minions[0]!.hp).toBeCloseTo(30 - 6 * 0.5 * SHIELD_REFLECT, 9);
+    });
+  });
+
+  it('ändert das Ergebnis nicht, wenn die Spieler vertauscht werden', () => {
+    const build = (): [CombatPlayer, CombatPlayer] => {
+      const a = player(100, 8);
+      const b = player(100, 8);
+      firstTower(a, 0).specialization = 'lightning';
+      firstTower(b, 0).specialization = 'shield';
+      firstTower(a, 1).specialization = 'shield';
+      firstTower(b, 1).specialization = 'lightning';
+      a.minions.push(minion(1, 0, 95, 40, 6), minion(2, 0, 85, 40, 6), minion(3, 1, 97, 40, 9));
+      b.minions.push(minion(1, 0, 96, 40, 7), minion(2, 1, 90, 40, 5), minion(3, 1, 98, 3, 9));
+      return [a, b];
+    };
+    const normal = build();
+    const swapped = build().reverse() as [CombatPlayer, CombatPlayer];
+    for (let tick = 0; tick < 20; tick += 1) {
+      combatTick(normal);
+      combatTick(swapped);
+    }
+    expect(normal[0]).toEqual(swapped[1]);
+    expect(normal[1]).toEqual(swapped[0]);
   });
 });

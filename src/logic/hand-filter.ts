@@ -18,6 +18,7 @@ const GROUPS: Record<CardType, Exclude<HandFilter, 'all'>> = {
   'line-upgrade': 'upgrade',
   'minion-upgrade': 'upgrade',
   'tower-upgrade': 'tower',
+  'tower-specialize': 'tower',
 };
 
 /** Nächster Filter in der Reihenfolge Alle → Beschwörung → Upgrade → Tower → Alle. */

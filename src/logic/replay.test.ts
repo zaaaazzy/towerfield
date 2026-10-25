@@ -214,6 +214,8 @@ describe('describeEvent für Aufzeichnungen', () => {
       'no-such-minion',
       'line-full',
       'max-level',
+      'level-too-low',
+      'already-specialized',
     ];
     for (const reason of reasons) expect(describeAbort({ reason, index: 4 }).length).toBeGreaterThan(10);
   });

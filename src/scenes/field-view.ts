@@ -86,7 +86,7 @@ export function drawTower(
   label: LabelFn,
   x: number,
   y: number,
-  tower: { hp: number; maxHp: number },
+  tower: { hp: number; maxHp: number; specialization?: 'lightning' | 'shield' },
   owner: number,
 ): void {
   const { hp, maxHp } = tower;
@@ -110,6 +110,18 @@ export function drawTower(
   g.fillStyle(accent, 1).fillRoundedRect(x - 6, y - 6, 12, 13, 2);
   g.fillStyle(PALETTE.panelDark, 0.9).fillRoundedRect(x - 5, y - 5, 10, 11, 2);
 
+  if (alive && tower.specialization) {
+    // Markierung: gelbe Raute für den Blitz-Turm, blaue für den Schild-Turm, über den Zinnen.
+    const mark = tower.specialization === 'lightning' ? 0xffd23a : 0x5ab4ff;
+    g.fillStyle(PALETTE.black, 0.8).fillPoints(
+      [new Phaser.Geom.Point(x, y - 31), new Phaser.Geom.Point(x + 5, y - 26), new Phaser.Geom.Point(x, y - 21), new Phaser.Geom.Point(x - 5, y - 26)],
+      true,
+    );
+    g.fillStyle(mark, 1).fillPoints(
+      [new Phaser.Geom.Point(x, y - 30), new Phaser.Geom.Point(x + 4, y - 26), new Phaser.Geom.Point(x, y - 22), new Phaser.Geom.Point(x - 4, y - 26)],
+      true,
+    );
+  }
   drawBar(g, x - 10, y - 21, 20, 4, maxHp > 0 ? hp / maxHp : 0, healthFill(maxHp > 0 ? hp / maxHp : 0), 'gold');
   label(`${Math.ceil(hp)}`, x, y + 1, { size: 8, bold: true, font: 'heading', color: alive ? TEXT.main : TEXT.dim });
 }

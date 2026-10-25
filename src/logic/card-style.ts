@@ -3,10 +3,11 @@
  * Ohne Phaser, DOM und Canvas; liest nur die Kartendefinitionen.
  */
 import type { CardDef, CardType } from './cards';
-import { MINION_RANGE } from './combat';
+import { LIGHTNING_FACTOR, MINION_RANGE, SHIELD_REFLECT } from './combat';
+import { SPECIALIZE_MIN_LEVEL } from './match';
 
 /** Symbol, das die Szene in der Bildfläche der Karte zeichnet. */
-export type CardSymbol = 'sword' | 'tower' | 'gem' | 'arrow';
+export type CardSymbol = 'sword' | 'tower' | 'gem' | 'arrow' | 'bolt';
 
 export interface CardTypeStyle {
   /** Rahmen- und Bannerfarbe (RGB). */
@@ -21,6 +22,7 @@ export interface CardTypeStyle {
 export const CARD_TYPE_STYLES: Readonly<Record<CardType, CardTypeStyle>> = {
   summon: { accent: 0xe0584a, dark: 0x6a1f1c, symbol: 'sword', banner: 'BESCHWÖRUNG' },
   'tower-upgrade': { accent: 0x4a90e2, dark: 0x1b3a6a, symbol: 'tower', banner: 'TOWER' },
+  'tower-specialize': { accent: 0xe0b23a, dark: 0x6a4e12, symbol: 'bolt', banner: 'SPEZIAL' },
   'line-upgrade': { accent: 0x3fb68b, dark: 0x145440, symbol: 'arrow', banner: 'LANE' },
   'minion-upgrade': { accent: 0xb06be0, dark: 0x4a2470, symbol: 'gem', banner: 'MINIONS' },
 };
@@ -56,7 +58,7 @@ export interface CardStats {
 
 /** Leben und Schaden für die Wert-Plaketten auf dem Kartenbild; `null`, wenn die Karte keine Werte hat. */
 export function cardStats(def: CardDef): CardStats | null {
-  if (def.type === 'line-upgrade') return null;
+  if (def.type === 'line-upgrade' || def.type === 'tower-specialize') return null;
   if (def.hp <= 0 && def.damage <= 0) return null;
   return { hp: def.hp, damage: def.damage, bonus: def.type !== 'summon' };
 }
@@ -68,6 +70,10 @@ export function describeCard(def: CardDef): string {
       return 'Lane +1 Stufe\noben + unten';
     case 'tower-upgrade':
       return [def.hp > 0 ? `+${def.hp} Leben` : '', def.damage > 0 ? `+${def.damage} Schaden` : ''].filter(Boolean).join('\n');
+    case 'tower-specialize':
+      return def.path === 'lightning'
+        ? `Trifft alle Gegner\nder Lane (${Math.round(LIGHTNING_FACTOR * 100)} %)\nab Lane-Lvl ${SPECIALIZE_MIN_LEVEL}`
+        : `Wirft ${Math.round(SHIELD_REFLECT * 100)} % des Schadens\nzurück\nab Lane-Lvl ${SPECIALIZE_MIN_LEVEL}`;
     case 'minion-upgrade':
       return `${def.scope === 'all' ? 'Alle' : 'Lane'}: +${def.hp} Leben\n+${def.damage} Schaden`;
     case 'summon':

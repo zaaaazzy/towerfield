@@ -64,7 +64,11 @@ test('Karte und danach Lane antippen spielt die Karte: Hand -1, Energie -Kosten,
   const errors = collectErrors(page);
   await openGame(page);
   const before = await readState(page);
-  const index = findCard(before, (def) => def.target === 'line' && def.cost <= before.players[0].energy);
+  // Spezialisierungen brauchen ein Lane-Level und haben ihren eigenen Test (unten).
+  const index = findCard(
+    before,
+    (def) => def.target === 'line' && def.type !== 'tower-specialize' && def.cost <= before.players[0].energy,
+  );
   expect(index).toBeGreaterThanOrEqual(0);
   const def = defOf(before, index);
 
@@ -92,6 +96,44 @@ test('Karte und danach Lane antippen spielt die Karte: Hand -1, Energie -Kosten,
       expect(lineAfter.bonus.damage).toBe(lineBefore.bonus.damage + def.damage);
       break;
   }
+
+  expect(errors).toEqual([]);
+});
+
+test('Spezialisierungskarte auf der Start-Lane wird mit Hinweis abgelehnt, auf einer Lvl-2-Lane markiert sie den Tower', async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await openGame(page);
+  await unlockField(page, 2);
+  // Die Szene liest ihren Zustand aus `state`; die Karte kommt vorn auf die Hand, die frei geschaltete Lane bekommt ihren Tower.
+  await page.evaluate(() => {
+    const scene = window.game!.scene.getScene('main') as unknown as {
+      state: { players: { hand: string[]; lines: { towers: object[] }[] }[] };
+    };
+    const me = scene.state.players[0]!;
+    me.hand.unshift('tower-lightning');
+    me.lines[1]!.towers = [{ offset: 0, hp: 100, maxHp: 100, damage: 8 }];
+  });
+  const before = await readState(page);
+  const energy = before.players[0].energy;
+
+  await tapCard(page, 0);
+  await tapLine(page, 0);
+  await expect.poll(() => hasVisibleText(page, 'Lane-Level zu niedrig')).toBe(true);
+  const rejected = await readState(page);
+  expect(rejected.players[0].hand).toEqual(before.players[0].hand);
+  expect(rejected.players[0].energy).toBe(energy);
+  expect(rejected.players[0].lines[0]!.towers.some((tower) => tower.specialization)).toBe(false);
+
+  await tapCard(page, 0);
+  await tapLine(page, 1);
+  await expect
+    .poll(async () => (await readState(page)).players[0].lines[1]!.towers[0]?.specialization)
+    .toBe('lightning');
+  const played = await readState(page);
+  expect(played.players[0].energy).toBe(energy - getCardDef('tower-lightning').cost);
+  expect(played.players[0].hand).toHaveLength(before.players[0].hand.length - 1);
 
   expect(errors).toEqual([]);
 });
