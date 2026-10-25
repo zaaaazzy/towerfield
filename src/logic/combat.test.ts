@@ -1,0 +1,109 @@
+import { describe, expect, it } from 'vitest';
+import {
+  combatTick,
+  type CombatPlayer,
+  LINE_LENGTH,
+  MINION_RANGE,
+  MINION_SPEED,
+  TICK_SECONDS,
+  totalTowerHp,
+  towersAlive,
+} from './combat';
+
+function player(towerHp = 100, towerDamage = 8): CombatPlayer {
+  return {
+    lines: [0, 1, 2].map(() => ({ tower: { hp: towerHp, maxHp: towerHp, damage: towerDamage } })),
+    minions: [],
+  };
+}
+
+function minion(id: number, line: number, position: number, hp = 30, damage = 6) {
+  return { id, line, position, hp, damage };
+}
+
+describe('Kampf', () => {
+  it('bewegt ein Minion mit der Geschwindigkeit pro Sekunde', () => {
+    const players: [CombatPlayer, CombatPlayer] = [player(), player()];
+    players[0].minions.push(minion(1, 0, 0));
+    for (let tick = 0; tick < 20; tick += 1) combatTick(players, TICK_SECONDS);
+    expect(players[0].minions[0]!.position).toBeCloseTo(MINION_SPEED * 1, 6);
+  });
+
+  it('lässt gegnerische Minions in der Mitte aufeinandertreffen und sich bekämpfen', () => {
+    const players: [CombatPlayer, CombatPlayer] = [player(), player()];
+    players[0].minions.push(minion(1, 1, 0));
+    players[1].minions.push(minion(1, 1, 0));
+    for (let tick = 0; tick < 200; tick += 1) combatTick(players);
+    const a = players[0].minions[0];
+    const b = players[1].minions[0];
+    // Gleiche Werte: beide fallen im selben Tick.
+    expect(a).toBeUndefined();
+    expect(b).toBeUndefined();
+  });
+
+  it('hält ein Minion an, sobald ein Gegner in Reichweite ist', () => {
+    const players: [CombatPlayer, CombatPlayer] = [player(), player()];
+    players[0].minions.push(minion(1, 0, 0, 1000));
+    players[1].minions.push(minion(1, 0, 0, 1000));
+    for (let tick = 0; tick < 100; tick += 1) combatTick(players);
+    const gapNow = LINE_LENGTH - players[0].minions[0]!.position - players[1].minions[0]!.position;
+    expect(gapNow).toBeLessThanOrEqual(MINION_RANGE);
+    expect(gapNow).toBeGreaterThan(MINION_RANGE - 2 * MINION_SPEED * TICK_SECONDS);
+  });
+
+  it('greift Minions nur auf derselben Line an', () => {
+    const players: [CombatPlayer, CombatPlayer] = [player(), player()];
+    players[0].minions.push(minion(1, 0, 48, 30));
+    players[1].minions.push(minion(1, 2, 48, 30));
+    combatTick(players);
+    expect(players[0].minions[0]!.hp).toBe(30);
+    expect(players[1].minions[0]!.hp).toBe(30);
+  });
+
+  it('lässt einen Tower Minions in Reichweite beschießen, aber keine außerhalb', () => {
+    const players: [CombatPlayer, CombatPlayer] = [player(), player()];
+    players[1].minions.push(minion(1, 0, 60, 30), minion(2, 1, 80, 30));
+    combatTick(players, 1);
+    expect(players[1].minions.find((m) => m.id === 1)!.hp).toBe(30);
+    expect(players[1].minions.find((m) => m.id === 2)!.hp).toBe(22);
+  });
+
+  it('beschießt das vorderste Minion im Turmradius', () => {
+    const players: [CombatPlayer, CombatPlayer] = [player(), player()];
+    players[1].minions.push(minion(1, 0, 80, 30), minion(2, 0, 90, 30));
+    combatTick(players, 1);
+    expect(players[1].minions.find((m) => m.id === 1)!.hp).toBe(30);
+    expect(players[1].minions.find((m) => m.id === 2)!.hp).toBe(22);
+  });
+
+  it('schadet dem gegnerischen Tower am Ende der Line', () => {
+    const players: [CombatPlayer, CombatPlayer] = [player(), player()];
+    players[0].minions.push(minion(1, 0, LINE_LENGTH - MINION_RANGE, 1000, 10));
+    combatTick(players, 1);
+    expect(players[1].lines[0]!.tower.hp).toBe(90);
+    expect(totalTowerHp(players[1])).toBe(290);
+  });
+
+  it('lässt Tower nicht unter 0 fallen und zählt lebende Tower', () => {
+    const players: [CombatPlayer, CombatPlayer] = [player(5), player()];
+    players[1].minions.push(minion(1, 0, LINE_LENGTH - MINION_RANGE, 1000, 100));
+    combatTick(players, 1);
+    expect(players[0].lines[0]!.tower.hp).toBe(0);
+    expect(towersAlive(players[0])).toBe(2);
+  });
+
+  it('wirkt für beide Seiten gleich (keine Bevorzugung durch die Reihenfolge)', () => {
+    const a: [CombatPlayer, CombatPlayer] = [player(), player()];
+    const b: [CombatPlayer, CombatPlayer] = [player(), player()];
+    a[0].minions.push(minion(1, 0, 40, 30, 6));
+    a[1].minions.push(minion(1, 0, 56, 30, 6));
+    b[1].minions.push(minion(1, 0, 40, 30, 6));
+    b[0].minions.push(minion(1, 0, 56, 30, 6));
+    for (let tick = 0; tick < 60; tick += 1) {
+      combatTick(a);
+      combatTick(b);
+    }
+    expect(a[0]).toEqual(b[1]);
+    expect(a[1]).toEqual(b[0]);
+  });
+});

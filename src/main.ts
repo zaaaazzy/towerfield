@@ -1,12 +1,11 @@
 import Phaser from 'phaser';
-import { DEFAULT_CONFIG } from './logic/game-state';
-import { MainScene } from './scenes/main-scene';
+import { MainScene, VIEW } from './scenes/main-scene';
 
 const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'game',
-  width: DEFAULT_CONFIG.width,
-  height: DEFAULT_CONFIG.height,
+  width: VIEW.width,
+  height: VIEW.height,
   backgroundColor: '#10141f',
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
   scene: [MainScene],
