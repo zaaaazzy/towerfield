@@ -170,6 +170,24 @@ describe('Kampf', () => {
     expect(melee[0].minions[0]!.position).toBeCloseTo(LINE_LENGTH - 4, 6);
   });
 
+  it('bewegt einen Minion mit seinem eigenen speed und skaliert mit deltaSeconds', () => {
+    const players: [CombatPlayer, CombatPlayer] = [player(), player()];
+    players[0].minions.push(minion(1, 0, 10, 30, 6, 5, 14));
+    combatTick(players, 0.5);
+    expect(players[0].minions[0]!.position).toBeCloseTo(12.5, 6);
+    combatTick(players, 2);
+    expect(players[0].minions[0]!.position).toBeCloseTo(22.5, 6);
+  });
+
+  it('lässt einen Fernkämpfer außerhalb seiner Reichweite weiterlaufen', () => {
+    const players: [CombatPlayer, CombatPlayer] = [player(), player()];
+    players[0].minions.push(minion(1, 0, 20, 30, 7, MINION_SPEED, 14));
+    players[1].minions.push(minion(1, 0, 50, 1000, 0));
+    combatTick(players, 1);
+    expect(players[1].minions[0]!.hp).toBe(1000);
+    expect(players[0].minions[0]!.position).toBeCloseTo(30, 6);
+  });
+
   it('lässt Tower nicht unter 0 fallen und zählt lebende Tower', () => {
     const players: [CombatPlayer, CombatPlayer] = [player(5), player()];
     players[1].minions.push(minion(1, 0, LINE_LENGTH - MINION_RANGE, 1000, 100));
