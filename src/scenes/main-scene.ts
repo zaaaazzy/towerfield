@@ -36,6 +36,9 @@ const LAYOUT = {
   button: { x: 230, y: 592, width: 120, height: 40 },
 };
 
+const STATS_PANEL = { x: 20, y: 60, width: 320, height: 500 };
+const STATS_CLOSE = { x: 120, y: 504, width: 120, height: 40 };
+
 const COLORS = {
   human: 0x4fc3f7,
   bot: 0xff7043,
@@ -114,6 +117,8 @@ export class MainScene extends Phaser.Scene {
   private selected: number | null = null;
   private message = '';
   private drag: DragState | null = null;
+  /** Statistik-Overlay nach Match-Ende wurde geschlossen. */
+  private statsClosed = false;
 
   constructor() {
     super('main');
@@ -135,7 +140,8 @@ export class MainScene extends Phaser.Scene {
     this.selected = null;
     this.message = '';
     this.drag = null;
-    this.graphics = this.add.graphics();
+    this.statsClosed = false;
+    this.graphics =this.add.graphics();
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => this.onPointerDown(pointer.worldX, pointer.worldY));
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => this.onPointerMove(pointer.worldX, pointer.worldY));
     this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => this.onPointerUp(pointer.worldX, pointer.worldY));
@@ -228,6 +234,10 @@ export class MainScene extends Phaser.Scene {
 
   private handleTap(x: number, y: number): void {
     if (this.state.phase === 'over') {
+      if (!this.statsClosed) {
+        if (inside(STATS_CLOSE, x, y)) this.statsClosed = true;
+        return;
+      }
       this.scene.restart();
       return;
     }
@@ -392,7 +402,9 @@ export class MainScene extends Phaser.Scene {
       size: 14,
     });
 
-    if (state.phase === 'over') {
+    if (state.phase === 'over' && !this.statsClosed) {
+      this.renderStats(state);
+    } else if (state.phase === 'over') {
       g.fillStyle(0x000000, 0.7).fillRect(0, 220, VIEW.width, 140);
       const text =
         state.outcome === 'draw' ? 'Unentschieden' : state.outcome === 'player0' ? 'Du gewinnst!' : 'Du verlierst';
@@ -401,6 +413,47 @@ export class MainScene extends Phaser.Scene {
     }
 
     for (let index = this.textCursor; index < this.texts.length; index += 1) this.texts[index]!.setVisible(false);
+  }
+
+  /** Overlay nach Match-Ende: Ergebnis, Karten pro Line und Schaden je Minion-Typ (liest nur `state.stats`). */
+  private renderStats(state: MatchState): void {
+    const g = this.graphics;
+    const { x, y, width, height } = STATS_PANEL;
+    g.fillStyle(0x000000, 0.88).fillRect(0, 0, VIEW.width, VIEW.height);
+    g.fillStyle(COLORS.card, 1).fillRoundedRect(x, y, width, height, 8);
+    const text =
+      state.outcome === 'draw' ? 'Unentschieden' : state.outcome === 'player0' ? 'Du gewinnst!' : 'Du verlierst';
+    this.label(text, VIEW.width / 2, y + 22, { size: 20 });
+
+    const left = x + 12;
+    const columns = [x + 150, x + 200, x + 250];
+    let row = y + 54;
+    this.label('Karten pro Line', left, row, { size: 12, color: '#ffd54a', origin: 0 });
+    columns.forEach((column, line) => this.label(`L${line + 1}`, column, row, { size: 11, color: '#9aa4bf' }));
+    const played = Object.entries(state.stats.played);
+    if (played.length === 0) this.label('Keine Beschwörungen', left, (row += 18), { size: 11, color: '#9aa4bf', origin: 0 });
+    for (const [cardId, counts] of played) {
+      row += 18;
+      this.label(getCardDef(cardId).name, left, row, { size: 11, origin: 0 });
+      columns.forEach((column, line) => this.label(`${counts[line] ?? 0}`, column, row, { size: 11 }));
+    }
+
+    row += 34;
+    this.label('Schaden je Typ', left, row, { size: 12, color: '#ffd54a', origin: 0 });
+    this.label('Minions', x + 190, row, { size: 11, color: '#9aa4bf' });
+    this.label('Tower', x + 260, row, { size: 11, color: '#9aa4bf' });
+    const damage = Object.entries(state.stats.damage);
+    if (damage.length === 0) this.label('Kein Schaden', left, (row += 18), { size: 11, color: '#9aa4bf', origin: 0 });
+    for (const [cardId, entry] of damage) {
+      row += 18;
+      this.label(getCardDef(cardId).name, left, row, { size: 11, origin: 0 });
+      this.label(`${Math.round(entry.minionDamage)}`, x + 190, row, { size: 11 });
+      this.label(`${Math.round(entry.towerDamage)}`, x + 260, row, { size: 11 });
+    }
+
+    const button = STATS_CLOSE;
+    g.fillStyle(0x2e7d32, 1).fillRoundedRect(button.x, button.y, button.width, button.height, 8);
+    this.label('Schließen', button.x + button.width / 2, button.y + button.height / 2, { size: 14 });
   }
 
   private drawTower(

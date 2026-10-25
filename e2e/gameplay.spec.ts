@@ -179,6 +179,14 @@ test('das Spiel endet spätestens nach MAX_ROUNDS Runden mit Ergebnis und Overla
   expect(over.phase).toBe('over');
   expect(over.outcome).not.toBeNull();
   expect(rounds).toBeLessThanOrEqual(MAX_ROUNDS);
+  // Zuerst das Statistik-Overlay; Tippen daneben startet nichts, „Schließen“ blendet es aus.
+  await expect.poll(() => hasVisibleText(page, 'Karten pro Line')).toBe(true);
+  await expect.poll(() => hasVisibleText(page, 'Schaden je Typ')).toBe(true);
+  await tap(page, 180, 30);
+  expect((await readState(page)).phase).toBe('over');
+  await tap(page, 180, 524);
+  await expect.poll(() => hasVisibleText(page, 'Karten pro Line')).toBe(false);
+  expect((await readState(page)).phase).toBe('over');
   await expect.poll(() => hasVisibleText(page, 'Tippen für ein neues Spiel')).toBe(true);
 
   // Neustart per Tippen.

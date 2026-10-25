@@ -17,10 +17,12 @@ import {
   MAX_LINE_LEVEL,
   MAX_ROUNDS,
   type MatchState,
+  moveMinion,
   type PlayerIndex,
   playCard,
   setReady,
   START_HAND,
+  undoSummon,
 } from './match';
 import { LINE_LENGTH, MINION_RANGE, TICK_MS } from './combat';
 
@@ -40,6 +42,62 @@ function withHand(state: MatchState, hand: string[], energy = MAX_ENERGY): Match
   }
   return copy;
 }
+
+describe('Statistik', () => {
+  const start = () => withHand(createMatch(3), ['summon-minion', 'summon-archer', 'summon-minion']);
+
+  it('zählt eine Beschwörung für Karte und Line', () => {
+    const result = playCard(start(), 0, 0, 1);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.state.stats.played['summon-minion']).toEqual([0, 1]);
+  });
+
+  it('zieht eine zurückgenommene Beschwörung wieder ab', () => {
+    const played = playCard(start(), 0, 0, 1);
+    if (!played.ok) throw new Error(played.reason);
+    const undone = undoSummon(played.state, 0, played.state.players[0].minions[0]!.id);
+    expect(undone.ok).toBe(true);
+    expect(undone.state.stats.played['summon-minion']).toEqual([0, 0]);
+  });
+
+  it('zählt einen verschobenen Minion auf der neuen Line', () => {
+    const played = playCard(start(), 0, 0, 1);
+    if (!played.ok) throw new Error(played.reason);
+    const moved = moveMinion(played.state, 0, played.state.players[0].minions[0]!.id, 2, 0);
+    expect(moved.ok).toBe(true);
+    expect(moved.state.stats.played['summon-minion']).toEqual([0, 0, 1]);
+  });
+
+  it('erfasst nur den eigenen Spieler', () => {
+    const result = playCard(start(), 1, 0, 0);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.state.stats.played).toEqual({});
+  });
+
+  it('ordnet Schaden über Runden hinweg dem Kartentyp zu und deckelt ihn auf die Tower-HP', () => {
+    let state = start();
+    const played = playCard(state, 0, 0, 0);
+    if (!played.ok) throw new Error(played.reason);
+    state = setReady(setReady(played.state, 0), 1);
+    for (let i = 0; i < COMBAT_TICKS * 3 && state.phase !== 'over'; i += 1) {
+      state = advance(state, TICK_MS);
+      if (state.phase === 'planning') state = setReady(setReady(state, 0), 1);
+    }
+    expect(state.round).toBeGreaterThan(1);
+    const damage = state.stats.damage['summon-minion']!;
+    expect(damage.towerDamage).toBeGreaterThan(0);
+    expect(damage.towerDamage).toBeLessThanOrEqual(state.players[1].lines[0]!.tower.maxHp + 1e-6);
+    expect(Object.keys(state.stats.damage)).toEqual(['summon-minion']);
+  });
+
+  it('liefert bei gleichem Seed und gleichen Aktionen identische Statistik', () => {
+    const run = () => {
+      const state = playMatch(5, TICK_MS, 'bot');
+      return state.stats;
+    };
+    expect(run()).toEqual(run());
+  });
+});
 
 /** Spielt ein ganzes Match; Spieler 0 per `human`, Spieler 1 als Bot. Schrittgröße in Millisekunden. */
 function playMatch(seed: number, stepMs: number, human: 'bot' | 'pass'): MatchState {

@@ -22,6 +22,71 @@ function minion(id: number, line: number, position: number, hp = 30, damage = 6,
   return { id, line, position, hp, damage, range, speed };
 }
 
+describe('Kampf mit Schaden-Sammler', () => {
+  type Call = [number, number, string, number];
+  const collect = (calls: Call[]) => (side: number, id: number, kind: 'minion' | 'tower', amount: number) =>
+    void calls.push([side, id, kind, amount]);
+
+  it('meldet jedem kämpfenden Minion damage * deltaSeconds', () => {
+    const players: [CombatPlayer, CombatPlayer] = [player(), player()];
+    players[0].minions.push(minion(1, 0, 48, 30, 6));
+    players[1].minions.push(minion(7, 0, 48, 30, 10));
+    const calls: Call[] = [];
+    combatTick(players, 0.5, collect(calls));
+    expect(calls).toContainEqual([0, 1, 'minion', 3]);
+    expect(calls).toContainEqual([1, 7, 'minion', 5]);
+  });
+
+  it('deckelt den Schaden auf die Rest-HP des Ziels', () => {
+    const players: [CombatPlayer, CombatPlayer] = [player(), player()];
+    players[0].minions.push(minion(1, 0, 48, 30, 60));
+    players[1].minions.push(minion(7, 0, 48, 2, 6));
+    const calls: Call[] = [];
+    combatTick(players, 1, collect(calls));
+    expect(calls).toContainEqual([0, 1, 'minion', 2]);
+  });
+
+  it('verteilt knappe Rest-HP anteilig auf gleichzeitige Angreifer, auch den Tower', () => {
+    const players: [CombatPlayer, CombatPlayer] = [player(100, 30), player()];
+    // Ziel (HP 4) steht 5 vor dem Tower von Spieler 0: zwei Minions (je 10) und der Tower (30) treffen es, Summe 50.
+    players[0].minions.push(minion(1, 0, 0, 30, 10, MINION_SPEED, 100), minion(2, 0, 0, 30, 10, MINION_SPEED, 100));
+    players[1].minions.push(minion(7, 0, 95, 4, 0));
+    const calls: Call[] = [];
+    combatTick(players, 1, collect(calls));
+    const minionHits = calls.filter((c) => c[2] === 'minion');
+    expect(minionHits).toHaveLength(2);
+    for (const hit of minionHits) expect(hit[3]).toBeCloseTo((10 * 4) / 50, 9);
+    expect(calls.every((c) => c[0] === 0)).toBe(true);
+  });
+
+  it('rechnet Tower-Schaden dem Minion-Typ zu, nicht dem Tower, und meldet Tower-Schaden an Minions nicht', () => {
+    const players: [CombatPlayer, CombatPlayer] = [player(), player()];
+    // Minion 1 steht am gegnerischen Tower; Minion 7 (Gegner) wird nur vom Tower von Spieler 0 getroffen.
+    players[0].minions.push(minion(1, 0, 98, 30, 6));
+    players[1].minions.push(minion(7, 1, 90, 30, 0));
+    const calls: Call[] = [];
+    combatTick(players, 1, collect(calls));
+    expect(calls).toContainEqual([0, 1, 'tower', 6]);
+    expect(calls.filter((c) => c[2] === 'minion')).toHaveLength(0);
+  });
+
+  it('liefert ohne Sammler dasselbe Ergebnis wie mit Sammler', () => {
+    const build = (): [CombatPlayer, CombatPlayer] => {
+      const players: [CombatPlayer, CombatPlayer] = [player(), player()];
+      players[0].minions.push(minion(1, 0, 40, 30, 6), minion(2, 2, 96, 30, 6));
+      players[1].minions.push(minion(7, 0, 56, 30, 10));
+      return players;
+    };
+    const plain = build();
+    const counted = build();
+    for (let tick = 0; tick < 40; tick += 1) {
+      combatTick(plain, TICK_SECONDS);
+      combatTick(counted, TICK_SECONDS, () => {});
+    }
+    expect(counted).toEqual(plain);
+  });
+});
+
 describe('Kampf', () => {
   it('bewegt ein Minion mit der Geschwindigkeit pro Sekunde', () => {
     const players: [CombatPlayer, CombatPlayer] = [player(), player()];
