@@ -439,6 +439,21 @@ describe('Karten ausspielen', () => {
     expect(state.players[0].minions.map((m) => m.range)).toEqual([14, 4, 4]);
   });
 
+  it('setzt beim Beschwören maxHp = hp inklusive Line-Bonus und das Heiler-Merkmal nur beim Heiler', () => {
+    let state = withHand(createMatch(1), ['minion-upgrade-line', 'summon-healer', 'summon-minion'], 20);
+    for (const id of ['minion-upgrade-line', 'summon-healer', 'summon-minion']) {
+      const result = playCard(state, 0, find(state, 0, id), 0);
+      if (!result.ok) throw new Error(result.reason);
+      state = result.state;
+    }
+    const [healer, other] = state.players[0].minions;
+    expect(healer!.heals).toBe(true);
+    expect(other!.heals).toBeUndefined();
+    expect(healer!.maxHp).toBe(healer!.hp);
+    expect(healer!.hp).toBe(20 +state.players[0].lines[0]!.bonus.hp);
+    expect(other!.maxHp).toBe(other!.hp);
+  });
+
   it('wirkt „Minion verbessern“ je nach Umfang auf eine oder alle Lines', () => {
     const base = withHand(createMatch(1), ['minion-upgrade-line', 'minion-upgrade-all'], 10);
     const one = playCard(base, 0, 0, 2);
