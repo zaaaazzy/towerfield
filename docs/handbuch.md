@@ -74,7 +74,7 @@ Mobiles 1-gegen-1-Tower-Defense-Spiel mit Karten im Browser (Phaser 3, TypeScrip
 
 Weiterführend unter `docs/`: `designkonzept.md` (Soll-Regeln) und die `anwendung-*.md` je Auftrag (Bogenschütze,
 Start-/Zieh-Konstanten, Handlimit, Iso-Platzierung, Drag-and-Drop, Bot-Tests, Energie-Maximum, Tower-Reichweite,
-Minion-Tempo, Balance-Szene, E2E, Minion-Statistik, Replay, Kartenfilter, Heiler).
+Minion-Tempo, Balance-Szene, E2E, Minion-Statistik, Replay, Kartenfilter, Heiler, Grafik-Überarbeitung; Stil und Lizenzen: `grafik-stil.md`).
 
 ### Umsetzungsstand
 
