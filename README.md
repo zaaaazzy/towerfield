@@ -24,7 +24,8 @@ Das verbindliche Designkonzept (Karten, Minions, Slot-Platzierung, Iso-Karte, Mo
 Slot-Platzierung beschreibt [`docs/anwendung-iso-platzierung.md`](docs/anwendung-iso-platzierung.md), das Verschieben
 von Minions [`docs/anwendung-minion-drag-and-drop.md`](docs/anwendung-minion-drag-and-drop.md) und die Handlimit-Regel
 mit ihren Tests [`docs/anwendung-handlimit.md`](docs/anwendung-handlimit.md). Die Tests der Bot-Strategie beschreibt
-[`docs/anwendung-bot-tests.md`](docs/anwendung-bot-tests.md).
+[`docs/anwendung-bot-tests.md`](docs/anwendung-bot-tests.md). Die Tower-Reichweite (20) beschreibt
+[`docs/anwendung-tower-reichweite.md`](docs/anwendung-tower-reichweite.md).
 
 ## Befehle
 

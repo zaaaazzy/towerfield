@@ -11,7 +11,7 @@ export const TICK_MS = 50;
 export const TICK_SECONDS = TICK_MS / 1000;
 export const MINION_RANGE = 4;
 export const MINION_SPEED = 10;
-export const TOWER_RANGE = 25;
+export const TOWER_RANGE = 20;
 
 export interface Tower {
   hp: number;
