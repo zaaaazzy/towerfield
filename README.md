@@ -15,7 +15,8 @@ Karten (Hochformat, Touch, `Scale.FIT`). Aktuell spielt man lokal gegen einen de
   Unentschieden.
 
 Basiswerte (in `src/logic/match.ts` und `combat.ts`, nur Startwerte, kein Balancing): `HAND_LIMIT = 10`
-(**noch zu bestätigen**, greift schon in Runde 2: 7 + 5 = 12, überzählige Karten verfallen), `MAX_ROUNDS = 8`,
+(bestätigt, greift schon in Runde 2: 7 + 5 = 12, überzählige Karten verfallen am Ende der Hand; es gilt die
+Reihenfolge der Ankunft), `MAX_ROUNDS = 8`,
 Energie 3 + 1 pro Runde (max. 10), Line-Höchststufe 5, Kapazität 2 + Stufe, Tower 100 HP / 8 Schaden.
 
 Das verbindliche Designkonzept (Karten, Minions, Slot-Platzierung, Iso-Karte, Mobile-Layout, Folgeaufträge) steht in

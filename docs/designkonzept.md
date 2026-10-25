@@ -40,8 +40,9 @@ flowchart LR
 
 - **Deck:** ein per Seed gemischtes Deck, für beide Spieler gleich (`buildDeck`); gleiche Reihenfolge, daher fair und
   testbar. Länge = `START_HAND + DRAW_PER_ROUND × (MAX_ROUNDS − 1)`.
-- **Hand:** Reihenfolge = Ankunft. Beim Ziehen über `HAND_LIMIT` hinaus wandern die überzähligen Karten in die Ablage.
-- **Ablage:** gespielte und verfallene Karten. Ist nur Anzeige (kein Nachmischen); Datenfeld folgt in Folgeauftrag 4.
+- **Hand:** Reihenfolge = Ankunft. Beim Ziehen über `HAND_LIMIT` hinaus verfallen die zuletzt gezogenen Karten (am Ende der Hand abgeschnitten, es gibt keine Ablage dafür). Verfallene
+  Karten zählen als gezogen.
+- **Ablage:** gespielte Karten (verfallene kommen nicht hinein; eine Ablage für sie wäre ein Folgeauftrag). Ist nur Anzeige (kein Nachmischen); Datenfeld folgt in Folgeauftrag 4.
   Eine per `undoSummon` zurückgenommene Karte kommt zurück an die Hand (nicht in die Ablage).
 - **Energie:** pro Runde neu gesetzt (`3 + (Runde − 1)`, max. `MAX_ENERGY`), nicht übertragbar.
 - **Ausspielen:** Phase Planung, Spieler nicht bereit, genug Energie, gültiges Ziel. Sonst Fehler (`PlayError`) und

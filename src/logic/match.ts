@@ -19,7 +19,7 @@ import { firstFreeSlot, isSlotFree, isValidSlot, slotPosition } from './placemen
 export const LINE_COUNT = 3;
 export const START_HAND = 7;
 export const DRAW_PER_ROUND = 5;
-/** Handlimit (Vorschlag aus dem Auftrag, noch zu bestätigen): neu gezogene Karten über dem Limit verfallen. */
+/** Handlimit (bestätigt, siehe docs/designkonzept.md): Karten über dem Limit verfallen am Ende der Hand. */
 export const HAND_LIMIT = 10;
 export const MAX_ROUNDS = 8;
 export const BASE_ENERGY = 3;

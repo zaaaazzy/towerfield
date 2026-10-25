@@ -135,6 +135,97 @@ describe('Runden und Ziehen', () => {
   });
 });
 
+describe('Handlimit', () => {
+  /** Beendet die laufende Kampfphase und beginnt die nächste Runde. */
+  function nextRound(state: MatchState): MatchState {
+    return advance(setReady(setReady(state, 0), 1), COMBAT_TICKS * TICK_MS);
+  }
+
+  /** Zustand mit `count` Handkarten für Spieler `player` (die ersten Deckkarten), der andere bleibt unverändert. */
+  function withPlayerHand(state: MatchState, player: PlayerIndex, count: number): MatchState {
+    const copy = structuredClone(state);
+    copy.players[player].hand = copy.deck.slice(0, count);
+    return copy;
+  }
+
+  it('lässt in Runde 1 mit 7 Startkarten nichts verfallen', () => {
+    const state = createMatch(3);
+    expect(START_HAND).toBeLessThan(HAND_LIMIT);
+    expect(state.players[0].hand).toEqual(state.deck.slice(0, START_HAND));
+    expect(state.players[1].hand).toEqual(state.deck.slice(0, START_HAND));
+  });
+
+  it('gibt beiden Spielern ab Runde 2 genau HAND_LIMIT Karten', () => {
+    const state = nextRound(createMatch(3));
+    expect(state.round).toBe(2);
+    expect(state.players[0].hand).toHaveLength(HAND_LIMIT);
+    expect(state.players[1].hand).toHaveLength(HAND_LIMIT);
+  });
+
+  it('behält die ersten 10 Karten in Ankunftsreihenfolge und lässt die letzten 2 verfallen', () => {
+    const initial = createMatch(3);
+    const state = nextRound(initial);
+    const arrived = initial.deck.slice(0, START_HAND + DRAW_PER_ROUND);
+    expect(state.players[0].hand).toEqual(arrived.slice(0, HAND_LIMIT));
+    expect(state.players[1].hand).toEqual(arrived.slice(0, HAND_LIMIT));
+    const expired = arrived.slice(HAND_LIMIT);
+    expect(expired).toHaveLength(START_HAND + DRAW_PER_ROUND - HAND_LIMIT);
+    expect(state.players[0].hand.slice(-3)).toEqual(arrived.slice(START_HAND, HAND_LIMIT));
+  });
+
+  it('lässt bei genau HAND_LIMIT nach dem Ziehen (5 + 5) nichts verfallen', () => {
+    const initial = withPlayerHand(withPlayerHand(createMatch(3), 0, HAND_LIMIT - DRAW_PER_ROUND), 1, HAND_LIMIT - DRAW_PER_ROUND);
+    const state = nextRound(initial);
+    const drawn = initial.deck.slice(initial.drawn, initial.drawn + DRAW_PER_ROUND);
+    expect(state.players[0].hand).toEqual([...initial.players[0].hand, ...drawn]);
+    expect(state.players[0].hand).toHaveLength(HAND_LIMIT);
+  });
+
+  it('nimmt unter dem Limit alle 5 neuen Karten auf die Hand', () => {
+    const initial = withPlayerHand(createMatch(3), 0, 2);
+    const state = nextRound(initial);
+    const drawn = initial.deck.slice(initial.drawn, initial.drawn + DRAW_PER_ROUND);
+    expect(state.players[0].hand).toEqual([...initial.players[0].hand, ...drawn]);
+    expect(state.players[0].hand).toHaveLength(2 + DRAW_PER_ROUND);
+  });
+
+  it('zählt verfallene Karten als gezogen, die nächste Runde zieht die nächsten Deckkarten', () => {
+    const initial = createMatch(3);
+    const round2 = nextRound(initial);
+    expect(round2.drawn).toBe(START_HAND + DRAW_PER_ROUND);
+    const next = initial.deck.slice(round2.drawn, round2.drawn + DRAW_PER_ROUND);
+    // Hand leeren, damit die gezogenen Karten der nächsten Runde direkt sichtbar sind.
+    const cleared = structuredClone(round2);
+    cleared.players[0].hand = [];
+    cleared.players[1].hand = [];
+    const round3 = nextRound(cleared);
+    expect(round3.drawn).toBe(START_HAND + 2 * DRAW_PER_ROUND);
+    expect(round3.players[0].hand).toEqual(next);
+  });
+
+  it('wendet das Limit pro Spieler an: wer weniger Karten hat, wird nicht gekappt', () => {
+    const initial = withPlayerHand(createMatch(3), 0, 3);
+    const state = nextRound(initial);
+    expect(state.players[0].hand).toHaveLength(3 + DRAW_PER_ROUND);
+    expect(state.players[1].hand).toHaveLength(HAND_LIMIT);
+    expect(state.players[0].hand.length).toBeLessThan(state.players[1].hand.length);
+  });
+
+  it('überschreitet über alle Runden bis MAX_ROUNDS nie das Limit', () => {
+    let state = createMatch(5);
+    while (state.round < MAX_ROUNDS) {
+      state = nextRound(state);
+      for (const player of state.players) expect(player.hand.length).toBeLessThanOrEqual(HAND_LIMIT);
+    }
+    expect(state.round).toBe(MAX_ROUNDS);
+    expect(state.players[0].hand).toHaveLength(HAND_LIMIT);
+  });
+
+  it('ergibt mit gleichem Seed dieselbe Hand nach dem Verfall', () => {
+    expect(nextRound(createMatch(11)).players[0].hand).toEqual(nextRound(createMatch(11)).players[0].hand);
+  });
+});
+
 describe('Karten ausspielen', () => {
   it('lehnt eine Karte ohne ausreichende Energie ab und ändert den Zustand nicht', () => {
     const state = withHand(createMatch(1), ['summon-brute'], 1);
