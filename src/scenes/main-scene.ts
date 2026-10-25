@@ -14,6 +14,7 @@ import {
   playCard,
   setReady,
 } from '../logic/match';
+import { HAND_FILTER_NAMES, type HandFilter, isCardVisible, nextHandFilter } from '../logic/hand-filter';
 import { parseSeed } from '../logic/seed';
 import { type DropTarget, dropTargetAt, type LineGeometry, positionToY, slotPosition } from '../logic/placement';
 
@@ -34,6 +35,8 @@ const LAYOUT = {
   cardsPerRow: 5,
   handTop: 440,
   button: { x: 230, y: 592, width: 120, height: 40 },
+  /** Filtertaste für die Hand: schaltet bei jedem Tipp weiter, links neben `button`, unter den Karten. */
+  filterButton: { x: 122, y: 592, width: 102, height: 40 },
 };
 
 const STATS_PANEL = { x: 20, y: 60, width: 320, height: 500 };
@@ -214,6 +217,8 @@ export class MainScene extends Phaser.Scene {
   private drag: DragState | null = null;
   /** Statistik-Overlay nach Match-Ende wurde geschlossen. */
   private statsClosed = false;
+  /** Kartenfilter der Hand; reiner Darstellungs- und Eingabezustand, wird nicht gespeichert. */
+  private handFilter: HandFilter = 'all';
 
   constructor() {
     super('main');
@@ -236,6 +241,7 @@ export class MainScene extends Phaser.Scene {
     this.message = '';
     this.drag = null;
     this.statsClosed = false;
+    this.handFilter = 'all';
     this.graphics = this.add.graphics();
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => this.onPointerDown(pointer.worldX, pointer.worldY));
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => this.onPointerMove(pointer.worldX, pointer.worldY));
@@ -343,9 +349,16 @@ export class MainScene extends Phaser.Scene {
       this.state = setReady(this.state, HUMAN);
       return;
     }
+    if (inside(LAYOUT.filterButton, x, y)) {
+      this.handFilter = nextHandFilter(this.handFilter);
+      const selected = this.selected;
+      if (selected !== null && !this.isVisibleInHand(selected)) this.selected = null;
+      return;
+    }
     const hand = this.state.players[HUMAN].hand;
     for (let index = 0; index < hand.length; index += 1) {
       if (!inside(cardRect(index), x, y)) continue;
+      if (!this.isVisibleInHand(index)) return;
       this.message = '';
       const def = getCardDef(hand[index]!);
       if (def.target === 'none') {
@@ -358,6 +371,12 @@ export class MainScene extends Phaser.Scene {
     if (this.selected === null) return;
     const line = LAYOUT.lineCenters.findIndex((center) => Math.abs(x - center) <= LAYOUT.lineHalfWidth);
     if (line >= 0 && y >= LAYOUT.enemyTowerY - 30 && y <= LAYOUT.handTop - 4) this.play(this.selected, line);
+  }
+
+  /** Ist die Handkarte mit diesem Hand-Index beim aktiven Filter sichtbar und antippbar? */
+  private isVisibleInHand(handIndex: number): boolean {
+    const id = this.state.players[HUMAN].hand[handIndex];
+    return id !== undefined && isCardVisible(getCardDef(id).type, this.handFilter);
   }
 
   private play(handIndex: number, line?: number): void {
@@ -425,17 +444,37 @@ export class MainScene extends Phaser.Scene {
     human.hand.slice(0, HAND_LIMIT).forEach((id, index) => {
       const def = getCardDef(id);
       const rect = cardRect(index);
+      const visible = isCardVisible(def.type, this.handFilter);
       const affordable = human.energy >= def.cost;
-      g.fillStyle(COLORS.card, affordable ? 1 : 0.45).fillRoundedRect(rect.x, rect.y, rect.width, rect.height, 6);
+      g.fillStyle(COLORS.card, !visible ? 0.15 : affordable ? 1 : 0.45).fillRoundedRect(rect.x, rect.y, rect.width, rect.height, 6);
       if (this.selected === index) {
         g.lineStyle(3, COLORS.selected, 1).strokeRoundedRect(rect.x, rect.y, rect.width, rect.height, 6);
       }
+      if (!visible) return;
       this.label(`${def.cost}`, rect.x + 9, rect.y + 9, { size: 12, color: '#ffd54a' });
       this.label(def.name, rect.x + rect.width / 2, rect.y + rect.height / 2 + 6, {
         size: 10,
         width: rect.width - 6,
       });
     });
+
+    const matching = human.hand
+      .slice(0, HAND_LIMIT)
+      .filter((id) => isCardVisible(getCardDef(id).type, this.handFilter)).length;
+    const filterButton = LAYOUT.filterButton;
+    g.fillStyle(this.handFilter === 'all' ? 0x3a4256 : 0x4a5f8f, 1).fillRoundedRect(
+      filterButton.x,
+      filterButton.y,
+      filterButton.width,
+      filterButton.height,
+      8,
+    );
+    this.label(
+      `Filter: ${HAND_FILTER_NAMES[this.handFilter]} (${matching})`,
+      filterButton.x + filterButton.width / 2,
+      filterButton.y + filterButton.height / 2,
+      { size: 10, width: filterButton.width - 8 },
+    );
 
     // Leiste unten
     this.label(`Energie ${human.energy}`, 70, 612, { size: 16, color: '#ffd54a' });
