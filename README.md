@@ -9,7 +9,9 @@ Karten (Hochformat, Touch, `Scale.FIT`). Aktuell spielt man lokal gegen einen de
   nebeneinander). Pro Ausbaustufe (Lvl 2, Lvl 3) kommen je eine Lane oberhalb und unterhalb dazu, siehe
   [`docs/anwendung-horizontale-lane.md`](docs/anwendung-horizontale-lane.md).
 - Beide Spieler ziehen aus derselben, per Seed gemischten Kartenreihenfolge: 5 Startkarten, ab Runde 2 je 3 neue
-  Karten (identisch für beide). Kein Zufall im Kampf, keine Trefferchancen.
+  Karten (identisch für beide). Kein Zufall im Kampf, keine Trefferchancen. In Runde 3 und 6 wirkt ein seedbasiertes Runden-Ereignis für beide
+  Spieler (Energie +1, früherer Respawn oder Tower-Schild), siehe
+  [`docs/anwendung-rundenereignisse.md`](docs/anwendung-rundenereignisse.md).
 - Eine Runde = Planung (beide spielen gleichzeitig Karten, begrenzt durch Energie) und Kampf (Minions und Tower,
   Zeit nur über `delta`).
 - Kartentypen: Lane ausbauen (Feld +1 Stufe, ohne Ziel), Tower ausbauen, Minion beschwören, Minion verbessern (wirkt nur auf künftige Minions).

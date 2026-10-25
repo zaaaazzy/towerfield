@@ -127,7 +127,9 @@ Mobiles 1-gegen-1-Tower-Defense-Spiel mit Karten im Browser (Phaser 3, TypeScrip
 
 - Hochformat 360 × 640, Touch und Maus, `Phaser.Scale.FIT`.
 - Lokal gegen einen deterministischen Bot. Kein Online-Spiel, keine Accounts, keine Töne. Die Grafik entsteht komplett im Code (Abschnitt „Grafik“).
-- Kampf ohne Zufall. Der Seed legt nur die Kartenreihenfolge fest; beide Spieler erhalten dieselben Karten.
+- Kampf ohne Zufall. Der Seed legt die Kartenreihenfolge und (über einen eigenen Event-Seed) die Runden-Ereignisse
+  der Runden 3 und 6 fest (`src/logic/round-events.ts`, siehe `anwendung-rundenereignisse.md`); beide Spieler erhalten
+  dieselben Karten und dasselbe Ereignis.
 - Phaser bleibt auf Version 3 (API-Doku: https://newdocs.phaser.io/docs/3.90.0).
 
 Weiterführend unter `docs/`: `designkonzept.md` (Soll-Regeln) und die `anwendung-*.md` je Auftrag (Bogenschütze,

@@ -10,6 +10,35 @@ function result(partial: Partial<MatchResult> & Pick<MatchResult, 'outcome' | 'r
   return { seed: 0, endedBy: 'round-limit', played: [[], []], ...partial };
 }
 
+describe('Ereignis-Zähler', () => {
+  it('zählt je Ereignis die Häufigkeit und liefert bei gleichem Startseed dieselben Zähler', () => {
+    const report = runSimulation({ startSeed: 1, count: 30 });
+    expect(runSimulation({ startSeed: 1, count: 30 }).eventCounts).toEqual(report.eventCounts);
+    expect(Object.keys(report.eventCounts).sort()).toEqual(['early-respawn', 'energy', 'tower-shield']);
+    const total = Object.values(report.eventCounts).reduce((sum, value) => sum + value, 0);
+    // Bis zu zwei Ereignisrunden je Match (Runde 3 und 6); Matches können früher enden.
+    expect(total).toBeGreaterThan(0);
+    expect(total).toBeLessThanOrEqual(60);
+  });
+
+  it('summiert die Ereignisse der Ergebnisse; ohne Ergebnisse ist alles 0', () => {
+    const report = buildReport(
+      [
+        result({ outcome: 'draw', rounds: 8, events: ['energy', 'tower-shield'] }),
+        result({ outcome: 'draw', rounds: 3, events: ['energy'] }),
+      ],
+      0,
+    );
+    expect(report.eventCounts).toEqual({ energy: 2, 'early-respawn': 0, 'tower-shield': 1 });
+    expect(buildReport([], 0).eventCounts).toEqual({ energy: 0, 'early-respawn': 0, 'tower-shield': 0 });
+  });
+
+  it('simulateMatch meldet nur Ereignisse der tatsächlich gespielten Runden', () => {
+    const match = simulateMatch(3, strategiesForSeed(3));
+    expect(match.events!.length).toBeLessThanOrEqual(match.rounds >= 6 ? 2 : match.rounds >= 3 ? 1 : 0);
+  });
+});
+
 describe('Strategien', () => {
   it('würfeln eine Reihenfolge aus allen Karten-IDs, reproduzierbar je Seed', () => {
     expect([...shuffledPriority(5)].sort()).toEqual([...ids].sort());

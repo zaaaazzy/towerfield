@@ -15,7 +15,10 @@ Level-Ausbau umgestellt; wo dieses Dokument „Line“, „3 Lines“ oder `MAX_
 | Mechabellum | Planungsphase: Einheiten platzieren, danach läuft der Kampf ohne Eingriff ab |
 
 Sieg: alle drei gegnerischen Tower zerstört, oder nach der letzten Runde mehr Tower-Lebenspunkte. Gleichstand =
-Unentschieden. Kein Zufall im Kampf; Zufall nur in der Deck-Reihenfolge (Seed).
+Unentschieden. Kein Zufall im Kampf; Zufall nur in der Deck-Reihenfolge und in den Runden-Ereignissen (beides über Seeds, siehe
+[Anwendung: Runden-Ereignisse](anwendung-rundenereignisse.md)). Jede dritte Runde (3 und 6) wirkt ein Ereignis für beide
+Spieler gleich: Energie +1, früherer Respawn der Überlebenden oder Tower-Schild. Es steht beim Rundenstart fest und ist
+in der Planung sichtbar.
 
 ## 2. Rundenablauf
 
@@ -191,7 +194,8 @@ Ansicht `VIEW` = 360 × 640, `Scale.FIT`, zentriert. Wireframe (von oben nach un
 
 1. Soll die Ablage nachgemischt werden, wenn das Deck leer ist (derzeit reicht das Deck genau für 8 Runden)?
 2. Dürfen Spieler unterschiedliche Decks bauen (Deckbau), oder bleibt es beim gemeinsamen Seed-Deck?
-3. Bleibt „kein Zufall im Kampf“ endgültig, oder kommen später Fähigkeiten/Effekte?
+3. Bleibt „kein Zufall im Kampf“ endgültig, oder kommen später Fähigkeiten/Effekte? (Teilweise beantwortet: Zufall
+   wirkt nur zwischen den Runden über die seedbasierten Runden-Ereignisse; die Kampfberechnung bleibt zufallsfrei.)
 4. Soll die gegnerische Planung (Slots) vor dem Kampf sichtbar sein (Mechabellum zeigt sie nicht)?
 5. Pinch-Zoom: wirklich nötig, oder genügt ein fester Zoom plus Scrollen?
 6. Gewünschtes Format auf Desktop: Hochformat mit Rändern oder zusätzliches Querformat-Layout?
