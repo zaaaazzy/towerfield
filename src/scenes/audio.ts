@@ -20,10 +20,12 @@ import {
 import type { LabelFn } from './labels';
 import { drawButton, PALETTE, TEXT } from './theme';
 
-/** Schlüssel der Musikschleife im Audio-Cache. */
+/** Schlüssel des ersten Musikstücks im Audio-Cache. */
 export const MUSIC_KEY = 'tavern-loop';
-/** Dateien der Musikschleife, die erste brauchbare gewinnt; Effekte liegen als `assets/audio/<schlüssel>.wav`. */
-const MUSIC_URLS = ['assets/audio/tavern-loop.ogg', 'assets/audio/tavern-loop.mp3'];
+/** Dateien eines Musikstücks, die erste brauchbare gewinnt; Effekte liegen als `assets/audio/<schlüssel>.wav`. */
+const musicUrls = (key: string): string[] => ['m4a', 'ogg', 'mp3'].map((ext) => `assets/audio/${key}.${ext}`);
+/** Musikstücke, die sich abwechseln; fehlt eines, läuft das andere allein in Schleife. */
+const MUSIC_KEYS = [MUSIC_KEY, 'tavern-loop-2'];
 const effectUrl = (key: string): string[] => [`assets/audio/${key}.wav`];
 
 /**
@@ -110,7 +112,7 @@ export class AudioLayer {
 
   /** Reiht alle Audiodateien in den `preload()` der Szene ein. */
   static preload(scene: Phaser.Scene): void {
-    scene.load.addFile(new SafeAudioFile(scene.load, MUSIC_KEY, MUSIC_URLS));
+    for (const key of MUSIC_KEYS) scene.load.addFile(new SafeAudioFile(scene.load, key, musicUrls(key)));
     for (const key of SOUND_KEYS) scene.load.addFile(new SafeAudioFile(scene.load, key, effectUrl(key)));
   }
 
@@ -125,10 +127,26 @@ export class AudioLayer {
   }
 
   private startMusic(): void {
-    if (this.music || !this.scene.cache.audio.exists(MUSIC_KEY)) return;
+    if (this.music) return;
+    const keys = MUSIC_KEYS.filter((key) => this.scene.cache.audio.exists(key));
+    if (keys.length > 0) this.playTrack(keys, 0);
+  }
+
+  /** Spielt ein Stück; bei mehreren folgt nach dessen Ende das nächste, ein einzelnes läuft in Schleife. */
+  private playTrack(keys: readonly string[], index: number): void {
     try {
-      this.music = this.scene.sound.add(MUSIC_KEY, { loop: true, volume: effectiveVolumes(this.settings, this.musicScale).music });
-      this.music.play();
+      const music = this.scene.sound.add(keys[index], {
+        loop: keys.length === 1,
+        volume: effectiveVolumes(this.settings, this.musicScale).music,
+      });
+      music.once(Phaser.Sound.Events.COMPLETE, () => {
+        if (this.music !== music) return;
+        music.destroy();
+        this.music = null;
+        this.playTrack(keys, (index + 1) % keys.length);
+      });
+      this.music = music;
+      music.play();
     } catch {
       this.music = null;
     }

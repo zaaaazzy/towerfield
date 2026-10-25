@@ -330,8 +330,8 @@ Fenster, 6 Töne gesamt, 2 je Schlüssel, über `delta`) und variiert Tonhöhe u
 Einstellungen (Musik, Effekte, Stumm) validiert `audio-settings.ts` und speichert sie im `localStorage`
 (`towerfield.audio`). Die Szene lädt fehlertolerant (fehlende Datei = Stille, kein `console.error`) und startet die
 Musik erst nach der ersten Eingabe. Bedienung, Schlüsseltabelle, Quellen und Lizenzen der Dateien:
-[`anwendung-audio.md`](anwendung-audio.md). Offen: Die Tavernen-Musikdatei fehlt noch (Auftrag schließt eigene
-Komposition aus); die Effekte entstehen mit `npm run audio:sfx`.
+[`anwendung-audio.md`](anwendung-audio.md). Musik: zwei CC0-Stücke im Wechsel (`tavern-loop.m4a`,
+`tavern-loop-2.m4a`); die Effekte entstehen mit `npm run audio:sfx`.
 
 ### Replay (`?replay=<seed>`)
 

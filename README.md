@@ -41,8 +41,8 @@ Soundeffekte für Kampf und Aktionen (Treffer, Pfeil, Blitz, Schild, Heilung, Be
 Niederlage) und eine Tavernen-Musikschleife, die nach der ersten Eingabe startet. Oben links schaltet „Ton an / Stumm“
 alles um, oben rechts stellen zwei Regler Musik und Effekte getrennt ein; die Werte bleiben im `localStorage`. Das
 Replay spielt die Effekte mit leiserer Musik. Dateien, Quellen und Lizenzen:
-[`docs/anwendung-audio.md`](docs/anwendung-audio.md). Die Musikdatei `tavern-loop.ogg` fehlt noch; ohne sie läuft das
-Spiel nur mit Effekten.
+[`docs/anwendung-audio.md`](docs/anwendung-audio.md). Als Musik wechseln sich zwei gemeinfreie (CC0) Tavernen-Stücke
+ab.
 
 ## Befehle
 
