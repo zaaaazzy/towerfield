@@ -106,6 +106,26 @@ describe('Bot', () => {
     });
   });
 
+  describe('Eigene Kartenreihenfolge', () => {
+    it('ändert die Auswahl bei knapper Energie nachweisbar', () => {
+      const hand = ['summon-minion', 'tower-hp'];
+      const byDefault = botPlan(withHand(hand, 1), 1);
+      const reordered = botPlan(withHand(hand, 1), 1, ['tower-hp', 'summon-minion']);
+      expect(byDefault.players[1].hand).toEqual(['tower-hp']);
+      expect(reordered.players[1].hand).toEqual(['summon-minion']);
+    });
+
+    it('verhält sich mit der Standardreihenfolge wie ohne Parameter', () => {
+      const state = createMatch(4);
+      expect(botPlan(state, 1, ['summon-minion', 'tower-hp', 'line-upgrade', 'minion-upgrade-line', 'summon-brute', 'tower-damage', 'minion-upgrade-all'])).toEqual(botPlan(state, 1));
+    });
+
+    it('spielt Karten nicht, die in der Reihenfolge fehlen', () => {
+      const after = botPlan(withHand(['summon-minion', 'tower-hp'], 5), 1, ['tower-hp']);
+      expect(after.players[1].hand).toEqual(['summon-minion']);
+    });
+  });
+
   describe('Energie', () => {
     it('spielt bei 0 Energie nichts und meldet sich nur bereit', () => {
       const state = withHand(['summon-minion', 'tower-hp', 'line-upgrade'], 0);
