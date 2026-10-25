@@ -99,6 +99,7 @@ describe('updateFlashes', () => {
     line: 0,
     position: 10,
     amount: 3,
+    source: 'melee',
   });
 
   it('startet einen Blitz bei Schaden', () => {

@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "review": "vite build && vite preview",
     "typecheck": "tsc --noEmit",
+    "audio:sfx": "node tools/generate-sfx.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
