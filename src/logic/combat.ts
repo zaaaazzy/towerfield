@@ -47,10 +47,25 @@ export function gap(a: Minion, b: Minion): number {
   return LINE_LENGTH - a.position - b.position;
 }
 
-/** Ein Tick von `deltaSeconds` Sekunden. Verändert die übergebenen Spieler (der Aufrufer arbeitet auf einer Kopie). */
-export function combatTick(players: [CombatPlayer, CombatPlayer], deltaSeconds: number = TICK_SECONDS): void {
+/**
+ * Meldet den tatsächlich verursachten Schaden eines Minions (`side`, `minionId`) an Minions oder Tower.
+ * Der Betrag ist auf die Rest-HP des Ziels gedeckelt; bei mehreren Angreifern wird er anteilig verteilt.
+ */
+export type DamageCollector = (side: number, minionId: number, kind: 'minion' | 'tower', amount: number) => void;
+
+/**
+ * Ein Tick von `deltaSeconds` Sekunden. Verändert die übergebenen Spieler (der Aufrufer arbeitet auf einer Kopie).
+ * Ein optionaler `collector` erfährt den Minion-Schaden; ohne ihn ist das Verhalten unverändert.
+ */
+export function combatTick(
+  players: [CombatPlayer, CombatPlayer],
+  deltaSeconds: number = TICK_SECONDS,
+  collector?: DamageCollector,
+): void {
   const minionDamage = players.map((player) => player.minions.map(() => 0));
   const towerDamage = players.map((player) => player.lines.map(() => 0));
+  /** Treffer von Minions für den Sammler; Ziel ist ein Minion-Index oder (bei `kind` 'tower') ein Line-Index. */
+  const hits: { side: number; minionId: number; kind: 'minion' | 'tower'; targetSide: number; target: number; amount: number }[] = [];
   const nextPosition = players.map((player) => player.minions.map((minion) => minion.position));
 
   for (const side of [0, 1] as const) {
@@ -71,11 +86,13 @@ export function combatTick(players: [CombatPlayer, CombatPlayer], deltaSeconds: 
       });
       if (target >= 0) {
         minionDamage[enemySide]![target]! += minion.damage * deltaSeconds;
+        hits.push({ side, minionId: minion.id, kind: 'minion', targetSide: enemySide, target, amount: minion.damage * deltaSeconds });
         return;
       }
       const tower = enemy.lines[minion.line]!.tower;
       if (tower.hp > 0 && LINE_LENGTH - minion.position <= minion.range) {
         towerDamage[enemySide]![minion.line]! += minion.damage * deltaSeconds;
+        hits.push({ side, minionId: minion.id, kind: 'tower', targetSide: enemySide, target: minion.line, amount: minion.damage * deltaSeconds });
         return;
       }
       nextPosition[side]![index] = Math.min(LINE_LENGTH, minion.position + minion.speed * deltaSeconds);
@@ -94,6 +111,16 @@ export function combatTick(players: [CombatPlayer, CombatPlayer], deltaSeconds: 
       });
       if (target >= 0) minionDamage[enemySide]![target]! += line.tower.damage * deltaSeconds;
     });
+  }
+
+  if (collector) {
+    for (const hit of hits) {
+      const target = players[hit.targetSide]!;
+      const incoming = hit.kind === 'minion' ? minionDamage[hit.targetSide]![hit.target]! : towerDamage[hit.targetSide]![hit.target]!;
+      const remaining = hit.kind === 'minion' ? target.minions[hit.target]!.hp : target.lines[hit.target]!.tower.hp;
+      const share = incoming > remaining ? remaining / incoming : 1;
+      collector(hit.side, hit.minionId, hit.kind, hit.amount * share);
+    }
   }
 
   players.forEach((player, side) => {
