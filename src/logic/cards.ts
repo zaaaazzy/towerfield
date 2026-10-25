@@ -122,6 +122,14 @@ const COPIES: Readonly<Record<string, number>> = {
 /** Karten je Durchgang des Decks (Summe von `COPIES`). */
 export const DECK_CYCLE = Object.values(COPIES).reduce((sum, count) => sum + count, 0);
 
+/** Karten, die in Runde N genau N Einheiten beschwören (Rundenzahl als Multiplikator). */
+const ROUND_SCALED_SUMMONS: readonly string[] = ['summon-archer'];
+
+/** Anzahl der Einheiten, die `cardId` in Runde `round` beschwört: Bogenschütze = Rundenzahl, sonst 1. */
+export function summonCount(cardId: string, round: number): number {
+  return ROUND_SCALED_SUMMONS.includes(cardId) ? Math.max(1, Math.floor(round)) : 1;
+}
+
 export function getCardDef(id: string): CardDef {
   const def = CARD_DEFS.find((card) => card.id === id);
   if (!def) throw new Error(`Unbekannte Karte: ${id}`);

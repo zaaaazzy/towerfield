@@ -46,6 +46,137 @@ import { deriveEventSeed, EARLY_RESPAWN_TICKS, pickRoundEvent, type RoundEventId
 import { isLaneUnlocked, MAX_FIELD_LEVEL, unlockedLanes } from './lanes';
 import { isSlotFree, validSlots } from './placement';
 
+/** Minion, der steht und nichts trifft: hält die Kampfphase am Leben, ohne den Ausgang zu ändern. */
+function idleMinion(id: number): MatchState['players'][0]['minions'][0] {
+  return { id, line: 0, position: 0, slot: 0, hp: 30, maxHp: 30, damage: 0, range: 0, speed: 0 };
+}
+
+/** Zustand in Runde `round`, Spieler 0 hat `summon-archer` auf Hand 0 und genug Energie. */
+function archerState(round: number): MatchState {
+  const state = createMatch(3);
+  state.round = round;
+  state.players[0].hand = ['summon-archer'];
+  state.players[0].energy = 8;
+  return state;
+}
+
+describe('Runde endet bei toten Einheiten', () => {
+  it('beginnt im selben Tick die nächste Runde, wenn keine Minions leben', () => {
+    const state = advance(setReady(setReady(createMatch(3), 0), 1), TICK_MS);
+    expect(state.phase).toBe('planning');
+    expect(state.round).toBe(2);
+    expect(state.combatTicks).toBe(0);
+  });
+
+  it('läuft weiter, solange ein Minion lebt', () => {
+    const start = createMatch(3);
+    start.players[1].minions.push(idleMinion(1));
+    const state = advance(setReady(setReady(start, 0), 1), 10 * TICK_MS);
+    expect(state.phase).toBe('combat');
+    expect(state.combatTicks).toBe(10);
+  });
+
+  it('zählt nur Minions mit hp > 0', () => {
+    const start = createMatch(3);
+    start.players[0].minions.push({ ...idleMinion(1), hp: 0 });
+    const state = advance(setReady(setReady(start, 0), 1), TICK_MS);
+    expect(state.round).toBe(2);
+  });
+
+  it('endet in der letzten Runde per hpOutcome', () => {
+    const start = createMatch(3);
+    start.round = MAX_ROUNDS;
+    start.players[1].lines[0]!.towers[0]!.hp -= 5;
+    const state = advance(setReady(setReady(start, 0), 1), TICK_MS);
+    expect(state.phase).toBe('over');
+    expect(state.outcome).toBe(hpOutcome(state));
+    expect(state.outcome).toBe('player0');
+  });
+
+  it('lässt zerstörte Tower vor dem Rundenwechsel gewinnen', () => {
+    const start = createMatch(3);
+    for (const line of start.players[1].lines) for (const tower of line.towers) tower.hp = 0;
+    const state = advance(setReady(setReady(start, 0), 1), TICK_MS);
+    expect(state.phase).toBe('over');
+    expect(state.outcome).toBe('player0');
+  });
+});
+
+describe('Bogenschützen wachsen mit der Runde', () => {
+  it('beschwört in Runde 1 einen und in Runde 3 drei Bogenschützen für eine Karte', () => {
+    const one = playCard(archerState(1), 0, 0, 0);
+    const three = playCard(archerState(3), 0, 0, 0);
+    expect(one.ok && one.state.players[0].minions).toHaveLength(1);
+    if (!three.ok) throw new Error('abgelehnt');
+    const player = three.state.players[0];
+    expect(player.minions).toHaveLength(3);
+    expect(new Set(player.minions.map((m) => m.slot)).size).toBe(3);
+    expect(player.energy).toBe(8 - getCardDef('summon-archer').cost);
+    expect(player.hand).toEqual([]);
+    expect(player.played).toHaveLength(1);
+  });
+
+  it('beginnt bei gewünschtem Slot dort und füllt mit den niedrigsten freien auf', () => {
+    const result = playCard(archerState(2), 0, 0, 0, 3);
+    if (!result.ok) throw new Error('abgelehnt');
+    expect(result.state.players[0].minions.map((m) => m.slot)).toEqual([3, 0]);
+  });
+
+  it('begrenzt auf die freien Slots, wenn die Lane nicht für N Einheiten reicht', () => {
+    const state = archerState(8);
+    const slots = validSlots(state.players[0].lines[0]!.towers);
+    expect(slots.length).toBeLessThan(8);
+    const result = playCard(state, 0, 0, 0);
+    if (!result.ok) throw new Error('abgelehnt');
+    expect(result.state.players[0].minions.map((m) => m.slot)).toEqual(slots);
+  });
+
+  it('lehnt ab, wenn kein Slot frei ist, und ändert nichts', () => {
+    const state = archerState(2);
+    const slots = validSlots(state.players[0].lines[0]!.towers);
+    slots.forEach((slot, index) => state.players[0].minions.push({ ...idleMinion(index + 1), slot }));
+    expect(playCard(state, 0, 0, 0)).toEqual({ ok: false, state, reason: 'line-full' });
+  });
+
+  it('belegt nie einen Slot doppelt', () => {
+    const state = archerState(2);
+    state.players[0].hand = ['summon-archer', 'summon-archer'];
+    const first = playCard(state, 0, 0, 0);
+    if (!first.ok) throw new Error('abgelehnt');
+    const second = playCard(first.state, 0, 0, 0);
+    if (second.ok) {
+      const slots = second.state.players[0].minions.map((m) => `${m.line}:${m.slot}`);
+      expect(new Set(slots).size).toBe(slots.length);
+    } else {
+      expect(second.reason).toBe('line-full');
+    }
+  });
+
+  it('nimmt beim Undo alle N Einheiten zurück und erstattet genau einmal', () => {
+    const start = archerState(3);
+    const played = playCard(start, 0, 0, 0);
+    if (!played.ok) throw new Error('abgelehnt');
+    const ids = played.state.players[0].minions.map((m) => m.id);
+    const undone = undoSummon(played.state, 0, ids[1]!);
+    if (!undone.ok) throw new Error('abgelehnt');
+    const player = undone.state.players[0];
+    expect(player.minions).toEqual([]);
+    expect(player.placements).toEqual([]);
+    expect(player.played).toEqual([]);
+    expect(player.energy).toBe(start.players[0].energy);
+    expect(player.hand).toEqual(['summon-archer']);
+    expect(undone.state.stats.played['summon-archer']?.[0]).toBe(0);
+  });
+
+  it('lässt andere Karten bei einer Einheit', () => {
+    const state = createMatch(3);
+    state.round = 4;
+    state.players[0].hand = ['summon-minion'];
+    const result = playCard(state, 0, 0, 0);
+    expect(result.ok && result.state.players[0].minions).toHaveLength(1);
+  });
+});
+
 describe('Runden-Ereignisse', () => {
   function seedWith(event: RoundEventId): number {
     for (let seed = 0; seed < 1000; seed += 1) {
@@ -103,7 +234,7 @@ describe('Runden-Ereignisse', () => {
       { id: 1, line: 0, slot: 0, position: 0, hp: 30, damage: 6, range: MINION_RANGE, speed: 10 },
       { id: 2, line: 0, position: LINE_LENGTH - 1, hp: 30, damage: 6, range: MINION_RANGE, speed: 10 },
     );
-    state.players[0].placements.push({ minionId: 1, cardId: 'x' });
+    state.players[0].placements.push({ minionId: 1, cardId: 'x', group: 1 });
     const combat = setReady(setReady(state, 0), 1);
     expect(combat.players[0].minions[0]!.position).toBe(0);
     expect(combat.players[0].minions[1]!.position).toBe(LINE_LENGTH);
@@ -346,7 +477,10 @@ describe('Runden und Ziehen', () => {
   });
 
   it('beendet die Kampfphase erst nach der Rundendauer', () => {
-    let state = setReady(setReady(createMatch(3), 0), 1);
+    let state = createMatch(3);
+    // Ein untätiger Minion hält die Kampfphase am Leben (ohne Minions endet sie sofort).
+    state.players[0].minions.push(idleMinion(1));
+    state = setReady(setReady(state, 0), 1);
     state = advance(state, (COMBAT_TICKS - 2) * TICK_MS);
     expect(state.phase).toBe('combat');
     expect(state.round).toBe(1);
@@ -1032,7 +1166,7 @@ describe('Respawn der Überlebenden', () => {
   function withMinions(minions: ReturnType<typeof minion>[]): MatchState {
     const state = withLevel(createMatch(3), MAX_FIELD_LEVEL);
     state.players[0].minions = minions;
-    state.players[0].placements = minions.map((m) => ({ minionId: m.id, cardId: 'summon-minion' }));
+    state.players[0].placements = minions.map((m) => ({ minionId: m.id, cardId: 'summon-minion', group: m.id }));
     return state;
   }
 
