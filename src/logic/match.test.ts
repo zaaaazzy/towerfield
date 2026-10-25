@@ -644,4 +644,17 @@ describe('Respawn der Überlebenden', () => {
     };
     expect(run()).toEqual(run());
   });
+
+  it('belegt nach Runde 2 in echten Matches keinen Slot doppelt und bleibt in der Zone', () => {
+    for (let seed = 1; seed <= 20; seed += 1) {
+      let state = createMatch(seed);
+      state = botPlan(botPlan(state, 0), 1);
+      state = advance(state, COMBAT_TICKS * TICK_MS);
+      for (const player of state.players) {
+        const keys = player.minions.map((m) => `${m.line}:${m.position}`);
+        expect(new Set(keys).size).toBe(keys.length);
+        for (const m of player.minions) expect(m.position).toBeLessThanOrEqual(PLACEMENT_ZONE_END);
+      }
+    }
+  });
 });
