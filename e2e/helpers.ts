@@ -2,6 +2,7 @@ import { expect, type Page } from '@playwright/test';
 import { getCardDef } from '../src/logic/cards';
 import { cardAt, fanLayout, HAND_FAN, poseContains, sortHand } from '../src/logic/hand-layout';
 import type { MatchState } from '../src/logic/match';
+import { type LineGeometry, positionToY, slotPosition } from '../src/logic/placement';
 
 /** Spielfläche in Spielkoordinaten (wie `VIEW` in der Szene). */
 const VIEW = { width: 360, height: 640 };
@@ -77,6 +78,53 @@ export async function cardPointOf(page: Page, index: number): Promise<{ x: numbe
 export const LINE_X = [60, 180, 300];
 const LINE_TAP_Y = 250;
 export const READY_BUTTON = { x: 290, y: 612 };
+
+/**
+ * Spiegel von `GEOMETRY`/`FIELD` aus `src/scenes/field-view.ts`. Die Datei importiert Phaser und läuft nicht im
+ * Node-Prozess der Tests; die Positionsberechnung selbst kommt aus `src/logic/placement.ts`.
+ */
+const GEOMETRY: LineGeometry = { lineCenters: LINE_X, lineHalfWidth: 50, ownTowerY: 400, enemyTowerY: 90 };
+
+/** Schwelle der Szene, ab der eine Bewegung als Ziehen gilt (`DRAG_THRESHOLD` in `main-scene.ts`). */
+export const DRAG_THRESHOLD = 8;
+
+export interface Point {
+  x: number;
+  y: number;
+}
+
+/** Spielkoordinaten des Slots `slot` auf der Line `line` (Mitte der Line). */
+export function slotPoint(line: number, slot: number): Point {
+  return { x: LINE_X[line]!, y: positionToY(slotPosition(slot), GEOMETRY) };
+}
+
+/** Spielkoordinaten, an denen die Szene einen eigenen Minion zeichnet (greifbar, mit seitlichem Versatz je `id`). */
+export function minionPoint(minion: { id: number; line: number; position: number }): Point {
+  return { x: LINE_X[minion.line]! + (minion.id % 2 === 0 ? 8 : -8), y: positionToY(minion.position, GEOMETRY) };
+}
+
+/** Punkt zwischen zwei Lines, der zu keiner Line gehört. */
+export function pointBetweenLines(): Point {
+  return { x: (LINE_X[0]! + LINE_X[1]!) / 2, y: slotPoint(0, 1).y };
+}
+
+/**
+ * Zieht mit gedrückter Maustaste von `from` nach `to` (Spielkoordinaten, gleiche Umrechnung wie `tap`).
+ * Mehrere `steps`, sonst erzeugt Playwright nur ein einziges Move-Ereignis.
+ */
+export async function drag(page: Page, from: Point, to: Point, steps = 8): Promise<void> {
+  const box = (await page.locator('#game canvas').boundingBox())!;
+  const toPage = (point: Point) => ({
+    x: box.x + (point.x / VIEW.width) * box.width,
+    y: box.y + (point.y / VIEW.height) * box.height,
+  });
+  const start = toPage(from);
+  const end = toPage(to);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps });
+  await page.mouse.up();
+}
 
 export async function tapCard(page: Page, index: number): Promise<void> {
   const point = await cardPointOf(page, index);
