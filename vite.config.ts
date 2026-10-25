@@ -20,5 +20,13 @@ export default defineConfig({
   test: {
     include: ['src/**/*.test.ts'],
     environment: 'node',
+    // Nur mit `npm run test:coverage` (vitest run --coverage) aktiv; `npm test` misst nichts.
+    coverage: {
+      provider: 'v8',
+      include: ['src/logic/**/*.ts'],
+      exclude: ['src/**/*.test.ts'],
+      reporter: ['text', 'html', 'json-summary'],
+      reportsDirectory: 'coverage',
+    },
   },
 });

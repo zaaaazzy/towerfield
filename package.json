@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "test:smoke": "vite build && playwright test"
   },
   "dependencies": {
@@ -19,6 +20,7 @@
   "devDependencies": {
     "@playwright/test": "1.64.1",
     "@types/node": "^22.15.0",
+    "@vitest/coverage-v8": "^5.0.5",
     "typescript": "^5.9.3",
     "vite": "^8.3.5",
     "vitest": "^5.0.5"
