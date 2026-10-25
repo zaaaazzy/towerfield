@@ -169,9 +169,9 @@ Minion-Tempo, Balance-Szene, E2E, Minion-Statistik, Replay, Kartenfilter, Heiler
 | Sieg | Nach jedem Kampf-Tick: hat ein Spieler keinen lebenden Tower mehr, endet das Match sofort; der andere gewinnt. Haben beide in demselben Tick keinen mehr, ist es unentschieden. Nach den 400 Ticks von Runde 8 gewinnt, wer mehr Tower-LP (Summe aller Tower aller freien Lanes) hat; gleiche Summe ist unentschieden. Vor Runde 8 zählt der Tower-LP-Vergleich nie. |
 
 Deck-Länge: `START_HAND + DRAW_PER_ROUND * (MAX_ROUNDS - 1)` = 26 Karten, Mischung per Seed (Fisher-Yates). Der Vorrat
-besteht aus Durchgängen der Kopienzahlen (je 17 Karten); die 26 Karten sind ein voller Durchgang plus die ersten 9
-Karten des zweiten (Minion ×4, Brocken ×2, Bogenschütze ×2, Heiler ×1). Im Deck stecken daher Minion 8, Brocken 4,
-Bogenschütze 4, Heiler 2, die übrigen Karten wie in der Tabelle. Beide Spieler ziehen dieselben Karten.
+besteht aus Durchgängen der Kopienzahlen (je 18 Karten); die 26 Karten sind ein voller Durchgang plus die ersten 8
+Karten des zweiten (Minion ×4, Brocken ×2, Bogenschütze ×2). Im Deck stecken daher Minion 8, Brocken 4,
+Bogenschütze 4, Heiler 1, Zerstörer 1, die übrigen Karten wie in der Tabelle. Beide Spieler ziehen dieselben Karten.
 
 ### Karten (`src/logic/cards.ts`)
 
@@ -181,6 +181,7 @@ Bogenschütze 4, Heiler 2, die übrigen Karten wie in der Tabelle. Beide Spieler
 | `summon-brute` | Brocken | 2 | 80 LP, 12 Schaden/s | 4 | 8 | 2 |
 | `summon-archer` | Bogenschütze | 2 | 20 LP, 7 Schaden/s | 14 | 10 | 2 |
 | `summon-healer` | Heiler | 2 | 20 LP, heilt 5 LP/s (`damage`), greift nie an | 10 | 10 | 1 |
+| `summon-destroyer` | Zerstörer | 2 | 40 LP, 8 Schaden/s; bei Tod Explosion (Radius 10, 15 Schaden an gegnerische Minions der Lane), siehe [Zerstörer](anwendung-zerstoerer.md) | 4 | 8 | 1 |
 | `line-upgrade` | Lane +1 | 2 | Feld-Stufe +1 (max. 3, ohne Ziel): je eine neue Lane oben und unten, ein Slot mehr je Lane | – | – | 2 |
 | `tower-hp` | Tower Leben | 1 | +30 max. LP und +30 LP | – | – | 2 |
 | `tower-damage` | Tower Schaden | 2 | +4 Schaden/s | – | – | 1 |
@@ -192,8 +193,9 @@ Eine abgelehnte Karte lässt den Zustand unverändert (`PlayResult.ok === false`
 
 Rollen (Werte aus `CARD_DEFS`; ohne eigenes `range` gilt `MINION_RANGE = 4`, ohne `speed` `MINION_SPEED = 10`):
 Nahkampf Minion (Reichweite 4, Tempo 10), Tank Brocken (4, Tempo 8), Fernkampf Bogenschütze (Reichweite 14, Tempo 10),
-Heiler (`role: 'healer'`, Reichweite 10, Tempo 10; `damage` 5 ist dort Heilung pro Sekunde). Die Bot-Priorität
-(`PRIORITY` in `bot.ts`) lautet: Minion, Bogenschütze, Heiler, Tower Leben, Line +1, Minions Line, Brocken, Tower
+Heiler (`role: 'healer'`, Reichweite 10, Tempo 10; `damage` 5 ist dort Heilung pro Sekunde), Zerstörer
+(`role: 'destroyer'`, `explodes`, Reichweite 4, Tempo 8; Kettenreaktion im selben Tick in Wellen). Die Bot-Priorität
+(`PRIORITY` in `bot.ts`) lautet: Minion, Bogenschütze, Heiler, Zerstörer, Tower Leben, Line +1, Minions Line, Brocken, Tower
 Schaden, Minions alle.
 
 #### Abweichungen zum Designkonzept
@@ -367,7 +369,7 @@ sie, spielt die Replay-Szene beide Seiten Zug für Zug nach, mit Kommentaren (�
 dazu „verschiebt …“, „nimmt … zurück“, „ist bereit“). Takt `PLAY_PAUSE_MS`, Kampf mit `SLOWMO_FACTOR`; Pause, Spulen und
 Geschwindigkeitswahl gibt es nicht.
 
-**Format `moves` (Version 2, seit dem Lane-Umbau; Links der Version 1 sind ungültig):** Nur die Zeichen `0-9 a-z . -`. Aufbau `v2` und je Aktion ein Token mit `.` davor.
+**Format `moves` (Version 3, seit der Karte Zerstörer; Links der Version 1 und 2 sind ungültig):** Nur die Zeichen `0-9 a-z . -`. Aufbau `v3` und je Aktion ein Token mit `.` davor.
 
 | Aktion | Token | Felder |
 |---|---|---|
@@ -376,7 +378,7 @@ Geschwindigkeitswahl gibt es nicht.
 | Beschwörung zurücknehmen | `u<R><P>-<Minion>` | Minion-Id |
 | Bereit | `r<R><P>` | – |
 
-`<R>` ist die Runde (1–8), `<P>` der Spieler (0 Blau, 1 Orange). Beispiel: `v2.p10-3-0.m10-1-0-2.r10`. Grenzen beim
+`<R>` ist die Runde (1–8), `<P>` der Spieler (0 Blau, 1 Orange). Beispiel: `v3.p10-3-0.m10-1-0-2.r10`. Grenzen beim
 Lesen: 4000 Zeichen und 800 Aktionen.
 
 **Ungültige Links** führen nie zu Absturz oder `console.error`:
@@ -429,7 +431,7 @@ flowchart LR
 | `theme.ts` | `PALETTE`, `TEXT`, `FONTS`, `FRAME`; `fillGradient`, `drawPanel`, `drawBar`, `drawButton`. Einzige Quelle für Farben und Schriften. |
 | `textures.ts` | `ensureTextures`, `addBackdrop`: Hintergrund, Vignette, Boden, Wege, Partikeltexturen (`backdrop`, `spark`, `glow`) per Canvas-Textur; eigener fester Zeichen-Zufall, nicht der Spiel-Seed. |
 | `card-view.ts` | `drawCard`: Rahmen, Kopfzeile, Kosten-Kristall, Bildfläche mit Symbol, Textfeld, Typ-Banner. |
-| `field-view.ts` | `drawBoard`, `drawMinions`, `drawTower`, `drawMinionBody`; Blau = du, Orange = Gegner. Minion-Form nach Rolle: Kreis, Raute (Fernkämpfer), Kreuz (Heiler). |
+| `field-view.ts` | `drawBoard`, `drawMinions`, `drawTower`, `drawMinionBody`; Blau = du, Orange = Gegner. Minion-Form nach Rolle: Kreis, Raute (Fernkämpfer), Kreuz (Heiler), Stachelkugel (Zerstörer). |
 | `effects.ts` | Klasse `Effects`: Partikel, Leuchtringe, Schadenszahlen, Kamerawackeln beim Tower-Fall, Animation beim Ausspielen. |
 | `card-style.ts` | `cardTypeStyle` (Typ → Rahmenfarbe, Symbol, Banner) und `describeCard` (Kurztext); mit Test. |
 | `fx-events.ts` | `diffFx` leitet Treffer, Tod, Beschwörung und Turmschaden aus zwei Zuständen ab; mit Test. |
