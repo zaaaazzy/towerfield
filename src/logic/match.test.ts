@@ -13,6 +13,7 @@ import {
   hpOutcome,
   lineCapacity,
   LINE_COUNT,
+  MAX_ENERGY,
   MAX_LINE_LEVEL,
   MAX_ROUNDS,
   type MatchState,
@@ -31,7 +32,7 @@ function find(state: MatchState, player: PlayerIndex, id: string): number {
 }
 
 /** Zustand mit einer bestimmten Karte auf der Hand beider Spieler (Hand überschrieben). */
-function withHand(state: MatchState, hand: string[], energy = 10): MatchState {
+function withHand(state: MatchState, hand: string[], energy = MAX_ENERGY): MatchState {
   const copy = structuredClone(state);
   for (const player of copy.players) {
     player.hand = [...hand];
@@ -123,8 +124,21 @@ describe('Runden und Ziehen', () => {
     expect(state.drawn).toBe(START_HAND + DRAW_PER_ROUND);
   });
 
-  it('begrenzt die Energie', () => {
-    expect(energyForRound(100)).toBeLessThanOrEqual(10);
+  it('begrenzt die Energie auf 8', () => {
+    expect(MAX_ENERGY).toBe(8);
+    expect([1, 2, 3, 4, 5, 6].map(energyForRound)).toEqual([3, 4, 5, 6, 7, 8]);
+    expect(energyForRound(7)).toBe(8);
+    expect(energyForRound(100)).toBe(8);
+  });
+
+  it('gibt in keiner Runde eines Matches mehr als MAX_ENERGY Energie', () => {
+    let state = createMatch(3);
+    for (let round = 1; round <= MAX_ROUNDS; round += 1) {
+      expect(state.round).toBe(round);
+      for (const player of state.players) expect(player.energy).toBeLessThanOrEqual(MAX_ENERGY);
+      state = advance(setReady(setReady(state, 0), 1), COMBAT_TICKS * TICK_MS);
+      if (state.phase === 'over') break;
+    }
   });
 
   it('beendet die Kampfphase erst nach der Rundendauer', () => {
@@ -259,7 +273,7 @@ describe('Karten ausspielen', () => {
     expect(player.lines[2]!.level).toBe(2);
     expect(player.lines[0]!.level).toBe(1);
     expect(player.hand).toEqual(['summon-minion']);
-    expect(player.energy).toBe(10 - getCardDef('line-upgrade').cost);
+    expect(player.energy).toBe(MAX_ENERGY - getCardDef('line-upgrade').cost);
     // Gegner und Ausgangszustand bleiben unberührt.
     expect(result.state.players[1].lines[2]!.level).toBe(1);
     expect(state.players[0].lines[2]!.level).toBe(1);

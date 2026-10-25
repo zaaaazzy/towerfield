@@ -70,7 +70,7 @@ zurücknehmbar.
 | `START_HAND` | `match.ts` | 7 | 5 | Mobile Hand passt auf eine Zeile (5 Karten × 64 px = 320 px); weniger Auswahl, schnellere Entscheidungen |
 | `DRAW_PER_ROUND` | `match.ts` | 5 | 3 | Mit 5 + 7 × 3 = 26 Karten im Deck reicht es; Hand wächst langsam, Handlimit wirkt nicht schon in Runde 2 (7 + 5 = 12 > 10) |
 | `HAND_LIMIT` | `match.ts` | 10 | 10 (bestätigt) | Bleibt; überzählige Karten verfallen (keine Ablage) |
-| `MAX_ENERGY` | `match.ts` | 10 | 8 | Energie 3…8 ab Runde 6 hält die Ausgaben begrenzt (günstigste Karte 1, teuerste 3) |
+| `MAX_ENERGY` | `match.ts` | 8 | 8 (umgesetzt, vorher 10) | Energie 3…8 ab Runde 6 hält die Ausgaben begrenzt (günstigste Karte 1, teuerste 3) |
 | `BASE_ENERGY`, `ENERGY_PER_ROUND` | `match.ts` | 3 / 1 | unverändert | Reicht für 1–2 Karten in Runde 1, wächst gleichmäßig |
 | `MAX_ROUNDS`, `COMBAT_TICKS` | `match.ts` | 8 / 400 | unverändert | Spieldauer ca. 8 × (Planung + 20 s) |
 | `TOWER_RANGE` | `combat.ts` | 25 | 20 | Fernkämpfer (Reichweite 14) sollen den Tower überhaupt erst treffen, wenn sie in seiner Reichweite stehen, aber nicht lange ungestraft |
