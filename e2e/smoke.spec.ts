@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 /** Was der Test von der Szene liest (nur Typ, der Code läuft im Browser). */
 interface MainSceneView {
-  current: { player: { x: number } };
+  current: { phase: string; players: { lines: unknown[]; hand: unknown[] }[] };
 }
 
 test('das Spiel startet, zeichnet in den Canvas und meldet keine Fehler', async ({ page }) => {
@@ -45,13 +45,24 @@ test('das Spiel startet, zeichnet in den Canvas und meldet keine Fehler', async 
   // Hintergrund, Raster, Figur, Stern und Text: ein leerer oder einfarbiger Canvas fällt hier auf.
   expect(colors).toBeGreaterThan(3);
 
-  // Pfeiltaste nach rechts bewegt die Figur.
-  const playerX = () =>
-    page.evaluate(() => (window.game!.scene.getScene('main') as unknown as MainSceneView).current.player.x);
-  const before = await playerX();
-  await page.keyboard.down('ArrowRight');
-  await expect.poll(playerX).toBeGreaterThan(before);
-  await page.keyboard.up('ArrowRight');
+  // Ohne Eingabe: 3 Lines je Spieler mit Tower, 7 Handkarten, Planungsphase.
+  const view = () =>
+    page.evaluate(() => {
+      const state = (window.game!.scene.getScene('main') as unknown as MainSceneView).current;
+      return {
+        phase: state.phase,
+        lines: state.players.map((player) => player.lines.length),
+        hands: state.players.map((player) => player.hand.length),
+      };
+    });
+  const start = await view();
+  expect(start.phase).toBe('planning');
+  expect(start.lines).toEqual([3, 3]);
+  expect(start.hands[0]).toBe(7);
+
+  // Tippen auf „Bereit“ (unten rechts; Spielkoordinaten 360x640) startet die Kampfphase.
+  await page.mouse.click(box!.x + (290 / 360) * box!.width, box!.y + (612 / 640) * box!.height);
+  await expect.poll(async () => (await view()).phase).not.toBe('planning');
 
   expect(errors).toEqual([]);
 });
