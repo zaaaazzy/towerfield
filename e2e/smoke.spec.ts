@@ -352,64 +352,7 @@ test('Nach Spielende zeigt die MainScene eine Teilen-URL, die dasselbe Match als
   expect(errors).toEqual([]);
 });
 
-/** Was der Drag-Test von der Szene liest. */
-interface DragSceneView {
-  current: { players: { minions: { id: number; line: number; position: number }[] }[] };
-}
-
-test('ein beschworener Minion lässt sich in der Planung ziehen, danach nicht mehr', async ({ page }) => {
-  const errors: string[] = [];
-  page.on('console', (message) => {
-    if (message.type() === 'error') errors.push(message.text());
-  });
-  page.on('pageerror', (error) => errors.push(error.message));
-
-  await page.goto('/');
-  const canvas = page.locator('#game canvas');
-  await expect(canvas).toBeVisible();
-  await page.waitForFunction(() => window.game?.scene.isActive('main') && window.game.loop.frame > 10);
-  const box = (await canvas.boundingBox())!;
-  const at = (x: number, y: number) => ({ x: box.x + (x / 360) * box.width, y: box.y + (y / 640) * box.height });
-  const humanMinions = () =>
-    page.evaluate(() => (window.game!.scene.getScene('main') as unknown as DragSceneView).current.players[0]!.minions);
-  const cardPoint = (index: number) => at(7 + (index % 5) * 70 + 33, 440 + Math.floor(index / 5) * 66 + 31);
-  const click = (point: { x: number; y: number }) => page.mouse.click(point.x, point.y);
-
-  // Karten der Reihe nach auf Line 0 spielen, bis ein Minion auf dem Feld steht.
-  for (let attempt = 0; attempt < 7 && (await humanMinions()).length === 0; attempt += 1) {
-    await click(cardPoint(attempt % 3));
-    await click(at(60, 300));
-  }
-  const placed = await humanMinions();
-  test.skip(placed.length === 0, 'Die Starthand enthält keinen Minion.');
-  const minion = placed[0]!;
-  const yOf = (position: number) => 400 - (position / 100) * 310;
-  const offset = minion.id % 2 === 0 ? 8 : -8;
-  const drag = async (from: { x: number; y: number }, to: { x: number; y: number }) => {
-    await page.mouse.move(from.x, from.y);
-    await page.mouse.down();
-    await page.mouse.move(to.x, to.y, { steps: 6 });
-    await page.mouse.up();
-  };
-
-  // Loslassen außerhalb aller Lines (zwischen Line 0 und 1): Minion bleibt.
-  await drag(at(60 + offset, yOf(minion.position)), at(120, 250));
-  expect(await humanMinions()).toEqual([minion]);
-
-  // Ziehen auf Slot 1 (Position 6) von Line 1.
-  await drag(at(60 + offset, yOf(minion.position)), at(180, yOf(6)));
-  const moved = (await humanMinions()).find((m) => m.id === minion.id)!;
-  expect(moved.line).toBe(1);
-  expect(moved.position).toBe(6);
-
-  // Nach „Bereit“ lässt sich nichts mehr ziehen.
-  await click(at(290, 612));
-  await drag(at(180 + offset, yOf(6)), at(300, yOf(10)));
-  const after = (await humanMinions()).find((m) => m.id === minion.id);
-  expect(after?.line).not.toBe(2);
-
-  expect(errors).toEqual([]);
-});
+// Das Verschieben von Minions per Drag-and-Drop prüfen die deterministischen Tests „Drag: …“ in gameplay.spec.ts.
 
 /** Was der Filter-Test von der Szene liest und setzt (Felder sind zur Laufzeit erreichbar). */
 interface FilterSceneView {
