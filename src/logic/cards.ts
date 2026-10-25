@@ -130,13 +130,19 @@ export function getCardDef(id: string): CardDef {
 
 /**
  * Deck der Länge `length`: die Karten laut `COPIES` (so oft wiederholt wie nötig), einmal per Seed gemischt
- * (Fisher-Yates). Gleicher Seed ergibt dieselbe Reihenfolge.
+ * (Fisher-Yates). Gleicher Seed ergibt dieselbe Reihenfolge. `defs` und `copies` sind nur für Tests austauschbar;
+ * Karten ohne Eintrag in `copies` kommen nicht vor (mindestens eine Karte braucht einen Eintrag > 0).
  */
-export function buildDeck(seed: number, length: number): string[] {
+export function buildDeck(
+  seed: number,
+  length: number,
+  defs: readonly CardDef[] = CARD_DEFS,
+  copies: Readonly<Record<string, number>> = COPIES,
+): string[] {
   const pool: string[] = [];
   while (pool.length < length) {
-    for (const def of CARD_DEFS) {
-      for (let copy = 0; copy < (COPIES[def.id] ?? 0); copy += 1) pool.push(def.id);
+    for (const def of defs) {
+      for (let copy = 0; copy < (copies[def.id] ?? 0); copy += 1) pool.push(def.id);
     }
   }
   pool.length = length;

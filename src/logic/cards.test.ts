@@ -163,6 +163,24 @@ describe('Karten', () => {
     expect(buildDeck(5, 42)).not.toEqual(buildDeck(6, 42));
   });
 
+  it('lässt Karten ohne COPIES-Eintrag weg und liefert trotzdem die verlangte Länge', () => {
+    const [first, second] = CARD_DEFS;
+    const deck = buildDeck(4, 10, [first!, second!], { [first!.id]: 2 });
+    expect(deck).toHaveLength(10);
+    expect(deck).not.toContain(second!.id);
+    expect(new Set(deck)).toEqual(new Set([first!.id]));
+  });
+
+  it('liefert ohne die optionalen Parameter exakt das bisherige Deck', () => {
+    const expected = [
+      'minion-upgrade-all', 'tower-hp', 'tower-hp', 'buff-minion', 'minion-upgrade-line', 'tower-shield',
+      'summon-minion', 'summon-minion', 'summon-brute', 'summon-archer', 'summon-healer', 'summon-minion',
+      'minion-upgrade-line', 'summon-archer', 'line-upgrade', 'summon-destroyer', 'summon-minion', 'line-upgrade',
+      'summon-brute', 'tower-lightning', 'tower-damage',
+    ];
+    expect(buildDeck(5, 21)).toEqual(expected);
+  });
+
   it('liefert die verlangte Länge nur mit bekannten Karten', () => {
     const deck = buildDeck(1, 42);
     expect(deck).toHaveLength(42);
