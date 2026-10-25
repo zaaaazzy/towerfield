@@ -88,6 +88,9 @@ Produktion); `moves` liest die Szene selbst. Ohne gültigen Parameter bleibt all
   0,35 läuft. Eine Geschwindigkeitswahl oder Pause gibt es bewusst nicht.
 - **Alte Links:** Nach einer Regeländerung sind aufgezeichnete Links nur mit erhöhter Version erkennbar ungültig; ohne
   Versionssprung brechen sie an der ersten abweichenden Aktion ab oder enden anders.
+- **Lange Seeds:** `decodeMatch` kürzt Seeds mit bis zu 15 Ziffern auf 32 Bit (`0xffffffff`). Das geschieht beim
+  Aufzeichnen und Nachspielen gleich, das Replay bleibt also konsistent (Test in `match-record.test.ts`).
+- **Handbuch:** `docs/handbuch.md` beschreibt das Teilen für Spieler; diese Datei ist die technische Anwendungsdoku.
 - **Keine neuen Regeln:** `MatchState` und die Spielregeln sind unverändert; das Replay nutzt `createMatch`, `playCard`,
   `moveMinion`, `undoSummon`, `setReady` und `advance`. Gespeichert wird nur in der URL.
 - **`MainScene` und Undo:** Die `MainScene` bietet „Beschwörung zurücknehmen“ noch nicht an; das Format und das Replay
