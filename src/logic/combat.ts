@@ -10,8 +10,9 @@ export const LINE_LENGTH = 100;
 export const TICK_MS = 50;
 export const TICK_SECONDS = TICK_MS / 1000;
 export const MINION_RANGE = 4;
+/** Standard-Tempo (Minions ohne eigene Rolle); die Simulation nutzt `Minion.speed`. */
 export const MINION_SPEED = 10;
-export const TOWER_RANGE = 25;
+export const TOWER_RANGE = 20;
 
 export interface Tower {
   hp: number;
@@ -28,6 +29,8 @@ export interface Minion {
   hp: number;
   /** Schaden pro Sekunde. */
   damage: number;
+  /** Tempo in Einheiten pro Sekunde. */
+  speed: number;
 }
 
 /** Was der Kampf von einem Spieler braucht; `lines[i].tower` ist der Tower der Line i. */
@@ -72,7 +75,7 @@ export function combatTick(players: [CombatPlayer, CombatPlayer], deltaSeconds: 
         towerDamage[enemySide]![minion.line]! += minion.damage * deltaSeconds;
         return;
       }
-      nextPosition[side]![index] = Math.min(LINE_LENGTH, minion.position + MINION_SPEED * deltaSeconds);
+      nextPosition[side]![index] = Math.min(LINE_LENGTH, minion.position + minion.speed * deltaSeconds);
     });
 
     me.lines.forEach((line, lineIndex) => {

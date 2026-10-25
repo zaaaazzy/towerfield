@@ -19,12 +19,12 @@ import { firstFreeSlot, isSlotFree, isValidSlot, slotPosition } from './placemen
 export const LINE_COUNT = 3;
 export const START_HAND = 7;
 export const DRAW_PER_ROUND = 5;
-/** Handlimit (Vorschlag aus dem Auftrag, noch zu bestätigen): neu gezogene Karten über dem Limit verfallen. */
+/** Handlimit (bestätigt, siehe docs/designkonzept.md): Karten über dem Limit verfallen am Ende der Hand. */
 export const HAND_LIMIT = 10;
 export const MAX_ROUNDS = 8;
 export const BASE_ENERGY = 3;
 export const ENERGY_PER_ROUND = 1;
-export const MAX_ENERGY = 10;
+export const MAX_ENERGY = 8;
 export const MAX_LINE_LEVEL = 5;
 export const BASE_CAPACITY = 2;
 export const TOWER_HP = 100;
@@ -207,6 +207,7 @@ export function playCard(
         position: slotPosition(summonSlot),
         hp: def.hp + line!.bonus.hp,
         damage: def.damage + line!.bonus.damage,
+        speed: def.speed,
       };
       player.nextMinionId += 1;
       player.minions.push(minion);

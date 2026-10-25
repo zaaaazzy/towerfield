@@ -14,6 +14,7 @@ import {
   playCard,
   setReady,
 } from '../logic/match';
+import { parseSeed } from '../logic/seed';
 import { type DropTarget, dropTargetAt, type LineGeometry, positionToY, slotPosition } from '../logic/placement';
 
 /** Spielfläche im Hochformat; Phaser skaliert sie per `Scale.FIT` auf den Bildschirm. */
@@ -123,8 +124,13 @@ export class MainScene extends Phaser.Scene {
     return this.state;
   }
 
+  /** Index der angetippten Handkarte, die auf eine Line wartet (nur lesen, z. B. für E2E-Tests). */
+  get selectedCard(): number | null {
+    return this.selected;
+  }
+
   create(): void {
-    this.state = createMatch(Date.now() >>> 0);
+    this.state = createMatch(parseSeed(window.location.search) ?? Date.now() >>> 0);
     this.texts = [];
     this.selected = null;
     this.message = '';

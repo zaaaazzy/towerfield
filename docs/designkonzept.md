@@ -40,8 +40,9 @@ flowchart LR
 
 - **Deck:** ein per Seed gemischtes Deck, für beide Spieler gleich (`buildDeck`); gleiche Reihenfolge, daher fair und
   testbar. Länge = `START_HAND + DRAW_PER_ROUND × (MAX_ROUNDS − 1)`.
-- **Hand:** Reihenfolge = Ankunft. Beim Ziehen über `HAND_LIMIT` hinaus wandern die überzähligen Karten in die Ablage.
-- **Ablage:** gespielte und verfallene Karten. Ist nur Anzeige (kein Nachmischen); Datenfeld folgt in Folgeauftrag 4.
+- **Hand:** Reihenfolge = Ankunft. Beim Ziehen über `HAND_LIMIT` hinaus verfallen die zuletzt gezogenen Karten (am Ende der Hand abgeschnitten, es gibt keine Ablage dafür). Verfallene
+  Karten zählen als gezogen.
+- **Ablage:** gespielte Karten (verfallene kommen nicht hinein; eine Ablage für sie wäre ein Folgeauftrag). Ist nur Anzeige (kein Nachmischen); Datenfeld folgt in Folgeauftrag 4.
   Eine per `undoSummon` zurückgenommene Karte kommt zurück an die Hand (nicht in die Ablage).
 - **Energie:** pro Runde neu gesetzt (`3 + (Runde − 1)`, max. `MAX_ENERGY`), nicht übertragbar.
 - **Ausspielen:** Phase Planung, Spieler nicht bereit, genug Energie, gültiges Ziel. Sonst Fehler (`PlayError`) und
@@ -68,13 +69,13 @@ zurücknehmbar.
 |---|---|---|---|---|
 | `START_HAND` | `match.ts` | 7 | 5 | Mobile Hand passt auf eine Zeile (5 Karten × 64 px = 320 px); weniger Auswahl, schnellere Entscheidungen |
 | `DRAW_PER_ROUND` | `match.ts` | 5 | 3 | Mit 5 + 7 × 3 = 26 Karten im Deck reicht es; Hand wächst langsam, Handlimit wirkt nicht schon in Runde 2 (7 + 5 = 12 > 10) |
-| `HAND_LIMIT` | `match.ts` | 10 | 10 (bestätigt) | Bleibt; überzählige Karten gehen in die Ablage |
-| `MAX_ENERGY` | `match.ts` | 10 | 8 | Energie 3…8 ab Runde 6 hält die Ausgaben begrenzt (günstigste Karte 1, teuerste 3) |
+| `HAND_LIMIT` | `match.ts` | 10 | 10 (bestätigt) | Bleibt; überzählige Karten verfallen (keine Ablage) |
+| `MAX_ENERGY` | `match.ts` | 8 | 8 (umgesetzt, vorher 10) | Energie 3…8 ab Runde 6 hält die Ausgaben begrenzt (günstigste Karte 1, teuerste 3) |
 | `BASE_ENERGY`, `ENERGY_PER_ROUND` | `match.ts` | 3 / 1 | unverändert | Reicht für 1–2 Karten in Runde 1, wächst gleichmäßig |
 | `MAX_ROUNDS`, `COMBAT_TICKS` | `match.ts` | 8 / 400 | unverändert | Spieldauer ca. 8 × (Planung + 20 s) |
-| `TOWER_RANGE` | `combat.ts` | 25 | 20 | Fernkämpfer (Reichweite 14) sollen den Tower überhaupt erst treffen, wenn sie in seiner Reichweite stehen, aber nicht lange ungestraft |
+| `TOWER_RANGE` | `combat.ts` | 20 | 20 (umgesetzt, vorher 25) | Fernkämpfer (Reichweite 14) sollen den Tower überhaupt erst treffen, wenn sie in seiner Reichweite stehen, aber nicht lange ungestraft |
 | `MINION_RANGE` | `combat.ts` | 4 (alle) | je Rolle (4 / 14), Feld am Minion | Rollen brauchen unterschiedliche Reichweite (Abschnitt 4) |
-| `MINION_SPEED` | `combat.ts` | 10 (alle) | je Rolle (10 / 8 / 10) | Tank langsamer, damit Wellen sich staffeln |
+| `MINION_SPEED` | `combat.ts` | 10 (alle) | Standardwert 10 bleibt; Tempo je Minion im Feld `speed` (umgesetzt: Minion 10, Brocken 8) | Tank langsamer, damit Wellen sich staffeln; Upgrades ändern das Tempo nicht |
 | `LINE_COUNT`, `BASE_CAPACITY`, `MAX_LINE_LEVEL`, `TOWER_HP`, `TOWER_DAMAGE` | `match.ts` | 3 / 2 / 5 / 100 / 8 | unverändert | Erst nach Spieltests anpassen |
 
 ## 4. Minions (HotS-Stil)
@@ -89,7 +90,7 @@ zurücknehmbar.
 | Rolle | Beispielkarte | LP | Schaden/s | Reichweite | Tempo | Status |
 |---|---|---|---|---|---|---|
 | Nahkampf | Minion | 30 | 6 | 4 | 10 | vorhanden |
-| Tank | Brocken | 80 | 12 | 4 | 8 | vorhanden (Tempo ändert sich) |
+| Tank | Brocken | 80 | 12 | 4 | 8 | vorhanden |
 | Fernkampf | Bogenschütze (`summon-archer`, Kosten 2, 2 Kopien) | 20 | 7 | 14 | 10 | neu, Folgeauftrag 5 |
 
 ## 5. Platzierung (Mechabellum-Stil)

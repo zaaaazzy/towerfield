@@ -29,12 +29,12 @@ import {
 function setup(): MatchState {
   const state = createMatch(1);
   state.players[0].hand = ['summon-minion', 'summon-minion', 'summon-minion', 'summon-minion', 'summon-brute'];
-  state.players[0].energy = 10;
+  state.players[0].energy = 8;
   return state;
 }
 
 function minion(line: number, position: number): Minion {
-  return { id: 1, line, position, hp: 1, damage: 1 };
+  return { id: 1, line, position, hp: 1, damage: 1, speed: 10 };
 }
 
 describe('Slots', () => {
@@ -174,7 +174,7 @@ describe('Rückgängig machen vor „Bereit“', () => {
 
   it('gilt nicht für Minions aus früheren Runden', () => {
     const state = setup();
-    state.players[0].minions.push({ id: 50, line: 0, position: 60, hp: 5, damage: 1 });
+    state.players[0].minions.push({ id: 50, line: 0, position: 60, hp: 5, damage: 1, speed: 10 });
     expect(undoSummon(state, 0, 50)).toMatchObject({ ok: false, reason: 'no-such-minion' });
     expect(moveMinion(state, 0, 50, 0, 0)).toMatchObject({ ok: false, reason: 'no-such-minion' });
   });

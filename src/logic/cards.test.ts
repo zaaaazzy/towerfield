@@ -12,6 +12,14 @@ describe('Karten', () => {
     for (const card of CARD_DEFS) expect(card.cost).toBeGreaterThan(0);
   });
 
+  it('gibt jeder Summon-Karte ein positives Tempo (Minion 10, Brocken 8)', () => {
+    for (const card of CARD_DEFS) {
+      if (card.type === 'summon') expect(card.speed).toBeGreaterThan(0);
+    }
+    expect(getCardDef('summon-minion')).toMatchObject({ speed: 10 });
+    expect(getCardDef('summon-brute')).toMatchObject({ speed: 8 });
+  });
+
   it('wirft bei einer unbekannten Karte', () => {
     expect(() => getCardDef('gibt-es-nicht')).toThrow();
   });

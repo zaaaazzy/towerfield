@@ -13,6 +13,7 @@ import {
   hpOutcome,
   lineCapacity,
   LINE_COUNT,
+  MAX_ENERGY,
   MAX_LINE_LEVEL,
   MAX_ROUNDS,
   type MatchState,
@@ -31,7 +32,7 @@ function find(state: MatchState, player: PlayerIndex, id: string): number {
 }
 
 /** Zustand mit einer bestimmten Karte auf der Hand beider Spieler (Hand überschrieben). */
-function withHand(state: MatchState, hand: string[], energy = 10): MatchState {
+function withHand(state: MatchState, hand: string[], energy = MAX_ENERGY): MatchState {
   const copy = structuredClone(state);
   for (const player of copy.players) {
     player.hand = [...hand];
@@ -123,8 +124,21 @@ describe('Runden und Ziehen', () => {
     expect(state.drawn).toBe(START_HAND + DRAW_PER_ROUND);
   });
 
-  it('begrenzt die Energie', () => {
-    expect(energyForRound(100)).toBeLessThanOrEqual(10);
+  it('begrenzt die Energie auf 8', () => {
+    expect(MAX_ENERGY).toBe(8);
+    expect([1, 2, 3, 4, 5, 6].map(energyForRound)).toEqual([3, 4, 5, 6, 7, 8]);
+    expect(energyForRound(7)).toBe(8);
+    expect(energyForRound(100)).toBe(8);
+  });
+
+  it('gibt in keiner Runde eines Matches mehr als MAX_ENERGY Energie', () => {
+    let state = createMatch(3);
+    for (let round = 1; round <= MAX_ROUNDS; round += 1) {
+      expect(state.round).toBe(round);
+      for (const player of state.players) expect(player.energy).toBeLessThanOrEqual(MAX_ENERGY);
+      state = advance(setReady(setReady(state, 0), 1), COMBAT_TICKS * TICK_MS);
+      if (state.phase === 'over') break;
+    }
   });
 
   it('beendet die Kampfphase erst nach der Rundendauer', () => {
@@ -132,6 +146,97 @@ describe('Runden und Ziehen', () => {
     state = advance(state, (COMBAT_TICKS - 2) * TICK_MS);
     expect(state.phase).toBe('combat');
     expect(state.round).toBe(1);
+  });
+});
+
+describe('Handlimit', () => {
+  /** Beendet die laufende Kampfphase und beginnt die nächste Runde. */
+  function nextRound(state: MatchState): MatchState {
+    return advance(setReady(setReady(state, 0), 1), COMBAT_TICKS * TICK_MS);
+  }
+
+  /** Zustand mit `count` Handkarten für Spieler `player` (die ersten Deckkarten), der andere bleibt unverändert. */
+  function withPlayerHand(state: MatchState, player: PlayerIndex, count: number): MatchState {
+    const copy = structuredClone(state);
+    copy.players[player].hand = copy.deck.slice(0, count);
+    return copy;
+  }
+
+  it('lässt in Runde 1 mit 7 Startkarten nichts verfallen', () => {
+    const state = createMatch(3);
+    expect(START_HAND).toBeLessThan(HAND_LIMIT);
+    expect(state.players[0].hand).toEqual(state.deck.slice(0, START_HAND));
+    expect(state.players[1].hand).toEqual(state.deck.slice(0, START_HAND));
+  });
+
+  it('gibt beiden Spielern ab Runde 2 genau HAND_LIMIT Karten', () => {
+    const state = nextRound(createMatch(3));
+    expect(state.round).toBe(2);
+    expect(state.players[0].hand).toHaveLength(HAND_LIMIT);
+    expect(state.players[1].hand).toHaveLength(HAND_LIMIT);
+  });
+
+  it('behält die ersten 10 Karten in Ankunftsreihenfolge und lässt die letzten 2 verfallen', () => {
+    const initial = createMatch(3);
+    const state = nextRound(initial);
+    const arrived = initial.deck.slice(0, START_HAND + DRAW_PER_ROUND);
+    expect(state.players[0].hand).toEqual(arrived.slice(0, HAND_LIMIT));
+    expect(state.players[1].hand).toEqual(arrived.slice(0, HAND_LIMIT));
+    const expired = arrived.slice(HAND_LIMIT);
+    expect(expired).toHaveLength(START_HAND + DRAW_PER_ROUND - HAND_LIMIT);
+    expect(state.players[0].hand.slice(-3)).toEqual(arrived.slice(START_HAND, HAND_LIMIT));
+  });
+
+  it('lässt bei genau HAND_LIMIT nach dem Ziehen (5 + 5) nichts verfallen', () => {
+    const initial = withPlayerHand(withPlayerHand(createMatch(3), 0, HAND_LIMIT - DRAW_PER_ROUND), 1, HAND_LIMIT - DRAW_PER_ROUND);
+    const state = nextRound(initial);
+    const drawn = initial.deck.slice(initial.drawn, initial.drawn + DRAW_PER_ROUND);
+    expect(state.players[0].hand).toEqual([...initial.players[0].hand, ...drawn]);
+    expect(state.players[0].hand).toHaveLength(HAND_LIMIT);
+  });
+
+  it('nimmt unter dem Limit alle 5 neuen Karten auf die Hand', () => {
+    const initial = withPlayerHand(createMatch(3), 0, 2);
+    const state = nextRound(initial);
+    const drawn = initial.deck.slice(initial.drawn, initial.drawn + DRAW_PER_ROUND);
+    expect(state.players[0].hand).toEqual([...initial.players[0].hand, ...drawn]);
+    expect(state.players[0].hand).toHaveLength(2 + DRAW_PER_ROUND);
+  });
+
+  it('zählt verfallene Karten als gezogen, die nächste Runde zieht die nächsten Deckkarten', () => {
+    const initial = createMatch(3);
+    const round2 = nextRound(initial);
+    expect(round2.drawn).toBe(START_HAND + DRAW_PER_ROUND);
+    const next = initial.deck.slice(round2.drawn, round2.drawn + DRAW_PER_ROUND);
+    // Hand leeren, damit die gezogenen Karten der nächsten Runde direkt sichtbar sind.
+    const cleared = structuredClone(round2);
+    cleared.players[0].hand = [];
+    cleared.players[1].hand = [];
+    const round3 = nextRound(cleared);
+    expect(round3.drawn).toBe(START_HAND + 2 * DRAW_PER_ROUND);
+    expect(round3.players[0].hand).toEqual(next);
+  });
+
+  it('wendet das Limit pro Spieler an: wer weniger Karten hat, wird nicht gekappt', () => {
+    const initial = withPlayerHand(createMatch(3), 0, 3);
+    const state = nextRound(initial);
+    expect(state.players[0].hand).toHaveLength(3 + DRAW_PER_ROUND);
+    expect(state.players[1].hand).toHaveLength(HAND_LIMIT);
+    expect(state.players[0].hand.length).toBeLessThan(state.players[1].hand.length);
+  });
+
+  it('überschreitet über alle Runden bis MAX_ROUNDS nie das Limit', () => {
+    let state = createMatch(5);
+    while (state.round < MAX_ROUNDS) {
+      state = nextRound(state);
+      for (const player of state.players) expect(player.hand.length).toBeLessThanOrEqual(HAND_LIMIT);
+    }
+    expect(state.round).toBe(MAX_ROUNDS);
+    expect(state.players[0].hand).toHaveLength(HAND_LIMIT);
+  });
+
+  it('ergibt mit gleichem Seed dieselbe Hand nach dem Verfall', () => {
+    expect(nextRound(createMatch(11)).players[0].hand).toEqual(nextRound(createMatch(11)).players[0].hand);
   });
 });
 
@@ -168,7 +273,7 @@ describe('Karten ausspielen', () => {
     expect(player.lines[2]!.level).toBe(2);
     expect(player.lines[0]!.level).toBe(1);
     expect(player.hand).toEqual(['summon-minion']);
-    expect(player.energy).toBe(10 - getCardDef('line-upgrade').cost);
+    expect(player.energy).toBe(MAX_ENERGY - getCardDef('line-upgrade').cost);
     // Gegner und Ausgangszustand bleiben unberührt.
     expect(result.state.players[1].lines[2]!.level).toBe(1);
     expect(state.players[0].lines[2]!.level).toBe(1);
@@ -229,6 +334,27 @@ describe('Karten ausspielen', () => {
     expect(newer!.damage).toBeGreaterThan(older!.damage);
   });
 
+  it('übernimmt das Tempo der Karte und lässt es durch Upgrades unverändert', () => {
+    let state = withHand(createMatch(1), ['summon-brute', 'summon-minion', 'minion-upgrade-all', 'minion-upgrade-line'], 20);
+    const brute = playCard(state, 0, find(state, 0, 'summon-brute'), 0);
+    if (!brute.ok) throw new Error(brute.reason);
+    state = brute.state;
+    const minion = playCard(state, 0, find(state, 0, 'summon-minion'), 0);
+    if (!minion.ok) throw new Error(minion.reason);
+    state = minion.state;
+    expect(state.players[0].minions.map((m) => m.speed)).toEqual([8, 10]);
+    for (const id of ['minion-upgrade-all', 'minion-upgrade-line']) {
+      const upgrade = playCard(state, 0, find(state, 0, id), 0);
+      if (!upgrade.ok) throw new Error(upgrade.reason);
+      state = upgrade.state;
+    }
+    expect(state.players[0].minions.map((m) => m.speed)).toEqual([8, 10]);
+    state = withHand(state, ['summon-brute'], 20);
+    const later = playCard(state, 0, 0, 1);
+    if (!later.ok) throw new Error(later.reason);
+    expect(later.state.players[0].minions.at(-1)!.speed).toBe(8);
+  });
+
   it('wirkt „Minion verbessern“ je nach Umfang auf eine oder alle Lines', () => {
     const base = withHand(createMatch(1), ['minion-upgrade-line', 'minion-upgrade-all'], 10);
     const one = playCard(base, 0, 0, 2);
@@ -283,8 +409,8 @@ describe('Sieg', () => {
         line.tower.hp = lineIndex === index ? 0.1 : 0;
       });
     }
-    state.players[0].minions.push({ id: 1, line: 1, position: LINE_LENGTH - MINION_RANGE, hp: 50, damage: 20 });
-    state.players[1].minions.push({ id: 1, line: 0, position: LINE_LENGTH - MINION_RANGE, hp: 50, damage: 20 });
+    state.players[0].minions.push({ id: 1, line: 1, position: LINE_LENGTH - MINION_RANGE, hp: 50, damage: 20, speed: 10 });
+    state.players[1].minions.push({ id: 1, line: 0, position: LINE_LENGTH - MINION_RANGE, hp: 50, damage: 20, speed: 10 });
     state = advance(state, TICK_MS);
     expect(state.phase).toBe('over');
     expect(state.outcome).toBe('draw');
@@ -294,7 +420,7 @@ describe('Sieg', () => {
     let state = setReady(setReady(createMatch(1), 0), 1);
     state = structuredClone(state);
     state.players[1].lines.forEach((line, index) => (line.tower.hp = index === 1 ? 0.1 : 0));
-    state.players[0].minions.push({ id: 1, line: 1, position: LINE_LENGTH - MINION_RANGE, hp: 50, damage: 20 });
+    state.players[0].minions.push({ id: 1, line: 1, position: LINE_LENGTH - MINION_RANGE, hp: 50, damage: 20, speed: 10 });
     state = advance(state, TICK_MS);
     expect(state.phase).toBe('over');
     expect(state.outcome).toBe('player0');
