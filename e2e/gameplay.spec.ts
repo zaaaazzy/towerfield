@@ -1,7 +1,15 @@
 import { expect, type Page, test } from '@playwright/test';
 import { buffGain } from '../src/logic/buff';
 import { type CardDef, getCardDef } from '../src/logic/cards';
-import type { Minion } from '../src/logic/combat';
+import {
+  combatTick,
+  LIGHTNING_FACTOR,
+  type Minion,
+  SHIELD_REFLECT,
+  TICK_SECONDS,
+  TOWER_RANGE,
+  towerDistance,
+} from '../src/logic/combat';
 import { slotPosition } from '../src/logic/placement';
 import {
   DRAW_PER_ROUND,
@@ -22,6 +30,7 @@ import {
   pointBetweenLines,
   readSelected,
   readState,
+  sampleCombat,
   slotPoint,
   tap,
   unlockField,
@@ -139,7 +148,110 @@ test('Spezialisierungskarte auf der Start-Lane wird mit Hinweis abgelehnt, auf e
   expect(errors).toEqual([]);
 });
 
-test('das Feld startet mit einer Lane; „Lane +1“ schaltet je eine Lane oben und unten frei (Lvl 2, dann Lvl 3)', async ({
+const DUEL_TICKS = 10;
+const DUEL_SECONDS = DUEL_TICKS * TICK_SECONDS;
+
+/** Gegnerischer Minion mit vielen HP (überlebt die Messung); `position` zählt vom Gegnerende, Tower steht bei Offset 0. */
+const enemyMinion = (id: number, position: number, damage = 10): Minion => ({
+  id,
+  line: 1,
+  position,
+  hp: 1000,
+  maxHp: 1000,
+  damage,
+  range: 4,
+  speed: 10,
+});
+
+/**
+ * Lane 1 freischalten, einen Tower setzen und `cardId` per Tippen auf Karte und Lane ausspielen. Prüft die Energie,
+ * der Gegner ohne Karten und Energie plant nichts. Danach läuft die Kampfphase.
+ */
+async function playSpecializationAndFight(page: Page, cardId: string): Promise<void> {
+  await unlockField(page, 2);
+  await page.evaluate((id) => {
+    const scene = window.game!.scene.getScene('main') as unknown as {
+      state: { players: { hand: string[]; lines: { towers: object[] }[]; energy: number }[] };
+    };
+    const [me, bot] = scene.state.players as [(typeof scene.state.players)[0], (typeof scene.state.players)[0]];
+    me.hand.unshift(id);
+    me.lines[1]!.towers = [{ offset: 0, hp: 1000, maxHp: 1000, damage: 10 }];
+    bot.hand = [];
+    bot.energy = 0;
+  }, cardId);
+  const before = await readState(page);
+
+  await tapCard(page, 0);
+  await tapLine(page, 1);
+  await expect.poll(async () => (await readState(page)).players[0].lines[1]!.towers[0]?.specialization).toBeDefined();
+  expect((await readState(page)).players[0].energy).toBe(before.players[0].energy - getCardDef(cardId).cost);
+
+  await startCombat(page);
+}
+
+/** Lebenspunkte der Minions des Gegners, in der Reihenfolge der Minions. */
+const enemyHp = (state: MatchState) => state.players[1].minions.map((minion) => minion.hp);
+
+/** Spielt `ticks` Ticks auf einer Kopie ohne Spezialisierung (reine Logik) und liefert deren Gegner-HP. */
+function controlHp(before: MatchState, ticks: number): number[] {
+  const control = structuredClone(before);
+  for (const tower of control.players[0].lines[1]!.towers) delete tower.specialization;
+  for (let tick = 0; tick < ticks; tick += 1) combatTick(control.players);
+  return enemyHp(control);
+}
+
+test('Blitz-Turm: nach dem Ausspielen per Tippen nehmen mehrere gegnerische Minions in Reichweite Schaden', async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await openGame(page);
+  await playSpecializationAndFight(page, 'tower-lightning');
+
+  // Beide Minions stehen in TOWER_RANGE (Abstand 15 und 20), sie laufen im Messfenster nur näher heran.
+  const { before, after } = await sampleCombat(page, [enemyMinion(9001, 85), enemyMinion(9002, 80)], DUEL_TICKS);
+  const tower = before.players[0].lines[1]!.towers[0]!;
+  expect(tower.specialization).toBe('lightning');
+  for (const minion of before.players[1].minions) expect(towerDistance(tower, minion.position)).toBeLessThanOrEqual(TOWER_RANGE);
+
+  const expected = tower.damage * DUEL_SECONDS * LIGHTNING_FACTOR;
+  const lost = enemyHp(before).map((hp, index) => hp - enemyHp(after)[index]!);
+  expect(lost).toHaveLength(2);
+  for (const amount of lost) expect(amount).toBeCloseTo(expected, 6);
+
+  // Ohne Spezialisierung trifft der Tower nur den vordersten Minion.
+  const withoutLost = enemyHp(before).map((hp, index) => hp - controlHp(before, DUEL_TICKS)[index]!);
+  expect(withoutLost.filter((amount) => amount > 1e-9)).toHaveLength(1);
+  expect(withoutLost[0]).toBeCloseTo(tower.damage * DUEL_SECONDS, 6);
+  expect(withoutLost[1]).toBeCloseTo(0, 6);
+
+  expect(errors).toEqual([]);
+});
+
+test('Schild-Turm: nach dem Ausspielen per Tippen erleidet der angreifende Minion SHIELD_REFLECT seines Schadens zurück', async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await openGame(page);
+  await playSpecializationAndFight(page, 'tower-shield');
+
+  // Der Minion steht in seiner Reichweite zum Tower und greift ihn an, ohne sich zu bewegen.
+  const attacker = enemyMinion(9001, 96);
+  const { before, after } = await sampleCombat(page, [attacker], DUEL_TICKS);
+  const tower = before.players[0].lines[1]!.towers[0]!;
+  expect(tower.specialization).toBe('shield');
+  expect(towerDistance(tower, attacker.position)).toBeLessThanOrEqual(attacker.range);
+
+  const lost = enemyHp(before)[0]! - enemyHp(after)[0]!;
+  const lostWithout = enemyHp(before)[0]! - controlHp(before, DUEL_TICKS)[0]!;
+  // Der Tower selbst schießt in beiden Fällen gleich; die Differenz ist der Rückwurf.
+  expect(lostWithout).toBeGreaterThan(0);
+  expect(lost - lostWithout).toBeCloseTo(attacker.damage * DUEL_SECONDS * SHIELD_REFLECT, 6);
+  expect(lost).toBeGreaterThan(lostWithout);
+
+  expect(errors).toEqual([]);
+});
+
+test('das Feld startet mit einer Lane;„Lane +1“ schaltet je eine Lane oben und unten frei (Lvl 2, dann Lvl 3)', async ({
   page,
 }) => {
   const errors = collectErrors(page);
