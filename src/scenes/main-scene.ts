@@ -13,6 +13,7 @@ import {
 } from '../logic/match';
 import { botPlanRecorded, createRecord, performAction, type RecordedMatch } from '../logic/match-record';
 import { HAND_FILTER_NAMES, type HandFilter, isCardVisible, nextHandFilter } from '../logic/hand-filter';
+import { updateFlashes } from '../logic/minion-look';
 import { parseSeed } from '../logic/seed';
 import { type DropTarget, dropTargetAt, slotPosition } from '../logic/placement';
 import { CardView } from './card-view';
@@ -26,6 +27,7 @@ import {
   HUMAN,
   BOT,
   lineY,
+  type MinionAnim,
   minionPoint,
   towerPoint,
 } from './field-view';
@@ -113,6 +115,8 @@ export class MainScene extends Phaser.Scene {
   private effects!: Effects;
   /** Zustand des letzten Bilds; der Vergleich mit dem aktuellen liefert die Effekte. */
   private fxState: MatchState = this.state;
+  /** Szenenzeit und Trefferblitze der Minions (aus `delta` fortgeschrieben, nur Darstellung). */
+  private minionAnim: MinionAnim = { timeMs: 0, flashes: new Map() };
   /** Index der angetippten Karte, die auf eine Line wartet. */
   private selected: number | null = null;
   /** Karte unter dem Mauszeiger (nur Darstellung). */
@@ -155,6 +159,7 @@ export class MainScene extends Phaser.Scene {
     this.state = createMatch(parseSeed(window.location.search) ?? Date.now() >>> 0);
     this.record = createRecord(this.state.seed);
     this.fxState = this.state;
+    this.minionAnim = { timeMs: 0, flashes: new Map() };
     addBackdrop(this, VIEW.width, VIEW.height, BACKDROP_FIELD);
     this.pool = new LabelPool(this);
     this.effects = new Effects(this, FX_LOCATOR);
@@ -212,8 +217,13 @@ export class MainScene extends Phaser.Scene {
   private updateEffects(deltaMs: number): void {
     const previous = this.fxState;
     this.fxState = this.state;
-    if (deltaMs <= FX_MAX_DELTA_MS) this.effects.play(diffFx(previous, this.state));
+    const events = deltaMs <= FX_MAX_DELTA_MS ? diffFx(previous, this.state) : [];
+    this.effects.play(events);
     this.effects.update(deltaMs);
+    this.minionAnim = {
+      timeMs: this.minionAnim.timeMs + deltaMs,
+      flashes: updateFlashes(this.minionAnim.flashes, events, deltaMs),
+    };
   }
 
   /** Id des eigenen, verschiebbaren Minions unter dem Punkt, sonst `null`. */
@@ -442,7 +452,7 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
-    drawMinions(g, state, drag?.minionId);
+    drawMinions(g, state, drag?.minionId, this.minionAnim);
     if (drag) drawMinionBody(g, drag.x, drag.y, HUMAN, undefined, 0.85);
 
     // Handkarten als Fächer in Typ-Reihenfolge; Stapelhöhe und Anhebung stehen in der Pose.
