@@ -18,6 +18,9 @@ Basiswerte (in `src/logic/match.ts` und `combat.ts`, nur Startwerte, kein Balanc
 (**noch zu bestätigen**, greift schon in Runde 2: 7 + 5 = 12, überzählige Karten verfallen), `MAX_ROUNDS = 8`,
 Energie 3 + 1 pro Runde (max. 10), Line-Höchststufe 5, Kapazität 2 + Stufe, Tower 100 HP / 8 Schaden.
 
+Das verbindliche Designkonzept (Karten, Minions, Slot-Platzierung, Iso-Karte, Mobile-Layout, Folgeaufträge) steht in
+[`docs/designkonzept.md`](docs/designkonzept.md).
+
 ## Befehle
 
 | Befehl | Zweck |
