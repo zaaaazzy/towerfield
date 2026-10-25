@@ -120,7 +120,7 @@ Spielt ein Spieler in derselben Runde ein bestimmtes Kartenpaar, erhalten seine 
 |---|---|---|---|---|---|---|
 | Nahkampf | Minion | 30 | 6 | 4 | 10 | vorhanden |
 | Tank | Brocken | 80 | 12 | 4 | 8 | vorhanden |
-| Fernkampf | Bogenschütze (`summon-archer`, Kosten 2, 2 Kopien) | 20 | 7 | 14 | 10 | vorhanden |
+| Fernkampf | Bogenschütze (`summon-archer`, Kosten 2, 2 Kopien; in Runde N beschwört die Karte N Einheiten, siehe `anwendung-runde-endet-bei-toten-einheiten.md`) | 20 | 7 | 14 | 10 | vorhanden |
 | Heiler | Heiler (`summon-healer`, Kosten 2, 1 Kopie) | 20 | 5 (Heilung/s) | 10 | 10 | vorhanden, siehe [Heiler](anwendung-heiler.md) |
 | Zerstörer | Zerstörer (`summon-destroyer`, Kosten 2, 1 Kopie) | 40 | 8 (Explosion bei Tod: 15 im Radius 10) | 4 | 8 | vorhanden, siehe [Zerstörer](anwendung-zerstoerer.md) |
 
