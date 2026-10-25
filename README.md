@@ -6,7 +6,7 @@ Karten (Hochformat, Touch, `Scale.FIT`). Aktuell spielt man lokal gegen einen de
 ## Spielkonzept
 
 - 3 Lines, jede gehört je zur Hälfte beiden Spielern; pro Spieler und Line genau 1 Tower.
-- Beide Spieler ziehen aus derselben, per Seed gemischten Kartenreihenfolge: 7 Startkarten, ab Runde 2 je 5 neue
+- Beide Spieler ziehen aus derselben, per Seed gemischten Kartenreihenfolge: 5 Startkarten, ab Runde 2 je 3 neue
   Karten (identisch für beide). Kein Zufall im Kampf, keine Trefferchancen.
 - Eine Runde = Planung (beide spielen gleichzeitig Karten, begrenzt durch Energie) und Kampf (Minions und Tower,
   Zeit nur über `delta`).
@@ -15,7 +15,7 @@ Karten (Hochformat, Touch, `Scale.FIT`). Aktuell spielt man lokal gegen einen de
   Unentschieden.
 
 Basiswerte (in `src/logic/match.ts` und `combat.ts`, nur Startwerte, kein Balancing): `HAND_LIMIT = 10`
-(bestätigt, greift schon in Runde 2: 7 + 5 = 12, überzählige Karten verfallen am Ende der Hand; es gilt die
+(bestätigt, greift erst in Runde 3: 5 + 3 = 8, dann 11; überzählige Karten verfallen am Ende der Hand; es gilt die
 Reihenfolge der Ankunft), `MAX_ROUNDS = 8`,
 Energie 3 + 1 pro Runde (max. 8), Line-Höchststufe 5, Kapazität 2 + Stufe, Tower 100 HP / 8 Schaden.
 

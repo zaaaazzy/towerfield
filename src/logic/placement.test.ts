@@ -34,7 +34,7 @@ function setup(): MatchState {
 }
 
 function minion(line: number, position: number): Minion {
-  return { id: 1, line, position, hp: 1, damage: 1, speed: 10 };
+  return { id: 1, line, position, hp: 1, damage: 1, range: 4, speed: 10 };
 }
 
 describe('Slots', () => {
@@ -174,7 +174,7 @@ describe('Rückgängig machen vor „Bereit“', () => {
 
   it('gilt nicht für Minions aus früheren Runden', () => {
     const state = setup();
-    state.players[0].minions.push({ id: 50, line: 0, position: 60, hp: 5, damage: 1, speed: 10 });
+    state.players[0].minions.push({ id: 50, line: 0, position: 60, hp: 5, damage: 1, range: 4, speed: 10 });
     expect(undoSummon(state, 0, 50)).toMatchObject({ ok: false, reason: 'no-such-minion' });
     expect(moveMinion(state, 0, 50, 0, 0)).toMatchObject({ ok: false, reason: 'no-such-minion' });
   });

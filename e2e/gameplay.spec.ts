@@ -1,6 +1,13 @@
 import { expect, test } from '@playwright/test';
 import { type CardDef, getCardDef } from '../src/logic/cards';
-import { DRAW_PER_ROUND, energyForRound, HAND_LIMIT, MAX_ROUNDS, type MatchState } from '../src/logic/match';
+import {
+  DRAW_PER_ROUND,
+  energyForRound,
+  HAND_LIMIT,
+  MAX_ROUNDS,
+  type MatchState,
+  START_HAND,
+} from '../src/logic/match';
 import {
   collectErrors,
   fastForwardCombat,
@@ -180,7 +187,7 @@ test('das Spiel endet spätestens nach MAX_ROUNDS Runden mit Ergebnis und Overla
   const fresh = await readState(page);
   expect(fresh.round).toBe(1);
   expect(fresh.outcome).toBeNull();
-  expect(fresh.players[0].hand).toHaveLength(7);
+  expect(fresh.players[0].hand).toHaveLength(START_HAND);
   await expect.poll(() => hasVisibleText(page, 'Tippen für ein neues Spiel')).toBe(false);
 
   expect(errors).toEqual([]);

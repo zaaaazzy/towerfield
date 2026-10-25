@@ -9,6 +9,7 @@ export const LINE_LENGTH = 100;
 /** Feste Schrittweite der Simulation, unabhängig von der Bildwiederholrate. */
 export const TICK_MS = 50;
 export const TICK_SECONDS = TICK_MS / 1000;
+/** Standard-Reichweite (Nahkämpfer); die Simulation nutzt `Minion.range`. */
 export const MINION_RANGE = 4;
 /** Standard-Tempo (Minions ohne eigene Rolle); die Simulation nutzt `Minion.speed`. */
 export const MINION_SPEED = 10;
@@ -29,6 +30,8 @@ export interface Minion {
   hp: number;
   /** Schaden pro Sekunde. */
   damage: number;
+  /** Reichweite in Einheiten. */
+  range: number;
   /** Tempo in Einheiten pro Sekunde. */
   speed: number;
 }
@@ -61,7 +64,7 @@ export function combatTick(players: [CombatPlayer, CombatPlayer], deltaSeconds: 
       enemy.minions.forEach((other, otherIndex) => {
         if (other.line !== minion.line) return;
         const distance = gap(minion, other);
-        if (distance <= MINION_RANGE && distance < best) {
+        if (distance <= minion.range && distance < best) {
           best = distance;
           target = otherIndex;
         }
@@ -71,7 +74,7 @@ export function combatTick(players: [CombatPlayer, CombatPlayer], deltaSeconds: 
         return;
       }
       const tower = enemy.lines[minion.line]!.tower;
-      if (tower.hp > 0 && LINE_LENGTH - minion.position <= MINION_RANGE) {
+      if (tower.hp > 0 && LINE_LENGTH - minion.position <= minion.range) {
         towerDamage[enemySide]![minion.line]! += minion.damage * deltaSeconds;
         return;
       }
