@@ -18,6 +18,7 @@ const GROUPS: Record<CardType, Exclude<HandFilter, 'all'>> = {
   'line-upgrade': 'upgrade',
   'minion-upgrade': 'upgrade',
   'minion-buff': 'upgrade',
+  'lane-card': 'upgrade',
   'tower-upgrade': 'tower',
   'tower-specialize': 'tower',
 };

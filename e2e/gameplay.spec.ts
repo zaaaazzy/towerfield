@@ -2,26 +2,37 @@ import { expect, type Page, test } from '@playwright/test';
 import { buffGain } from '../src/logic/buff';
 import { type CardDef, getCardDef } from '../src/logic/cards';
 import type { Minion } from '../src/logic/combat';
-import { slotPosition } from '../src/logic/placement';
 import {
+  DISCARD_ENERGY,
   DRAW_PER_ROUND,
   energyForRound,
   HAND_LIMIT,
+  MAX_ENERGY,
   MAX_ROUNDS,
   type MatchState,
+  MOVE_COST,
   START_HAND,
 } from '../src/logic/match';
 import {
+  cardPointOf,
   collectErrors,
+  DISCARD_BUTTON,
   DRAG_THRESHOLD,
   drag,
+  dragCard,
   fastForwardCombat,
   hasVisibleText,
+  laneSlot,
   minionPoint,
   openGame,
   pointBetweenLines,
+  pointerDown,
+  pointerMove,
+  pointerUp,
+  readDots,
   readSelected,
   readState,
+  setHand,
   slotPoint,
   tap,
   unlockField,
@@ -355,12 +366,11 @@ test('buff-minion: Karte und danach eigenen Minion antippen stärkt nur diesen M
   expect(errors).toEqual([]);
 });
 
-test('Drag: ein Minion auf einen freien Slot einer anderen Lane gezogen setzt line und position, Energie bleibt', async ({
-  page,
-}) => {
+test('Drag: ein Minion auf einen freien Turm-Slot einer anderen Lane gezogen kostet genau 1 Energie', async ({ page }) => {
   const errors = collectErrors(page);
   await openGame(page);
   await unlockField(page);
+  await ensureTower(page, 1);
   const placed = await summonOn(page, 0);
   const before = await readState(page);
 
@@ -368,49 +378,286 @@ test('Drag: ein Minion auf einen freien Slot einer anderen Lane gezogen setzt li
   await expect.poll(async () => minionById(await readState(page), placed.id)?.line).toBe(1);
 
   const after = await readState(page);
-  expect(minionById(after, placed.id)).toEqual({ ...placed, line: 1, position: slotPosition(1) });
-  expect(after.players[0].energy).toBe(before.players[0].energy);
+  expect(minionById(after, placed.id)).toEqual({ ...placed, line: 1, slot: 1, position: 0 });
+  expect(after.players[0].energy).toBe(before.players[0].energy - MOVE_COST);
   expect(after.players[0].hand).toEqual(before.players[0].hand);
-  expect(await hasVisibleText(page, 'Platz ist belegt')).toBe(false);
+  expect(await hasVisibleText(page, 'Turm-Slot ist belegt')).toBe(false);
+  expect(await readState(page).then((s) => s.players[0].lines[0]!.towers.length)).toBe(3);
 
   expect(errors).toEqual([]);
 });
 
-test('Drag: ein Minion auf einen anderen freien Slot derselben Line gezogen ändert nur die position', async ({
+test('Drag: ein Minion auf einen anderen Turm-Slot derselben Lane gezogen ändert slot und position für 1 Energie', async ({
   page,
 }) => {
   const errors = collectErrors(page);
   await openGame(page);
   const placed = await summonOn(page, 0);
   const before = await readState(page);
+  expect(placed.slot).toBe(0);
 
-  await drag(page, minionPoint(placed), slotPoint(0, 1));
-  await expect.poll(async () => minionById(await readState(page), placed.id)?.position).toBe(slotPosition(1));
+  await drag(page, minionPoint(placed), slotPoint(0, 3));
+  await expect.poll(async () => minionById(await readState(page), placed.id)?.slot).toBe(3);
 
   const after = await readState(page);
-  expect(minionById(after, placed.id)).toEqual({ ...placed, line: 0, position: slotPosition(1) });
-  expect(after.players[0].energy).toBe(before.players[0].energy);
+  expect(minionById(after, placed.id)).toEqual({ ...placed, line: 0, slot: 3, position: 8 });
+  expect(after.players[0].energy).toBe(before.players[0].energy - MOVE_COST);
 
   expect(errors).toEqual([]);
 });
 
-test('Drag: ein belegter Slot lässt den Zustand unverändert und zeigt „Platz ist belegt“', async ({ page }) => {
+test('Drag: bei zu wenig Energie wird das Verschieben abgelehnt, die Einheit bleibt auf ihrem Slot', async ({ page }) => {
   const errors = collectErrors(page);
   await openGame(page);
-  await unlockField(page);
+  const placed = await summonOn(page, 0);
+  await page.evaluate(() => {
+    const scene = window.game!.scene.getScene('main') as unknown as { state: { players: { energy: number }[] } };
+    scene.state.players[0]!.energy = 0;
+  });
+  const before = await readState(page);
+
+  await drag(page, minionPoint(placed), slotPoint(0, 3));
+  await expect.poll(() => hasVisibleText(page, 'Nicht genug Energie')).toBe(true);
+  const after = await readState(page);
+  expect(after).toEqual(before);
+  expect(minionById(after, placed.id)).toMatchObject({ slot: 0, position: 0 });
+
+  expect(errors).toEqual([]);
+});
+
+test('Drag: belegte Turm-Slots sind kein Ziel, ausserhalb der Reichweite bleibt der Zustand unverändert', async ({ page }) => {
+  const errors = collectErrors(page);
+  await openGame(page);
   const first = await summonOn(page, 0);
   // Mit Seed 1 reicht die Energie nur für eine der beiden Summon-Karten der Starthand; für die zweite aufstocken.
   await page.evaluate(() => {
     const scene = window.game!.scene.getScene('main') as unknown as { state: { players: { energy: number }[] } };
     scene.state.players[0]!.energy += 2;
   });
-  await summonOn(page, 1);
+  const second = await summonOn(page, 0);
+  expect(second.slot).toBe(1);
   const before = await readState(page);
 
-  // Der zweite Minion steht auf Slot 0 von Lane 1; der erste wird darauf gezogen.
-  await drag(page, minionPoint(first), slotPoint(1, 0));
-  await expect.poll(() => hasVisibleText(page, 'Platz ist belegt')).toBe(true);
+  // Der erste Minion wird über den Slot des zweiten gezogen: Beide Slots tragen keinen Punkt.
+  await pointerDown(page, minionPoint(first));
+  await pointerMove(page, minionPoint(second));
+  await expect.poll(async () => (await readDots(page)).length).toBe(4);
+  expect((await readDots(page)).some((dot) => dot.slot === 0 || dot.slot === 1)).toBe(false);
+  // Loslassen weit weg von allen Slots verschiebt nichts und kostet nichts.
+  await pointerMove(page, pointBetweenLines());
+  await pointerUp(page);
   expect(await readState(page)).toEqual(before);
+
+  expect(errors).toEqual([]);
+});
+
+/** Gibt der Lane `line` des Menschen im Szenenzustand einen Tower (wie nach dem Ausbau durch „Lane +1“). */
+async function ensureTower(page: Page, line: number): Promise<void> {
+  await page.evaluate((index) => {
+    const scene = window.game!.scene.getScene('main') as unknown as {
+      state: { players: { lines: { towers: object[] }[] }[] };
+    };
+    const lane = scene.state.players[0]!.lines[index]!;
+    if (lane.towers.length === 0) lane.towers = [{ offset: 0, hp: 100, maxHp: 100, damage: 8 }];
+  }, line);
+}
+
+test('Karte ziehen: grüne Punkte an allen freien Turm-Slots, der nächste ist hervorgehoben', async ({ page }) => {
+  const errors = collectErrors(page);
+  await openGame(page);
+  const state = await readState(page);
+  const index = findCard(state, (def) => def.type === 'summon' && def.cost <= state.players[0].energy);
+  expect(index).toBeGreaterThanOrEqual(0);
+  expect(await readDots(page)).toEqual([]);
+
+  await pointerDown(page, await cardPointOf(page, index));
+  await pointerMove(page, { x: 200, y: 330 });
+  await expect.poll(async () => (await readDots(page)).length).toBe(6);
+  expect((await readDots(page)).map((dot) => [dot.line, dot.slot])).toEqual([
+    [0, 0],
+    [0, 1],
+    [0, 2],
+    [0, 3],
+    [0, 4],
+    [0, 5],
+  ]);
+
+  // Näherung: Der Zeiger über Slot 3 (Turm 2, unten) hebt genau diesen Punkt hervor.
+  const target = slotPoint(0, 3);
+  await pointerMove(page, { x: target.x + 3, y: target.y + 2 });
+  await expect
+    .poll(async () => {
+      const dots = await readDots(page);
+      const best = dots.reduce((a, b) => (b.proximity > a.proximity ? b : a));
+      const others = dots.filter((d) => d !== best);
+      return { slot: best.slot, strong: best.proximity > 0.9, others: others.every((d) => d.proximity < best.proximity - 0.2) };
+    })
+    .toEqual({ slot: 3, strong: true, others: true });
+
+  await pointerUp(page);
+  await expect.poll(async () => (await readState(page)).players[0].minions.length).toBe(1);
+  expect(await readDots(page)).toEqual([]);
+
+  expect(errors).toEqual([]);
+});
+
+test('Karte auf einen Turm-Slot ziehen und loslassen rastet dort ein und kostet die Kartenenergie', async ({ page }) => {
+  const errors = collectErrors(page);
+  await openGame(page);
+  const before = await readState(page);
+  const index = findCard(before, (def) => def.type === 'summon' && def.cost <= before.players[0].energy);
+  const def = defOf(before, index);
+
+  // Loslassen etwas neben dem Slot, aber in Reichweite.
+  const slot = slotPoint(0, 4);
+  await dragCard(page, index, { x: slot.x + 10, y: slot.y - 8 });
+  await expect.poll(async () => (await readState(page)).players[0].minions.length).toBe(1);
+
+  const after = await readState(page);
+  expect(after.players[0].minions[0]).toMatchObject({ line: 0, slot: 4, position: 16 });
+  expect(after.players[0].energy).toBe(before.players[0].energy - def.cost);
+  expect(after.players[0].hand).toHaveLength(before.players[0].hand.length - 1);
+  // Die Aufzeichnung kennt den gewählten Slot.
+  const record = await page.evaluate(
+    () => (window.game!.scene.getScene('main') as unknown as { currentRecord: { actions: { type: string; slot?: number }[] } }).currentRecord,
+  );
+  expect(record.actions.some((action) => action.type === 'play' && action.slot === 4)).toBe(true);
+
+  expect(errors).toEqual([]);
+});
+
+test('Karte ausserhalb der Reichweite loslassen bringt sie zurück in die Hand, ohne Energie zu verbrauchen', async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await openGame(page);
+  const before = await readState(page);
+  const index = findCard(before, (def) => def.type === 'summon' && def.cost <= before.players[0].energy);
+
+  await dragCard(page, index, pointBetweenLines());
+  // Die Karte fliegt zurück; danach ist alles wie vorher.
+  await expect.poll(async () => (await readDots(page)).length).toBe(0);
+  expect(await readState(page)).toEqual(before);
+  expect(await readSelected(page)).toBeNull();
+
+  expect(errors).toEqual([]);
+});
+
+test('Belegte Turm-Slots und Slots zerstörter Türme zeigen beim Ziehen keinen Punkt', async ({ page }) => {
+  const errors = collectErrors(page);
+  await openGame(page);
+  await setHand(page, ['summon-minion', 'summon-minion', 'summon-minion'], 8);
+  await tapCard(page, 0);
+  await tapLine(page, 0);
+  await expect.poll(async () => (await readState(page)).players[0].minions.length).toBe(1);
+  // Der mittlere Tower fällt: Slot 2 und 3 verschwinden, Slot 0 ist belegt.
+  await page.evaluate(() => {
+    const scene = window.game!.scene.getScene('main') as unknown as {
+      state: { players: { lines: { towers: { hp: number }[] }[] }[] };
+    };
+    scene.state.players[0]!.lines[0]!.towers[1]!.hp = 0;
+  });
+
+  await pointerDown(page, await cardPointOf(page, 0));
+  await pointerMove(page, { x: 200, y: 330 });
+  await expect.poll(async () => (await readDots(page)).map((dot) => dot.slot)).toEqual([1, 4, 5]);
+  await pointerUp(page);
+
+  expect(errors).toEqual([]);
+});
+
+test('Lane-Karte ziehen: Punkt im Lane-Slot hinter dem Turm, höchstens eine Lane-Karte je Lane', async ({ page }) => {
+  const errors = collectErrors(page);
+  await openGame(page);
+  await setHand(page, ['lane-buff', 'lane-shield'], 8);
+
+  await pointerDown(page, await cardPointOf(page, 0));
+  await pointerMove(page, { x: 200, y: 330 });
+  await expect.poll(async () => (await readDots(page)).length).toBe(1);
+  const [dot] = await readDots(page);
+  expect(dot).toMatchObject({ line: 0, slot: null });
+  expect(dot!.x).toBeLessThan(slotPoint(0, 0).x);
+  await pointerMove(page, laneSlot(0));
+  await pointerUp(page);
+
+  await expect.poll(async () => (await readState(page)).players[0].lines[0]!.laneEffect).toBe('buff');
+  const placed = await readState(page);
+  expect(placed.players[0].lines[0]!.laneCard).toBe('lane-buff');
+  expect(placed.players[0].energy).toBe(8 - getCardDef('lane-buff').cost);
+
+  // Die Lane trägt schon eine Lane-Karte: kein Punkt mehr, die zweite Karte bleibt auf der Hand.
+  await pointerDown(page, await cardPointOf(page, 0));
+  await pointerMove(page, { x: 200, y: 330 });
+  await pointerMove(page, laneSlot(0));
+  expect(await readDots(page)).toEqual([]);
+  await pointerUp(page);
+  expect((await readState(page)).players[0].hand).toEqual(['lane-shield']);
+
+  expect(errors).toEqual([]);
+});
+
+test('Abwerfen: gewählte Karte mit „Abwerfen“ abwerfen bringt 1 Energie, Energie über dem Maximum verfällt', async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await openGame(page);
+  await setHand(page, ['summon-brute', 'tower-hp', 'summon-minion'], 3);
+
+  await tapCard(page, 1);
+  await expect.poll(() => readSelected(page)).toBe(1);
+  await expect.poll(() => hasVisibleText(page, `Abwerfen +${DISCARD_ENERGY}`)).toBe(true);
+  await tap(page, DISCARD_BUTTON.x, DISCARD_BUTTON.y);
+  await expect.poll(async () => (await readState(page)).players[0].hand.length).toBe(2);
+  expect((await readState(page)).players[0].energy).toBe(3 + DISCARD_ENERGY);
+  expect(await readSelected(page)).toBeNull();
+
+  await setHand(page, ['summon-brute', 'tower-hp'], MAX_ENERGY);
+  await tapCard(page, 0);
+  await tap(page, DISCARD_BUTTON.x, DISCARD_BUTTON.y);
+  await expect.poll(async () => (await readState(page)).players[0].hand.length).toBe(1);
+  expect((await readState(page)).players[0].energy).toBe(MAX_ENERGY);
+
+  expect(errors).toEqual([]);
+});
+
+test('Abwerfen: eine Karte auf die Taste „Abwerfen“ ziehen wirft sie ab', async ({ page }) => {
+  const errors = collectErrors(page);
+  await openGame(page);
+  await setHand(page, ['summon-minion', 'tower-hp'], 2);
+
+  await dragCard(page, 0, DISCARD_BUTTON);
+  await expect.poll(async () => (await readState(page)).players[0].hand.length).toBe(1);
+  const after = await readState(page);
+  expect(after.players[0].energy).toBe(2 + DISCARD_ENERGY);
+  expect(after.players[0].minions).toHaveLength(0);
+
+  expect(errors).toEqual([]);
+});
+
+test('Einheit auf dem Turm-Slot kämpft in der nächsten Runde vom selben Tower aus, ohne neu gesetzt zu werden', async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await openGame(page);
+  await setHand(page, ['summon-guard'], 8);
+  const slot = slotPoint(0, 5);
+  await dragCard(page, 0, slot);
+  await expect.poll(async () => (await readState(page)).players[0].minions.length).toBe(1);
+  const placed = (await readState(page)).players[0].minions[0]!;
+  // Der Wächter soll die Runde sicher überstehen (der Bot kämpft wie immer mit).
+  await page.evaluate(() => {
+    const scene = window.game!.scene.getScene('main') as unknown as {
+      state: { players: { minions: { hp: number; maxHp: number }[] }[] };
+    };
+    for (const minion of scene.state.players[0]!.minions) minion.hp = minion.maxHp = 100000;
+  });
+
+  await startCombat(page);
+  await fastForwardCombat(page);
+  const next = await readState(page);
+  expect(next.round).toBe(2);
+  expect(minionById(next, placed.id)).toMatchObject({ slot: 5, line: 0, position: 16 });
+  expect(next.players[0].placements).toEqual([]);
 
   expect(errors).toEqual([]);
 });

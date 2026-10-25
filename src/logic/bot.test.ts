@@ -6,12 +6,12 @@ import {
   BASE_ENERGY,
   createLaneTowers,
   createMatch,
-  lineCapacity,
   LINE_COUNT,
   MAX_ENERGY,
   type MatchState,
   type PlayerIndex,
 } from './match';
+import { firstFreeSlot, validSlots } from './placement';
 
 const cost = (id: string) => getCardDef(id).cost;
 
@@ -45,11 +45,97 @@ function withHand(hand: string[], energy: number, seed = 4): MatchState {
 function addMinions(state: MatchState, line: number, count: number): void {
   const player = state.players[1];
   for (let index = 0; index < count; index += 1) {
-    player.minions.push({ id: 100 + player.minions.length, line, position: index, hp: 30, damage: 6, range: 4, speed: 10 });
+    const slot = firstFreeSlot(player.minions, line, player.lines[line]!.towers);
+    player.minions.push({
+      id: 100 + player.minions.length,
+      line,
+      ...(slot === undefined ? {} : { slot }),
+      position: index,
+      hp: 30,
+      damage: 6,
+      range: 4,
+      speed: 10,
+    });
   }
 }
 
+/** Belegt alle Turm-Slots der Lane von Spieler 1; gibt ihre Zahl zurück. */
+function fillLane(state: MatchState, line: number): number {
+  const count = validSlots(state.players[1].lines[line]!.towers).length;
+  addMinions(state, line, count);
+  return count;
+}
+
 const minionCount = (state: MatchState, line: number) => state.players[1].minions.filter((m) => m.line === line).length;
+
+describe('Bot: Abwerfen', () => {
+  it('wirft eine nutzlose Karte ab, wenn die Energie danach eine bevorzugte Karte bezahlbar macht', () => {
+    const state = withHand(['buff-minion', 'summon-brute'], 1);
+    const first = botStep(state, 1)!;
+    expect(first).toMatchObject({ cardId: 'buff-minion', discard: true, line: undefined });
+    expect(first.state.players[1].energy).toBe(2);
+    const after = botPlan(state, 1);
+    expect(after.players[1].hand).toEqual([]);
+    expect(after.players[1].energy).toBe(0);
+    expect(after.players[1].minions).toHaveLength(1);
+  });
+
+  it('wirft Karten ab, die gar nicht in der Prioritätenliste stehen', () => {
+    const move = botStep(withHand(['summon-brute', 'tower-hp'], 1), 1, ['summon-brute']);
+    expect(move).toMatchObject({ cardId: 'tower-hp', discard: true });
+  });
+
+  it('wirft nichts ab, wenn auch die zusätzliche Energie keine Karte spielbar macht', () => {
+    expect(botStep(withHand(['buff-minion', 'summon-brute'], 0), 1)).toBeNull();
+  });
+
+  it('wirft nichts ab, wenn die Energie schon voll ist', () => {
+    const state = withHand(['buff-minion'], MAX_ENERGY);
+    expect(botStep(state, 1)).toBeNull();
+    expect(botPlan(state, 1).players[1].hand).toEqual(['buff-minion']);
+  });
+
+  it('wirft keine Karte ab, die er selbst spielen würde', () => {
+    expect(botStep(withHand(['summon-brute', 'summon-brute'], 1), 1)).toBeNull();
+  });
+
+  it('wirft nichts ab, solange er noch eine Karte spielen kann', () => {
+    const move = botStep(withHand(['buff-minion', 'summon-minion'], 1), 1)!;
+    expect(move.discard).toBeUndefined();
+    expect(move.cardId).toBe('summon-minion');
+  });
+});
+
+describe('Bot: Lane-Karten und neue Karten', () => {
+  it('legt eine Lane-Karte auf die Lane mit den meisten eigenen Minions', () => {
+    const state = grow(withHand(['lane-buff'], 2), 2);
+    addMinions(state, 1, 1);
+    addMinions(state, 2, 2);
+    const move = botStep(state, 1)!;
+    expect(move).toMatchObject({ cardId: 'lane-buff', line: 2 });
+    expect(move.state.players[1].lines[2]).toMatchObject({ laneCard: 'lane-buff', laneEffect: 'buff' });
+  });
+
+  it('spielt eine Lane-Karte nicht auf eine Lane ohne Minions', () => {
+    expect(botStep(withHand(['lane-shield'], 5), 1)).toBeNull();
+  });
+
+  it('legt höchstens eine Lane-Karte auf dieselbe Lane', () => {
+    const state = withHand(['lane-buff', 'lane-shield'], 6);
+    addMinions(state, 0, 1);
+    const after = botPlan(state, 1);
+    expect(after.players[1].lines[0]!.laneCard).toBe('lane-buff');
+    expect(after.players[1].hand).toEqual(['lane-shield']);
+  });
+
+  it('spielt Späher, Wächter, Magier, Panzer und Drill', () => {
+    for (const id of ['summon-scout', 'summon-guard', 'summon-mage', 'tower-armor', 'minion-upgrade-elite']) {
+      const state = withHand([id], MAX_ENERGY);
+      addMinions(state, 0, 1);
+      expect(botStep(state, 1)?.cardId).toBe(id);
+    }
+  });
+});
 
 describe('Bot', () => {
   it('spielt Karten, verbraucht Energie und meldet sich bereit', () => {
@@ -319,30 +405,41 @@ describe('Bot', () => {
 
     it('summon: weicht auf eine freie Lane aus, wenn andere Lanes voll sind', () => {
       const state = grow(withHand(['summon-minion'], 1), 2);
-      const capacity = lineCapacity(state.players[1].level);
-      addMinions(state, 0, capacity);
-      addMinions(state, 1, capacity);
+      const full0 = fillLane(state, 0);
+      const full1 = fillLane(state, 1);
       const after = botPlan(state, 1);
       expect(minionCount(after, 2)).toBe(1);
-      expect(minionCount(after, 0)).toBe(capacity);
-      expect(minionCount(after, 1)).toBe(capacity);
+      expect(minionCount(after, 0)).toBe(full0);
+      expect(minionCount(after, 1)).toBe(full1);
     });
 
     it('summon: überspringt eine volle Lane und nimmt bei Gleichstand die niedrigste freie', () => {
       const state = grow(withHand(['summon-minion'], 1), 2);
-      const capacity = lineCapacity(state.players[1].level);
-      addMinions(state, 0, capacity);
-      addMinions(state, 1, 2);
-      addMinions(state, 2, 2);
+      const full0 = fillLane(state, 0);
+      addMinions(state, 1, 1);
+      addMinions(state, 2, 1);
       const after = botPlan(state, 1);
-      expect(minionCount(after, 0)).toBe(capacity);
-      expect(minionCount(after, 1)).toBe(3);
-      expect(minionCount(after, 2)).toBe(2);
+      expect(minionCount(after, 0)).toBe(full0);
+      expect(minionCount(after, 1)).toBe(2);
+      expect(minionCount(after, 2)).toBe(1);
+    });
+
+    it('summon: setzt auf einen freien Turm-Slot und nie auf einen belegten', () => {
+      const state = withHand(['summon-minion', 'summon-minion', 'summon-minion'], 3);
+      const after = botPlan(state, 1);
+      expect(after.players[1].minions.map((m) => m.slot)).toEqual([0, 1, 2]);
+    });
+
+    it('summon: meidet Lanes, deren Tower alle zerstört sind', () => {
+      const state = grow(withHand(['summon-minion'], 1), 2);
+      for (const tower of state.players[1].lines[0]!.towers) tower.hp = 0;
+      const after = botPlan(state, 1);
+      expect(after.players[1].minions.map((m) => m.line)).toEqual([1]);
     });
 
     it('summon: lässt die Karte auf der Hand, wenn alle freien Lanes voll sind', () => {
       const state = grow(withHand(['summon-minion'], 3), 2);
-      for (const line of unlockedLanes(2)) addMinions(state, line, lineCapacity(state.players[1].level));
+      for (const line of unlockedLanes(2)) fillLane(state, line);
       const after = botPlan(state, 1);
       expect(after.players[1].hand).toEqual(['summon-minion']);
       expect(after.players[1].energy).toBe(3);
