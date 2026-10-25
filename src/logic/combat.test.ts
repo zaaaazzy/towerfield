@@ -6,6 +6,7 @@ import {
   MINION_RANGE,
   MINION_SPEED,
   TICK_SECONDS,
+  TOWER_RANGE,
   totalTowerHp,
   towersAlive,
 } from './combat';
@@ -66,6 +67,34 @@ describe('Kampf', () => {
     combatTick(players, 1);
     expect(players[1].minions.find((m) => m.id === 1)!.hp).toBe(30);
     expect(players[1].minions.find((m) => m.id === 2)!.hp).toBe(22);
+  });
+
+  it('trifft ein Minion genau im Abstand TOWER_RANGE, aber keins im Abstand TOWER_RANGE + 1', () => {
+    const players: [CombatPlayer, CombatPlayer] = [player(), player()];
+    players[1].minions.push(
+      minion(1, 0, LINE_LENGTH - TOWER_RANGE, 30),
+      minion(2, 1, LINE_LENGTH - TOWER_RANGE - 1, 30),
+    );
+    combatTick(players, 1);
+    expect(players[1].minions.find((m) => m.id === 1)!.hp).toBe(22);
+    expect(players[1].minions.find((m) => m.id === 2)!.hp).toBe(30);
+  });
+
+  it('lässt ein Minion im Abstand 22 unbeschädigt (nach altem Wert 25 wäre es getroffen worden)', () => {
+    const players: [CombatPlayer, CombatPlayer] = [player(), player()];
+    players[1].minions.push(minion(1, 0, LINE_LENGTH - 22, 30));
+    combatTick(players, 1);
+    expect(players[1].minions[0]!.hp).toBe(30);
+  });
+
+  it('lässt einen fernkämpfenden Minion (Reichweite 14) den Tower erst in TOWER_RANGE treffen, den Tower ihn dann auch', () => {
+    const rangedRange = 14;
+    expect(rangedRange).toBeLessThan(TOWER_RANGE);
+    const players: [CombatPlayer, CombatPlayer] = [player(), player()];
+    // Abstand 14 liegt innerhalb von TOWER_RANGE: der Tower trifft den Fernkämpfer.
+    players[1].minions.push(minion(1, 0, LINE_LENGTH - rangedRange, 30));
+    combatTick(players, 1);
+    expect(players[1].minions[0]!.hp).toBe(22);
   });
 
   it('beschießt das vorderste Minion im Turmradius', () => {
