@@ -141,6 +141,18 @@ describe('Bot', () => {
       expect(minions.find((m) => !m.heals)!.heals).toBeUndefined();
     });
 
+    it('beschwört einen Zerstörer mit Explosionswerten, andere Minions ohne', () => {
+      const after = botPlan(
+        withHand(['summon-destroyer', 'summon-minion'], cost('summon-destroyer') + cost('summon-minion')),
+        1,
+      );
+      const minions = after.players[1].minions;
+      expect(minions).toHaveLength(2);
+      expect(minions.find((m) => m.explodes)).toMatchObject({ explodes: { radius: 10, damage: 15 }, maxHp: 40 });
+      expect(minions.filter((m) => m.explodes)).toHaveLength(1);
+      expect(minions.some((m) => m.heals)).toBe(false);
+    });
+
     it('beschwört einen Bogenschützen mit Reichweite 14', () => {
       const after = botPlan(withHand(['summon-archer'], cost('summon-archer')), 1);
       expect(after.players[1].minions).toHaveLength(1);

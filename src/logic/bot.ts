@@ -11,6 +11,7 @@ const PRIORITY = [
   'summon-minion',
   'summon-archer',
   'summon-healer',
+  'summon-destroyer',
   'tower-hp',
   'line-upgrade',
   'minion-upgrade-line',

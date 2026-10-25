@@ -65,6 +65,7 @@ describe('describeCard', () => {
     expect(describeCard(getCardDef('summon-minion'))).toBe('6 Schaden\n30 Leben');
     expect(describeCard(getCardDef('summon-archer'))).toBe('7 Fernschaden\n20 Leben');
     expect(describeCard(getCardDef('summon-healer'))).toBe('Heilt 5/s\n20 Leben');
+    expect(describeCard(getCardDef('summon-destroyer'))).toBe('8 Schaden · 40 Leben\nTod: 15 Fläche');
     expect(describeCard(getCardDef('minion-upgrade-all'))).toBe('Alle: +5 Leben\n+1 Schaden');
     expect(describeCard(getCardDef('minion-upgrade-line'))).toBe('Lane: +10 Leben\n+2 Schaden');
     expect(describeCard(getCardDef('line-upgrade'))).toBe('Lane +1 Stufe\noben + unten');

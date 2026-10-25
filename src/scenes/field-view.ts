@@ -4,7 +4,7 @@
  * (`logic/minion-look.ts`). Nur Darstellung, keine Regeln.
  */
 import Phaser from 'phaser';
-import { LINE_LENGTH } from '../logic/combat';
+import { type Explosion, LINE_LENGTH } from '../logic/combat';
 import { isLaneUnlocked, LANE_COUNT, laneName, laneRow, laneTowerOffsets, laneUnlockLevel } from '../logic/lanes';
 import { lineCapacity, type MatchState } from '../logic/match';
 import {
@@ -128,7 +128,7 @@ export interface MinionAnim {
   flashes: ReadonlyMap<string, number>;
 }
 
-/** Füllt die Silhouette der Rolle: Nahkämpfer rund, Fernkämpfer Raute in Blickrichtung, Heiler Rundquadrat. */
+/** Füllt die Silhouette der Rolle: Nahkämpfer rund, Fernkämpfer Raute in Blickrichtung, Heiler Rundquadrat, Zerstörer Stachelkugel. */
 function fillSilhouette(
   g: Phaser.GameObjects.Graphics,
   shape: MinionShape,
@@ -146,6 +146,15 @@ function fillSilhouette(
     const h = r * 1.3;
     g.fillTriangle(x - h, y, x, y - w, x, y + w);
     g.fillTriangle(x + h, y, x, y - w, x, y + w);
+  } else if (shape === 'destroyer') {
+    // Stachelkugel: Kreis mit vier Spitzen oben, unten, vorn und hinten.
+    const s = r * 1.3;
+    const w = r * 0.5;
+    g.fillCircle(x, y, r * 0.92);
+    g.fillTriangle(x - w, y - r * 0.6, x + w, y - r * 0.6, x, y - s);
+    g.fillTriangle(x - w, y + r * 0.6, x + w, y + r * 0.6, x, y + s);
+    g.fillTriangle(x - r * 0.6, y - w, x - r * 0.6, y + w, x - s, y);
+    g.fillTriangle(x + r * 0.6, y - w, x + r * 0.6, y + w, x + s, y);
   } else {
     g.fillRoundedRect(x - r * 0.9, y - r * 0.9, r * 1.8, r * 1.8, r * 0.5);
   }
@@ -161,7 +170,7 @@ export function drawMinionBody(
   x: number,
   baseY: number,
   owner: number,
-  minion?: { hp: number; maxHp?: number; heals?: boolean; range: number },
+  minion?: { hp: number; maxHp?: number; heals?: boolean; explodes?: Explosion; range: number },
   alpha = 1,
   look?: MinionLook,
 ): void {
@@ -185,8 +194,12 @@ export function drawMinionBody(
     const centre = dir < 0 ? Math.PI : 0;
     g.lineStyle(2, team.dark, alpha).beginPath().arc(x, y, r + 3, centre - 1, centre + 1).strokePath();
     g.lineStyle(1, PALETTE.goldLight, alpha).beginPath().arc(x, y, r + 3, centre - 1, centre + 1).strokePath();
-  } else {
+  } else if (shape === 'healer') {
     g.lineStyle(2, PALETTE.good, 0.9 * alpha).strokeEllipse(x + dir * (r + 2.5), y, 3.5, r * 1.3);
+  } else {
+    // Zündschnur oben mit Funken.
+    g.lineStyle(1.5, STEEL, alpha).beginPath().moveTo(x, y - r).lineTo(x - dir * 2, y - r - 4).strokePath();
+    g.fillStyle(PALETTE.gold, alpha).fillCircle(x - dir * 2, y - r - 5, 1.8);
   }
 
   // Körper: dunkle Kontur, Teamfarbe, aufgehellte Fläche oben links (Verlauf), Glanzlicht.

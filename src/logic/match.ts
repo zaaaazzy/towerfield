@@ -267,6 +267,7 @@ export function playCard(
         speed: def.speed ?? MINION_SPEED,
         maxHp: def.hp + line!.bonus.hp,
         ...(def.role === 'healer' ? { heals: true } : {}),
+        ...(def.explodes ? { explodes: { ...def.explodes } } : {}),
       };
       player.nextMinionId += 1;
       player.minions.push(minion);
