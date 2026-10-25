@@ -74,7 +74,7 @@ zurücknehmbar.
 | `BASE_ENERGY`, `ENERGY_PER_ROUND` | `match.ts` | 3 / 1 | unverändert | Reicht für 1–2 Karten in Runde 1, wächst gleichmäßig |
 | `MAX_ROUNDS`, `COMBAT_TICKS` | `match.ts` | 8 / 400 | unverändert | Spieldauer ca. 8 × (Planung + 20 s) |
 | `TOWER_RANGE` | `combat.ts` | 20 | 20 (umgesetzt, vorher 25) | Fernkämpfer (Reichweite 14) sollen den Tower überhaupt erst treffen, wenn sie in seiner Reichweite stehen, aber nicht lange ungestraft |
-| `MINION_RANGE` | `combat.ts` | 4 (alle) | je Rolle (4 / 14), Feld am Minion | Rollen brauchen unterschiedliche Reichweite (Abschnitt 4) |
+| `MINION_RANGE` | `combat.ts` | 4 (alle) | Standardwert 4 bleibt; Reichweite je Minion im Feld `range` (umgesetzt: Minion und Brocken 4, Bogenschütze 14) | Rollen brauchen unterschiedliche Reichweite (Abschnitt 4) |
 | `MINION_SPEED` | `combat.ts` | 10 (alle) | Standardwert 10 bleibt; Tempo je Minion im Feld `speed` (umgesetzt: Minion 10, Brocken 8) | Tank langsamer, damit Wellen sich staffeln; Upgrades ändern das Tempo nicht |
 | `LINE_COUNT`, `BASE_CAPACITY`, `MAX_LINE_LEVEL`, `TOWER_HP`, `TOWER_DAMAGE` | `match.ts` | 3 / 2 / 5 / 100 / 8 | unverändert | Erst nach Spieltests anpassen |
 
@@ -91,7 +91,7 @@ zurücknehmbar.
 |---|---|---|---|---|---|---|
 | Nahkampf | Minion | 30 | 6 | 4 | 10 | vorhanden |
 | Tank | Brocken | 80 | 12 | 4 | 8 | vorhanden |
-| Fernkampf | Bogenschütze (`summon-archer`, Kosten 2, 2 Kopien) | 20 | 7 | 14 | 10 | neu, Folgeauftrag 5 |
+| Fernkampf | Bogenschütze (`summon-archer`, Kosten 2, 2 Kopien) | 20 | 7 | 14 | 10 | vorhanden |
 
 ## 5. Platzierung (Mechabellum-Stil)
 
@@ -178,7 +178,7 @@ Ansicht `VIEW` = 360 × 640, `Scale.FIT`, zentriert. Wireframe (von oben nach un
 2. **Platzierungs-UI:** Slots sichtbar, Vorschau, Verschieben und Rückgängig in der Szene anbinden (Logik vorhanden).
 3. **Hand-UI:** Hand unten, Auswahl per Tippen, Platzieren per Tippen oder Ziehen, 44-px-Treffer-Zonen.
 4. **Konstanten und Ablage:** Soll-Werte aus Abschnitt 3 übernehmen, Ablage als Zustandsfeld, Tests und README anpassen.
-5. **Minion-Rollen:** Reichweite und Tempo je Minion, Karte `summon-archer`, Bot-Priorität anpassen.
+5. ~~**Minion-Rollen:** Reichweite und Tempo je Minion, Karte `summon-archer`, Bot-Priorität anpassen.~~ (umgesetzt)
 6. **Balancing:** Bot-gegen-Bot-Simulation über viele Seeds, Werte in Abschnitt 3 und 4 justieren.
 7. **Grafiken und Töne:** Platzhalter ersetzen (`public/assets/`).
 

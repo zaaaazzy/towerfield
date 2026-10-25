@@ -20,6 +20,25 @@ describe('Karten', () => {
     expect(getCardDef('summon-brute')).toMatchObject({ speed: 8 });
   });
 
+  it('definiert den Bogenschützen mit Kosten 2, 20 LP, 7 Schaden/s, Reichweite 14 und Tempo 10', () => {
+    expect(getCardDef('summon-archer')).toMatchObject({
+      name: 'Bogenschütze',
+      type: 'summon',
+      cost: 2,
+      target: 'line',
+      hp: 20,
+      damage: 7,
+      range: 14,
+      speed: 10,
+    });
+  });
+
+  it('legt den Bogenschützen genau zweimal in einen Durchgang des Decks', () => {
+    const passLength = 16;
+    expect(buildDeck(1, passLength).filter((id) => id === 'summon-archer')).toHaveLength(2);
+    expect(buildDeck(7, passLength * 3).filter((id) => id === 'summon-archer')).toHaveLength(6);
+  });
+
   it('wirft bei einer unbekannten Karte', () => {
     expect(() => getCardDef('gibt-es-nicht')).toThrow();
   });

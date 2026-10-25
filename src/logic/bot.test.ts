@@ -25,7 +25,7 @@ function withHand(hand: string[], energy: number, seed = 4): MatchState {
 function addMinions(state: MatchState, line: number, count: number): void {
   const player = state.players[1];
   for (let index = 0; index < count; index += 1) {
-    player.minions.push({ id: 100 + player.minions.length, line, position: index, hp: 30, damage: 6, speed: 10 });
+    player.minions.push({ id: 100 + player.minions.length, line, position: index, hp: 30, damage: 6, range: 4, speed: 10 });
   }
 }
 
@@ -71,6 +71,7 @@ describe('Bot', () => {
   describe('Priorisierung', () => {
     const PRIORITY = [
       'summon-minion',
+      'summon-archer',
       'tower-hp',
       'line-upgrade',
       'minion-upgrade-line',
@@ -78,6 +79,12 @@ describe('Bot', () => {
       'tower-damage',
       'minion-upgrade-all',
     ];
+
+    it('beschwört einen Bogenschützen mit Reichweite 14', () => {
+      const after = botPlan(withHand(['summon-archer'], cost('summon-archer')), 1);
+      expect(after.players[1].minions).toHaveLength(1);
+      expect(after.players[1].minions[0]).toMatchObject({ range: 14, speed: 10 });
+    });
 
     it('spielt summon-minion vor tower-hp, auch wenn tower-hp zuerst auf der Hand steht', () => {
       const state = withHand(['tower-hp', 'summon-minion'], cost('summon-minion'));
@@ -117,7 +124,7 @@ describe('Bot', () => {
 
     it('verhält sich mit der Standardreihenfolge wie ohne Parameter', () => {
       const state = createMatch(4);
-      expect(botPlan(state, 1, ['summon-minion', 'tower-hp', 'line-upgrade', 'minion-upgrade-line', 'summon-brute', 'tower-damage', 'minion-upgrade-all'])).toEqual(botPlan(state, 1));
+      expect(botPlan(state, 1, ['summon-minion', 'summon-archer', 'tower-hp', 'line-upgrade', 'minion-upgrade-line', 'summon-brute', 'tower-damage', 'minion-upgrade-all'])).toEqual(botPlan(state, 1));
     });
 
     it('spielt Karten nicht, die in der Reihenfolge fehlen', () => {

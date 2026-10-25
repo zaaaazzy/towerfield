@@ -18,12 +18,13 @@ interface CardBase {
 export type CardDef =
   | (CardBase & { type: 'line-upgrade' })
   | (CardBase & { type: 'tower-upgrade'; hp: number; damage: number })
-  | (CardBase & { type: 'summon'; hp: number; damage: number; speed: number })
+  | (CardBase & { type: 'summon'; hp: number; damage: number; range?: number; speed?: number })
   | (CardBase & { type: 'minion-upgrade'; hp: number; damage: number; scope: 'line' | 'all' });
 
 export const CARD_DEFS: readonly CardDef[] = [
   { id: 'summon-minion', name: 'Minion', type: 'summon', cost: 1, target: 'line', hp: 30, damage: 6, speed: MINION_SPEED },
   { id: 'summon-brute', name: 'Brocken', type: 'summon', cost: 2, target: 'line', hp: 80, damage: 12, speed: 8 },
+  { id: 'summon-archer', name: 'Bogenschütze', type: 'summon', cost: 2, target: 'line', hp: 20, damage: 7, range: 14, speed: 10 },
   { id: 'line-upgrade', name: 'Line +1', type: 'line-upgrade', cost: 2, target: 'line' },
   { id: 'tower-hp', name: 'Tower Leben', type: 'tower-upgrade', cost: 1, target: 'line', hp: 30, damage: 0 },
   { id: 'tower-damage', name: 'Tower Schaden', type: 'tower-upgrade', cost: 2, target: 'line', hp: 0, damage: 4 },
@@ -53,6 +54,7 @@ export const CARD_DEFS: readonly CardDef[] = [
 const COPIES: Readonly<Record<string, number>> = {
   'summon-minion': 4,
   'summon-brute': 2,
+  'summon-archer': 2,
   'line-upgrade': 2,
   'tower-hp': 2,
   'tower-damage': 1,

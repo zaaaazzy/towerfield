@@ -9,6 +9,8 @@ import {
   combatTick,
   type CombatPlayer,
   type Minion,
+  MINION_RANGE,
+  MINION_SPEED,
   TICK_MS,
   type Tower,
   totalTowerHp,
@@ -207,7 +209,8 @@ export function playCard(
         position: slotPosition(summonSlot),
         hp: def.hp + line!.bonus.hp,
         damage: def.damage + line!.bonus.damage,
-        speed: def.speed,
+        range: def.range ?? MINION_RANGE,
+        speed: def.speed ?? MINION_SPEED,
       };
       player.nextMinionId += 1;
       player.minions.push(minion);
