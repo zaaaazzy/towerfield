@@ -1,4 +1,6 @@
 import { expect, type Page } from '@playwright/test';
+import { getCardDef } from '../src/logic/cards';
+import { cardAt, fanLayout, HAND_FAN, poseContains, sortHand } from '../src/logic/hand-layout';
 import type { MatchState } from '../src/logic/match';
 
 /** Spielfläche in Spielkoordinaten (wie `VIEW` in der Szene). */
@@ -38,16 +40,48 @@ export async function tap(page: Page, x: number, y: number): Promise<void> {
   await page.mouse.click(box.x + (x / VIEW.width) * box.width, box.y + (y / VIEW.height) * box.height);
 }
 
-/** Mittelpunkt der Handkarte `index` (5 pro Reihe, siehe `cardRect` in der Szene). */
-export function cardCenter(index: number): { x: number; y: number } {
-  return { x: 7 + (index % 5) * 70 + 33, y: 440 + Math.floor(index / 5) * 66 + 31 };
+/**
+ * Ein Punkt, an dem die Handkarte mit Hand-Index `index` in Ruhelage sichtbar die oberste ist (Fächer aus
+ * `src/logic/hand-layout.ts`). Gesucht wird der Punkt der sichtbaren Fläche, der der Kartenmitte am nächsten liegt.
+ */
+export function cardPoint(hand: readonly string[], index: number, exclusive = false): { x: number; y: number } {
+  const order = sortHand(hand.map((id) => getCardDef(id).type));
+  const poses = fanLayout(hand.length);
+  const slot = order.indexOf(index);
+  const pose = poses[slot]!;
+  let best: { x: number; y: number } | null = null;
+  let bestDistance = Infinity;
+  for (let dy = -HAND_FAN.cardHeight; dy <= HAND_FAN.cardHeight; dy += 2) {
+    for (let dx = -HAND_FAN.cardWidth; dx <= HAND_FAN.cardWidth; dx += 2) {
+      const x = pose.x + dx;
+      const y = pose.y + dy;
+      if (cardAt(poses, x, y) !== slot) continue;
+      // `exclusive`: nur Punkte, auf denen keine andere Karte darunterliegt (wichtig für ausgeblendete Karten).
+      if (exclusive && poses.some((other, otherSlot) => otherSlot !== slot && poseContains(other, x, y))) continue;
+      const distance = Math.hypot(dx, dy);
+      if (distance < bestDistance) {
+        best = { x, y };
+        bestDistance = distance;
+      }
+    }
+  }
+  if (!best) throw new Error(`Handkarte ${index} ist nicht sichtbar`);
+  return best;
+}
+
+/** Punkt der Handkarte `index` im aktuellen Spielzustand. */
+export async function cardPointOf(page: Page, index: number): Promise<{ x: number; y: number }> {
+  return cardPoint((await readState(page)).players[0].hand, index);
 }
 
 export const LINE_X = [60, 180, 300];
 const LINE_TAP_Y = 250;
 export const READY_BUTTON = { x: 290, y: 612 };
 
-export const tapCard = (page: Page, index: number) => tap(page, cardCenter(index).x, cardCenter(index).y);
+export async function tapCard(page: Page, index: number): Promise<void> {
+  const point = await cardPointOf(page, index);
+  await tap(page, point.x, point.y);
+}
 export const tapLine = (page: Page, line: number) => tap(page, LINE_X[line]!, LINE_TAP_Y);
 export const tapReady = (page: Page) => tap(page, READY_BUTTON.x, READY_BUTTON.y);
 
