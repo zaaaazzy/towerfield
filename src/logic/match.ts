@@ -16,6 +16,7 @@ import {
   totalTowerHp,
   towersAlive,
 } from './combat';
+import { createStats, type MatchStats, recordDamage, recordMove, recordSummon, recordUndo } from './match-stats';
 import { firstFreeSlot, isSlotFree, isValidSlot, slotPosition } from './placement';
 
 export const LINE_COUNT = 3;
@@ -33,6 +34,9 @@ export const TOWER_HP = 100;
 export const TOWER_DAMAGE = 8;
 /** Dauer der Kampfphase in Ticks (20 Sekunden). */
 export const COMBAT_TICKS = 400;
+
+/** Nur dieser Spieler (der eigene) wird in `MatchState.stats` erfasst. */
+const STATS_PLAYER: PlayerIndex = 0;
 
 export type Phase = 'planning' | 'combat' | 'over';
 export type Outcome = 'player0' | 'player1' | 'draw';
@@ -68,6 +72,8 @@ export interface MatchState {
   accumulatorMs: number;
   combatTicks: number;
   outcome: Outcome | null;
+  /** Statistik des eigenen Spielers (Spieler 0), siehe `match-stats.ts`. */
+  stats: MatchStats;
 }
 
 export type PlayError =
@@ -138,6 +144,7 @@ export function createMatch(seed: number): MatchState {
     accumulatorMs: 0,
     combatTicks: 0,
     outcome: null,
+    stats: createStats(),
   };
   startRound(state, 1);
   return state;
@@ -215,6 +222,7 @@ export function playCard(
       player.nextMinionId += 1;
       player.minions.push(minion);
       player.placements.push({ minionId: minion.id, cardId });
+      if (playerIndex === STATS_PLAYER) recordSummon(next.stats, minion.id, cardId, minion.line);
       break;
     }
     case 'minion-upgrade':
@@ -252,6 +260,7 @@ export function moveMinion(
   if (!isSlotFree(others, lineIndex, slot)) return reject(state, 'slot-taken');
   const next = structuredClone(state);
   const moved = next.players[playerIndex].minions.find((m) => m.id === minionId)!;
+  if (playerIndex === STATS_PLAYER) recordMove(next.stats, minionId, moved.line, lineIndex);
   moved.line = lineIndex;
   moved.position = slotPosition(slot);
   return { ok: true, state: next };
@@ -268,6 +277,9 @@ export function undoSummon(state: MatchState, playerIndex: PlayerIndex, minionId
   if (!placement) return reject(state, 'no-such-minion');
   const next = structuredClone(state);
   const player = next.players[playerIndex];
+  if (playerIndex === STATS_PLAYER) {
+    recordUndo(next.stats, minionId, player.minions.find((m) => m.id === minionId)!.line);
+  }
   player.minions = player.minions.filter((m) => m.id !== minionId);
   player.placements = player.placements.filter((p) => p.minionId !== minionId);
   player.energy += getCardDef(placement.cardId).cost;
@@ -323,7 +335,9 @@ export function advance(state: MatchState, deltaMs: number): MatchState {
   // Kleine Toleranz gegen Rundungsfehler beim Aufsummieren vieler Bruchteile.
   while (next.phase === 'combat' && next.accumulatorMs >= TICK_MS - 1e-6) {
     next.accumulatorMs -= TICK_MS;
-    combatTick(next.players);
+    combatTick(next.players, undefined, (side, minionId, kind, amount) => {
+      if (side === STATS_PLAYER) recordDamage(next.stats, minionId, kind, amount);
+    });
     next.combatTicks += 1;
     const destroyed = destroyedOutcome(next);
     if (destroyed) {
