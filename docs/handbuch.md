@@ -206,6 +206,22 @@ Heiler (`role: 'healer'`, Reichweite 10, Tempo 10; `damage` 5 ist dort Heilung p
 (`PRIORITY` in `bot.ts`) lautet: Minion, Bogenschütze, Heiler, Zerstörer, Tower Leben, Line +1, Minions Line, Brocken, Tower
 Schaden, Minions alle.
 
+#### Synergien (`src/logic/synergies.ts`)
+
+`SYNERGY_DEFS` listet Paare (`id`, `name`, `cards`, `condition` `sameLine`/`anyLine`, `modifier` `{ stat: 'range', amount }`).
+Umgesetzt: `archer-line-upgrade` (`summon-archer` + `line-upgrade`, `sameLine`, Reichweite +2).
+
+- `activeSynergies(played, defs?)` wertet `PlayedCard[]` (`cardId`, `line?`, `minionId?`) reihenfolgeunabhängig aus: je
+  Definition und Line höchstens ein Treffer, sortiert nach Definition und Line (`line: null` bei `anyLine`). Eine Karte
+  ohne Lane (`line-upgrade`) passt zur Line der anderen Karte; zwei Karten ohne Lane ergeben nichts.
+- `PlayerState.played` (in der Runde gespielte Karten) und `PlayerState.synergies` (aktive Synergien) füllt `playCard`
+  nach erfolgreichem Spielen; ein Fehler lässt den Zustand unverändert. `undoSummon` und `moveMinion` halten beide aktuell.
+  `startRound` leert `played` und entfernt `Minion.rangeBonus`.
+- Der Bonus liegt als `Minion.rangeBonus` an allen Minions der betroffenen Line (auch an später beschworenen); der Kampf
+  nutzt `effectiveRange(minion)` = `range + rangeBonus` (`combat.ts`). `LineState.bonus` und Basiswerte bleiben unberührt.
+- Anzeige: `drawBoard` schreibt `describeSynergy` an die Lane (z. B. „Fernkampf-Ausbau · Reichweite +2“). `balance-sim.ts`
+  und Replay laufen über `playCard`/`advance` und berücksichtigen Synergien automatisch; der Bot bleibt unverändert.
+
 #### Abweichungen zum Designkonzept
 
 Maßgeblich ist der Code; `docs/designkonzept.md` bleibt unverändert und ist an diesen Stellen veraltet:

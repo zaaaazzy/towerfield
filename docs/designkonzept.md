@@ -70,6 +70,22 @@ Ausnahme: Sie wirkt sofort und nur auf den gewählten Minion, ändert `line.bonu
 Minions nicht. Mehrere Stärkungen wirken nacheinander auf die jeweils aktuellen Werte; der Zuwachs ist
 `Math.round(Wert × 0,5)` (`buff.ts`, z. B. 5 → +3). Upgrades und Stärkungen sind nicht zurücknehmbar.
 
+### Synergien (temporär, pro Runde)
+
+Spielt ein Spieler in derselben Runde ein bestimmtes Kartenpaar, erhalten seine Minions bis zum Rundenende einen Bonus
+(`SYNERGY_DEFS` in `synergies.ts`, datengetrieben mit Karten-IDs, Bedingung `sameLine`/`anyLine` und Modifikator).
+
+| Synergie | Karten | Bedingung | Wirkung |
+|---|---|---|---|
+| Fernkampf-Ausbau (`archer-line-upgrade`) | Bogenschütze + Lane +1 | dieselbe Line | alle Minions dieser Line: Reichweite +2 (Bogenschütze 14 → 16) |
+
+- Die Reihenfolge der Karten ist egal. Der Bonus wirkt auch auf später beschworene und überlebende Minions der Line, nie auf
+  andere Lines oder den Gegner. Je Spieler, Line und Runde zählt jede Synergie höchstens einmal (kein Stapeln).
+- Lane +1 hat kein Lane-Ziel; es passt deshalb zu jeder Line mit Bogenschütze (die Synergie gilt für jede dieser Lines).
+- Der Bonus steht nicht in `LineState.bonus` oder in den Minion-Werten, sondern als `rangeBonus`; `startRound` löscht ihn
+  samt der gespielten Karten. Zurücknehmen oder Verschieben des Bogenschützen aktualisiert die Synergie. Die Szene zeigt sie
+  in grüner Schrift an der Lane.
+
 ### Soll-Änderungen an Konstanten
 
 | Konstante | Datei | Ist | Soll | Begründung |

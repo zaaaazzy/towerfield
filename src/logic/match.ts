@@ -20,6 +20,7 @@ import {
 import { createStats, type MatchStats, recordDamage, recordMove, recordSummon, recordUndo } from './match-stats';
 import { isLaneUnlocked, LANE_COUNT, laneTowerOffsets, MAX_FIELD_LEVEL } from './lanes';
 import { firstFreeSlot, isSlotFree, isValidSlot, slotPosition } from './placement';
+import { type ActiveSynergy, activeSynergies, type PlayedCard, synergyBonus } from './synergies';
 
 /** Zahl der Lanes des voll ausgebauten Feldes (Lvl 3); `PlayerState.lines` hat immer so viele Einträge. */
 export const LINE_COUNT = LANE_COUNT;
@@ -61,6 +62,10 @@ export interface PlayerState extends CombatPlayer {
   nextMinionId: number;
   /** In dieser Planungsphase beschworene Minions samt Karte; nur sie lassen sich verschieben oder zurücknehmen. */
   placements: { minionId: number; cardId: string }[];
+  /** Alle in dieser Runde gespielten Karten mit Ziel-Lane; `startRound` leert die Liste. */
+  played: PlayedCard[];
+  /** Daraus folgende aktive Synergien (nur diese Runde, nur für die Minions dieses Spielers), siehe `synergies.ts`. */
+  synergies: ActiveSynergy[];
 }
 
 export interface MatchState {
@@ -127,6 +132,8 @@ function createPlayer(): PlayerState {
     hand: [],
     nextMinionId: 1,
     placements: [],
+    played: [],
+    synergies: [],
     minions: [],
     lines: Array.from({ length: LANE_COUNT }, (_, lane) => ({
       towers: isLaneUnlocked(1, lane) ? createLaneTowers(lane) : [],
@@ -159,6 +166,19 @@ export function respawnSurvivors(player: PlayerState): void {
   player.minions = alive.map((m) => ({ ...m, position: positions.get(m.id)! }));
 }
 
+/**
+ * Wertet die Synergien aus `player.played` neu aus (verändert `player`) und setzt den temporären Reichweitenbonus aller
+ * Minions nach ihrer aktuellen Lane. Ohne Bonus fehlt das Feld; `LineState.bonus` und Basiswerte bleiben unberührt.
+ */
+function refreshSynergies(player: PlayerState): void {
+  player.synergies = activeSynergies(player.played);
+  for (const minion of player.minions) {
+    const bonus = synergyBonus(player.synergies, minion.line, 'range');
+    if (bonus > 0) minion.rangeBonus = bonus;
+    else delete minion.rangeBonus;
+  }
+}
+
 /** Beginnt Runde `round` (verändert `state`): Energie setzen, dieselben Karten für beide ziehen, Planung öffnen. */
 function startRound(state: MatchState, round: number): void {
   const count = round === 1 ? START_HAND : DRAW_PER_ROUND;
@@ -172,7 +192,9 @@ function startRound(state: MatchState, round: number): void {
   for (const player of state.players) {
     player.energy = energyForRound(round);
     player.placements = [];
+    player.played = [];
     respawnSurvivors(player);
+    refreshSynergies(player);
     player.hand.push(...drawn);
     player.hand.length = Math.min(player.hand.length, HAND_LIMIT);
   }
@@ -250,6 +272,9 @@ export function playCard(
   player.energy -= def.cost;
   player.hand.splice(handIndex, 1);
   const line = def.target === 'line' ? player.lines[lineIndex!]! : undefined;
+  const played: PlayedCard = { cardId };
+  if (def.target === 'line') played.line = lineIndex;
+  if (def.target === 'minion') played.line = player.minions.find((m) => m.id === targetMinionId)!.line;
   switch (def.type) {
     case 'line-upgrade':
       // Neue Ausbaustufe: die frisch freien Lanes (je eine oberhalb und unterhalb) bekommen ihre Tower.
@@ -281,6 +306,7 @@ export function playCard(
       player.nextMinionId += 1;
       player.minions.push(minion);
       player.placements.push({ minionId: minion.id, cardId });
+      played.minionId = minion.id;
       if (playerIndex === STATS_PLAYER) recordSummon(next.stats, minion.id, cardId, minion.line);
       break;
     }
@@ -294,6 +320,8 @@ export function playCard(
       applyMinionBuff(player.minions.find((m) => m.id === targetMinionId)!);
       break;
   }
+  player.played.push(played);
+  refreshSynergies(player);
   return { ok: true, state: next };
 }
 
@@ -325,6 +353,10 @@ export function moveMinion(
   if (playerIndex === STATS_PLAYER) recordMove(next.stats, minionId, moved.line, lineIndex);
   moved.line = lineIndex;
   moved.position = slotPosition(slot);
+  const owner = next.players[playerIndex];
+  // Jede Platzierung dieser Runde hat einen Eintrag in `played` (beide entstehen in `playCard`).
+  owner.played.find((p) => p.minionId === minionId)!.line = lineIndex;
+  refreshSynergies(owner);
   return { ok: true, state: next };
 }
 
@@ -344,6 +376,8 @@ export function undoSummon(state: MatchState, playerIndex: PlayerIndex, minionId
   }
   player.minions = player.minions.filter((m) => m.id !== minionId);
   player.placements = player.placements.filter((p) => p.minionId !== minionId);
+  player.played = player.played.filter((p) => p.minionId !== minionId);
+  refreshSynergies(player);
   player.energy += getCardDef(placement.cardId).cost;
   player.hand.push(placement.cardId);
   return { ok: true, state: next };

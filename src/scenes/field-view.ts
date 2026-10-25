@@ -18,6 +18,7 @@ import {
   minionShape,
 } from '../logic/minion-look';
 import { isSlotFree, isValidSlot, type LineGeometry, positionToX, slotPosition } from '../logic/placement';
+import { describeSynergy } from '../logic/synergies';
 import type { Point } from './effects';
 import type { LabelFn } from './labels';
 import { drawBar, healthFill, lerpColor, PALETTE, TEXT } from './theme';
@@ -265,6 +266,10 @@ export function drawBoard(g: Phaser.GameObjects.Graphics, label: LabelFn, state:
     for (const tower of bot.lines[line]!.towers) drawTower(g, label, lineX(BOT, tower.offset ?? 0), center, tower, BOT);
     for (const tower of human.lines[line]!.towers) drawTower(g, label, lineX(HUMAN, tower.offset ?? 0), center, tower, HUMAN);
     label(laneName(line), 180, center - 30, { size: 9, color: TEXT.gold });
+    // Aktive Synergien der Lane (nur Anzeige, die Regeln stehen in `logic/synergies.ts`).
+    human.synergies
+      .filter((synergy) => synergy.line === null || synergy.line === line)
+      .forEach((synergy, row) => label(describeSynergy(synergy), 268, center - 30 + row * 9, { size: 8, color: TEXT.good }));
   }
   label(`Feld Lvl ${human.level}`, 330, 58, { size: 10, color: TEXT.gold });
 }
