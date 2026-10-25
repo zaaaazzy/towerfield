@@ -14,6 +14,7 @@ import {
   totalTowerHp,
   towersAlive,
 } from './combat';
+import { firstFreeSlot, isSlotFree, isValidSlot, slotPosition } from './placement';
 
 export const LINE_COUNT = 3;
 export const START_HAND = 7;
@@ -48,6 +49,8 @@ export interface PlayerState extends CombatPlayer {
   hand: string[];
   lines: LineState[];
   nextMinionId: number;
+  /** In dieser Planungsphase beschworene Minions samt Karte; nur sie lassen sich verschieben oder zurücknehmen. */
+  placements: { minionId: number; cardId: string }[];
 }
 
 export interface MatchState {
@@ -71,6 +74,9 @@ export type PlayError =
   | 'no-such-card'
   | 'not-enough-energy'
   | 'invalid-line'
+  | 'invalid-slot'
+  | 'slot-taken'
+  | 'no-such-minion'
   | 'line-full'
   | 'max-level';
 
@@ -90,6 +96,7 @@ function createPlayer(): PlayerState {
     energy: 0,
     hand: [],
     nextMinionId: 1,
+    placements: [],
     minions: [],
     lines: Array.from({ length: LINE_COUNT }, () => ({
       level: 1,
@@ -111,6 +118,7 @@ function startRound(state: MatchState, round: number): void {
   state.combatTicks = 0;
   for (const player of state.players) {
     player.energy = energyForRound(round);
+    player.placements = [];
     player.hand.push(...drawn);
     player.hand.length = Math.min(player.hand.length, HAND_LIMIT);
   }
@@ -138,14 +146,16 @@ function reject(state: MatchState, reason: PlayError): PlayResult {
 }
 
 /**
- * Spielt die Handkarte `handIndex` für `playerIndex` aus, bei Bedarf auf `lineIndex`. Bei einem Fehler kommt der
- * unveränderte Zustand zurück.
+ * Spielt die Handkarte `handIndex` für `playerIndex` aus, bei Bedarf auf `lineIndex`. Eine Beschwörung steht danach
+ * auf Slot `slot` der Line (ohne Angabe: auf dem ersten freien Slot); bei anderen Karten wird `slot` ignoriert.
+ * Bei einem Fehler kommt der unveränderte Zustand zurück.
  */
 export function playCard(
   state: MatchState,
   playerIndex: PlayerIndex,
   handIndex: number,
   lineIndex?: number,
+  slot?: number,
 ): PlayResult {
   if (state.phase !== 'planning') return reject(state, 'not-planning');
   if (state.ready[playerIndex]) return reject(state, 'already-ready');
@@ -154,13 +164,24 @@ export function playCard(
   if (cardId === undefined) return reject(state, 'no-such-card');
   const def = getCardDef(cardId);
   if (current.energy < def.cost) return reject(state, 'not-enough-energy');
+  let summonSlot = 0;
   if (def.target === 'line') {
     if (lineIndex === undefined || !Number.isInteger(lineIndex) || lineIndex < 0 || lineIndex >= LINE_COUNT) {
       return reject(state, 'invalid-line');
     }
     const line = current.lines[lineIndex]!;
-    if (def.type === 'summon' && current.minions.filter((m) => m.line === lineIndex).length >= lineCapacity(line.level)) {
-      return reject(state, 'line-full');
+    if (def.type === 'summon') {
+      const slotCount = lineCapacity(line.level);
+      if (current.minions.filter((m) => m.line === lineIndex).length >= slotCount) return reject(state, 'line-full');
+      if (slot === undefined) {
+        const free = firstFreeSlot(current.minions, lineIndex, slotCount);
+        if (free === undefined) return reject(state, 'slot-taken');
+        summonSlot = free;
+      } else {
+        if (!isValidSlot(slot, slotCount)) return reject(state, 'invalid-slot');
+        if (!isSlotFree(current.minions, lineIndex, slot)) return reject(state, 'slot-taken');
+        summonSlot = slot;
+      }
     }
     if (def.type === 'line-upgrade' && line.level >= MAX_LINE_LEVEL) return reject(state, 'max-level');
   }
@@ -183,12 +204,13 @@ export function playCard(
       const minion: Minion = {
         id: player.nextMinionId,
         line: lineIndex!,
-        position: 0,
+        position: slotPosition(summonSlot),
         hp: def.hp + line!.bonus.hp,
         damage: def.damage + line!.bonus.damage,
       };
       player.nextMinionId += 1;
       player.minions.push(minion);
+      player.placements.push({ minionId: minion.id, cardId });
       break;
     }
     case 'minion-upgrade':
@@ -198,6 +220,54 @@ export function playCard(
       }
       break;
   }
+  return { ok: true, state: next };
+}
+
+/**
+ * Verschiebt einen in dieser Planungsphase beschworenen Minion auf Line `lineIndex`, Slot `slot` (kostenlos, beliebig
+ * oft bis „Bereit“). Der eigene alte Platz zählt dabei als frei. Bei einem Fehler kommt der alte Zustand zurück.
+ */
+export function moveMinion(
+  state: MatchState,
+  playerIndex: PlayerIndex,
+  minionId: number,
+  lineIndex: number,
+  slot: number,
+): PlayResult {
+  if (state.phase !== 'planning') return reject(state, 'not-planning');
+  if (state.ready[playerIndex]) return reject(state, 'already-ready');
+  const current = state.players[playerIndex];
+  if (!current.placements.some((p) => p.minionId === minionId) || !current.minions.some((m) => m.id === minionId)) {
+    return reject(state, 'no-such-minion');
+  }
+  if (!Number.isInteger(lineIndex) || lineIndex < 0 || lineIndex >= LINE_COUNT) return reject(state, 'invalid-line');
+  const others = current.minions.filter((m) => m.id !== minionId);
+  const slotCount = lineCapacity(current.lines[lineIndex]!.level);
+  if (others.filter((m) => m.line === lineIndex).length >= slotCount) return reject(state, 'line-full');
+  if (!isValidSlot(slot, slotCount)) return reject(state, 'invalid-slot');
+  if (!isSlotFree(others, lineIndex, slot)) return reject(state, 'slot-taken');
+  const next = structuredClone(state);
+  const moved = next.players[playerIndex].minions.find((m) => m.id === minionId)!;
+  moved.line = lineIndex;
+  moved.position = slotPosition(slot);
+  return { ok: true, state: next };
+}
+
+/**
+ * Nimmt eine in dieser Planungsphase gespielte Beschwörung zurück: der Minion verschwindet, die Energie wird erstattet
+ * und die Karte kommt ans Ende der Hand. Upgrades lassen sich nicht zurücknehmen.
+ */
+export function undoSummon(state: MatchState, playerIndex: PlayerIndex, minionId: number): PlayResult {
+  if (state.phase !== 'planning') return reject(state, 'not-planning');
+  if (state.ready[playerIndex]) return reject(state, 'already-ready');
+  const placement = state.players[playerIndex].placements.find((p) => p.minionId === minionId);
+  if (!placement) return reject(state, 'no-such-minion');
+  const next = structuredClone(state);
+  const player = next.players[playerIndex];
+  player.minions = player.minions.filter((m) => m.id !== minionId);
+  player.placements = player.placements.filter((p) => p.minionId !== minionId);
+  player.energy += getCardDef(placement.cardId).cost;
+  player.hand.push(placement.cardId);
   return { ok: true, state: next };
 }
 
