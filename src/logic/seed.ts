@@ -11,6 +11,14 @@ export function parseReplaySeed(search: string): number | null {
   return parseSeedParam(search, 'replay');
 }
 
+/**
+ * Rohe Zugdaten des Replays (`&moves=...`) oder `null`, wenn der Parameter fehlt. Ein leerer oder fehlerhafter Wert
+ * kommt unverändert zurück; geprüft wird er erst von `decodeMatch`, damit er als ungültig gemeldet werden kann.
+ */
+export function parseReplayMoves(search: string): string | null {
+  return new URLSearchParams(search).get('moves');
+}
+
 function parseSeedParam(search: string, name: string): number | null {
   const value = new URLSearchParams(search).get(name);
   if (value === null || !/^\d{1,15}$/.test(value)) return null;
