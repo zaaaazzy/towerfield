@@ -42,6 +42,8 @@ export interface Minion {
   damage: number;
   /** Reichweite in Einheiten. */
   range: number;
+  /** Temporärer Zusatz zur Reichweite für die laufende Runde (Synergien); fehlt er, gilt 0. */
+  rangeBonus?: number;
   /** Tempo in Einheiten pro Sekunde. */
   speed: number;
   /** Explodiert beim Tod: fügt gegnerischen Minions derselben Lane im Abstand `radius` einmalig `damage` zu. */
@@ -58,6 +60,11 @@ export interface Explosion {
 export interface CombatPlayer {
   lines: { towers: Tower[] }[];
   minions: Minion[];
+}
+
+/** Reichweite im Kampf: Basiswert plus temporärer Bonus. */
+export function effectiveRange(minion: Minion): number {
+  return minion.range + (minion.rangeBonus ?? 0);
 }
 
 /** Abstand zweier gegnerischer Minions auf derselben Lane. */
@@ -95,7 +102,7 @@ function healTarget(allies: Minion[], healerIndex: number): number {
   allies.forEach((ally, index) => {
     const maxHp = ally.maxHp ?? ally.hp;
     if (index === healerIndex || ally.line !== healer.line || ally.hp <= 1e-9 || ally.hp >= maxHp) return;
-    if (Math.abs(ally.position - healer.position) > healer.range) return;
+    if (Math.abs(ally.position - healer.position) > effectiveRange(healer)) return;
     const ratio = ally.hp / maxHp;
     if (ratio < lowest) {
       lowest = ratio;
@@ -206,7 +213,7 @@ export function combatTick(
       enemy.minions.forEach((other, otherIndex) => {
         if (other.line !== minion.line) return;
         const distance = gap(minion, other);
-        if (distance <= minion.range && distance < best) {
+        if (distance <= effectiveRange(minion) && distance < best) {
           best = distance;
           target = otherIndex;
         }
@@ -218,7 +225,7 @@ export function combatTick(
       }
       const towers = enemy.lines[minion.line]!.towers;
       const tower = nearestTower(towers, minion.position);
-      if (tower >= 0 && towerDistance(towers[tower]!, minion.position) <= minion.range) {
+      if (tower >= 0 && towerDistance(towers[tower]!, minion.position) <= effectiveRange(minion)) {
         towerDamage[enemySide]![minion.line]![tower]! += minion.damage * deltaSeconds;
         hits.push({ side, minionId: minion.id, kind: 'tower', targetSide: enemySide, target: minion.line, tower, amount: minion.damage * deltaSeconds });
         return;

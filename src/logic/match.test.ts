@@ -28,7 +28,7 @@ import {
   TOWER_HP,
   undoSummon,
 } from './match';
-import { LINE_LENGTH, MINION_RANGE, TICK_MS, towersAlive } from './combat';
+import { effectiveRange, LINE_LENGTH, MINION_RANGE, TICK_MS, towersAlive } from './combat';
 import { isLaneUnlocked, MAX_FIELD_LEVEL, unlockedLanes } from './lanes';
 import { PLACEMENT_ZONE_END, slotPosition } from './placement';
 
@@ -913,5 +913,124 @@ describe('Respawn der Überlebenden', () => {
         for (const m of player.minions) expect(m.position).toBeLessThanOrEqual(PLACEMENT_ZONE_END);
       }
     }
+  });
+});
+
+describe('Synergien', () => {
+  const archerDef = getCardDef('summon-archer');
+  const ARCHER_RANGE = archerDef.type === 'summon' ? (archerDef.range ?? MINION_RANGE) : MINION_RANGE;
+  const start = () => withHand(createMatch(5), ['summon-archer', 'line-upgrade', 'summon-archer', 'summon-minion', 'summon-minion']);
+
+  /** Spielt die Handkarten mit den IDs der Reihe nach (Ziel-Line nur für Beschwörungen); wirft bei Fehlern. */
+  function playAll(state: MatchState, plays: [string, number?][], player: PlayerIndex = 0): MatchState {
+    let current = state;
+    for (const [id, line] of plays) {
+      const result = playCard(current, player, find(current, player, id), line);
+      if (!result.ok) throw new Error(result.reason);
+      current = result.state;
+    }
+    return current;
+  }
+
+  it('gibt dem Bogenschützen mit Lane +1 range +2, ohne Basiswert oder Line-Bonus zu ändern', () => {
+    const state = playAll(start(), [['summon-archer', 0], ['line-upgrade']]);
+    const player = state.players[0];
+    expect(player.synergies).toMatchObject([{ id: 'archer-line-upgrade', line: 0, modifier: { stat: 'range', amount: 2 } }]);
+    expect(player.minions[0]).toMatchObject({ range: ARCHER_RANGE, rangeBonus: 2 });
+    expect(player.lines[0]!.bonus).toEqual({ hp: 0, damage: 0 });
+  });
+
+  it('wirkt unabhängig von der Reihenfolge der Karten', () => {
+    const forward = playAll(start(), [['summon-archer', 0], ['line-upgrade']]);
+    const backward = playAll(start(), [['line-upgrade'], ['summon-archer', 0]]);
+    expect(backward.players[0].synergies).toEqual(forward.players[0].synergies);
+    expect(backward.players[0].minions[0]!.rangeBonus).toBe(2);
+  });
+
+  it('wirkt auf später beschworene Minions der Line, nicht auf andere Lines und nicht auf den Gegner', () => {
+    let state = playAll(start(), [['summon-archer', 0], ['line-upgrade']]);
+    state = playAll(state, [['summon-minion', 0], ['summon-minion', 1]]);
+    state = playAll(withHand(state, ['summon-minion'], 5), [['summon-minion', 0]], 1);
+    const [first, late, other] = state.players[0].minions;
+    expect([first!.rangeBonus, late!.rangeBonus, other!.rangeBonus]).toEqual([2, 2, undefined]);
+    expect(state.players[1].synergies).toEqual([]);
+    expect(state.players[1].minions[0]!.rangeBonus).toBeUndefined();
+  });
+
+  it('stapelt bei einem zweiten Bogenschützen nicht über +2', () => {
+    const state = playAll(start(), [['summon-archer', 0], ['line-upgrade'], ['summon-archer', 0]]);
+    expect(state.players[0].synergies).toHaveLength(1);
+    expect(state.players[0].minions.map((m) => m.rangeBonus)).toEqual([2, 2]);
+  });
+
+  it('verändert nach einem fehlgeschlagenen playCard nichts', () => {
+    const state = playAll(start(), [['summon-archer', 0]]);
+    const broke = structuredClone(state);
+    broke.players[0].energy = 0;
+    const before = structuredClone(broke);
+    const result = playCard(broke, 0, find(broke, 0, 'line-upgrade'));
+    expect(result).toMatchObject({ ok: false, reason: 'not-enough-energy' });
+    expect(result.state).toEqual(before);
+    expect(result.state.players[0].synergies).toEqual([]);
+  });
+
+  it('nimmt die Synergie mit zurückgenommenem oder verschobenem Bogenschützen zurück', () => {
+    const state = playAll(start(), [['summon-archer', 0], ['line-upgrade']]);
+    const id = state.players[0].minions[0]!.id;
+    const undone = undoSummon(state, 0, id);
+    if (!undone.ok) throw new Error(undone.reason);
+    expect(undone.state.players[0].synergies).toEqual([]);
+    expect(undone.state.players[0].played.map((p) => p.cardId)).toEqual(['line-upgrade']);
+    // Auf Lane 1 hat das Upgrade (ohne Lane-Ziel) ebenfalls Wirkung, der Bonus folgt dem Minion.
+    const moved = moveMinion(state, 0, id, 1, 0);
+    if (!moved.ok) throw new Error(moved.reason);
+    expect(moved.state.players[0].synergies[0]!.line).toBe(1);
+    expect(moved.state.players[0].minions[0]!.rangeBonus).toBe(2);
+  });
+
+  it('entfernt den Bonus bei startRound auch bei Überlebenden', () => {
+    let state = playAll(start(), [['summon-archer', 0], ['line-upgrade']]);
+    state.players[0].minions[0]!.hp = 1000;
+    state.players[0].minions[0]!.maxHp = 1000;
+    state = setReady(setReady(state, 0), 1);
+    state = advance(state, COMBAT_TICKS * TICK_MS);
+    expect(state.round).toBe(2);
+    const player = state.players[0];
+    expect(player.minions).toHaveLength(1);
+    expect(player.minions[0]).toMatchObject({ range: ARCHER_RANGE });
+    expect(player.minions[0]!.rangeBonus).toBeUndefined();
+    expect(player.synergies).toEqual([]);
+    expect(player.played).toEqual([]);
+  });
+
+  it('wirkt im Kampf: Treffer ausserhalb der Basisreichweite, innerhalb von Basis plus 2', () => {
+    const setup = (withSynergy: boolean) => {
+      let state = playAll(start(), withSynergy ? [['summon-archer', 0], ['line-upgrade']] : [['summon-archer', 0]]);
+      state = withHand(state, [], 0);
+      const archer = state.players[0].minions[0]!;
+      archer.position = 60;
+      state.players[1].minions.push({
+        id: 99, line: 0, position: LINE_LENGTH - 60 - (ARCHER_RANGE + 1), hp: 50, damage: 0, range: MINION_RANGE, speed: 0,
+      });
+      return advance(setReady(setReady(state, 0), 1), TICK_MS);
+    };
+    expect(setup(false).players[1].minions[0]!.hp).toBe(50);
+    expect(setup(true).players[1].minions[0]!.hp).toBeLessThan(50);
+  });
+
+  it('rechnet die effektive Reichweite als Basis plus Bonus', () => {
+    expect(effectiveRange({ id: 1, line: 0, position: 0, hp: 1, damage: 1, range: 10, speed: 1, rangeBonus: 2 })).toBe(12);
+  });
+
+  it('ergibt bei gleichem Seed und gleichen Zügen identische Zustände', () => {
+    const run = () => {
+      let state = createMatch(11);
+      for (let round = 0; round < 3; round += 1) {
+        state = botPlan(botPlan(state, 0), 1);
+        state = advance(state, COMBAT_TICKS * TICK_MS);
+      }
+      return state;
+    };
+    expect(run()).toEqual(run());
   });
 });
