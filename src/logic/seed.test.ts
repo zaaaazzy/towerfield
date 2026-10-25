@@ -1,5 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { parseSeed } from './seed';
+import { parseReplaySeed, parseSeed } from './seed';
+
+describe('parseReplaySeed', () => {
+  it('liest den Parameter replay', () => {
+    expect(parseReplaySeed('?replay=42')).toBe(42);
+    expect(parseReplaySeed('?seed=1&replay=7')).toBe(7);
+    expect(parseReplaySeed('?replay=4294967297')).toBe(1);
+  });
+
+  it('gibt null zurück, wenn der Parameter fehlt oder ungültig ist', () => {
+    expect(parseReplaySeed('')).toBeNull();
+    expect(parseReplaySeed('?replay=')).toBeNull();
+    expect(parseReplaySeed('?replay=abc')).toBeNull();
+    expect(parseReplaySeed('?replay=-3')).toBeNull();
+    expect(parseReplaySeed('?replay=1234567890123456')).toBeNull();
+    expect(parseReplaySeed('?seed=42')).toBeNull();
+  });
+});
 
 describe('parseSeed', () => {
   it('liest eine ganze Zahl aus dem Query-String', () => {
