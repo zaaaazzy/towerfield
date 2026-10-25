@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { getCardDef } from '../src/logic/cards';
 import { cardPoint, collectErrors, openGame, readSelected, readState, tap } from './helpers';
 
 /** Gemischte Hand in der Reihenfolge, in der sie gezogen wurde (nicht nach Typ sortiert). */
@@ -30,14 +31,20 @@ async function setHand(page: Parameters<typeof openGame>[0], hand: string[]): Pr
 test('Fächer: ein Tipp auf eine überlappende Karte wählt genau die sichtbar getroffene Karte', async ({ page }) => {
   const errors = collectErrors(page);
   await openGame(page);
-  await setHand(page, MIXED_HAND);
-
-  // Jede Karte mit Ziel Line wird an ihrer sichtbaren Stelle angetippt und muss mit ihrem echten Hand-Index gewählt sein.
+  // Jede Karte wird an ihrer sichtbaren Stelle angetippt. Eine Karte mit Ziel Lane muss mit ihrem echten Hand-Index
+  // gewählt sein; eine ohne Ziel („Lane +1“) wird sofort gespielt, und genau diese Karte verlässt die Hand.
   for (let index = 0; index < MIXED_HAND.length; index += 1) {
+    await setHand(page, MIXED_HAND);
     const point = cardPoint(MIXED_HAND, index);
     await page.mouse.move(5, 5);
     await tap(page, point.x, point.y);
-    expect(await readSelected(page), `Hand-Index ${index}`).toBe(index);
+    if (getCardDef(MIXED_HAND[index]!).target === 'none') {
+      await expect
+        .poll(async () => (await readState(page)).players[0].hand, `Hand-Index ${index}`)
+        .toEqual(MIXED_HAND.filter((_, other) => other !== index));
+    } else {
+      expect(await readSelected(page), `Hand-Index ${index}`).toBe(index);
+    }
     await page.evaluate(() => {
       (window.game!.scene.getScene('main') as unknown as { selected: number | null }).selected = null;
     });

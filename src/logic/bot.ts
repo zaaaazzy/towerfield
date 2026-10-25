@@ -3,7 +3,8 @@
  * und entscheidet ohne Zufall.
  */
 import { getCardDef } from './cards';
-import { lineCapacity, LINE_COUNT, MAX_LINE_LEVEL, type MatchState, type PlayerIndex, playCard, setReady } from './match';
+import { unlockedLanes } from './lanes';
+import { lineCapacity, type MatchState, type PlayerIndex, playCard, setReady } from './match';
 
 /** Reihenfolge, in der der Bot Karten bevorzugt. */
 const PRIORITY = [
@@ -18,11 +19,11 @@ const PRIORITY = [
   'minion-upgrade-all',
 ];
 
-/** Zielline einer Karte (die mit dem kleinsten Wert, bei Gleichstand die niedrigste), oder `undefined`. */
+/** Ziel-Lane einer Karte (die freie mit dem kleinsten Wert, bei Gleichstand die niedrigste), oder `undefined`. */
 function chooseLine(state: MatchState, playerIndex: PlayerIndex, cardId: string): number | undefined {
   const player = state.players[playerIndex];
   const def = getCardDef(cardId);
-  const lines = Array.from({ length: LINE_COUNT }, (_, index) => index);
+  const lines = unlockedLanes(player.level).sort((a, b) => a - b);
   const minions = (line: number) => player.minions.filter((m) => m.line === line).length;
   const pick = (candidates: number[], score: (line: number) => number): number | undefined =>
     candidates.reduce<number | undefined>(
@@ -32,16 +33,11 @@ function chooseLine(state: MatchState, playerIndex: PlayerIndex, cardId: string)
   switch (def.type) {
     case 'summon':
       return pick(
-        lines.filter((line) => minions(line) < lineCapacity(player.lines[line]!.level)),
+        lines.filter((line) => minions(line) < lineCapacity(player.level)),
         minions,
       );
-    case 'line-upgrade':
-      return pick(
-        lines.filter((line) => player.lines[line]!.level < MAX_LINE_LEVEL),
-        (line) => player.lines[line]!.level,
-      );
     case 'tower-upgrade':
-      return pick(lines, (line) => player.lines[line]!.tower.hp);
+      return pick(lines, (line) => player.lines[line]!.towers.reduce((sum, tower) => sum + tower.hp, 0));
     case 'minion-upgrade':
       return pick(lines, (line) => -player.lines[line]!.bonus.hp);
   }

@@ -23,6 +23,7 @@ import {
   readState,
   slotPoint,
   tap,
+  unlockField,
   tapCard,
   tapLine,
   tapReady,
@@ -59,7 +60,7 @@ test('Karte mit Ziel Line antippen wählt sie aus, erneutes Antippen hebt die Au
   expect(errors).toEqual([]);
 });
 
-test('Karte und danach Line antippen spielt die Karte: Hand -1, Energie -Kosten, Line verändert', async ({ page }) => {
+test('Karte und danach Lane antippen spielt die Karte: Hand -1, Energie -Kosten, Lane verändert', async ({ page }) => {
   const errors = collectErrors(page);
   await openGame(page);
   const before = await readState(page);
@@ -68,24 +69,23 @@ test('Karte und danach Line antippen spielt die Karte: Hand -1, Energie -Kosten,
   const def = defOf(before, index);
 
   await tapCard(page, index);
-  await tapLine(page, 1);
+  await tapLine(page, 0);
   await expect.poll(async () => (await readState(page)).players[0].hand.length).toBe(before.players[0].hand.length - 1);
 
   const after = await readState(page);
   expect(after.players[0].energy).toBe(before.players[0].energy - def.cost);
   expect(await readSelected(page)).toBeNull();
-  const lineBefore = before.players[0].lines[1]!;
-  const lineAfter = after.players[0].lines[1]!;
+  const lineBefore = before.players[0].lines[0]!;
+  const lineAfter = after.players[0].lines[0]!;
+  const sum = (towers: { maxHp: number; damage: number }[], key: 'maxHp' | 'damage') =>
+    towers.reduce((total, tower) => total + tower[key], 0);
   switch (def.type) {
     case 'summon':
-      expect(after.players[0].minions.filter((m) => m.line === 1)).toHaveLength(1);
-      break;
-    case 'line-upgrade':
-      expect(lineAfter.level).toBe(lineBefore.level + 1);
+      expect(after.players[0].minions.filter((m) => m.line === 0)).toHaveLength(1);
       break;
     case 'tower-upgrade':
-      expect(lineAfter.tower.maxHp).toBe(lineBefore.tower.maxHp + def.hp);
-      expect(lineAfter.tower.damage).toBe(lineBefore.tower.damage + def.damage);
+      expect(sum(lineAfter.towers, 'maxHp')).toBe(sum(lineBefore.towers, 'maxHp') + def.hp);
+      expect(sum(lineAfter.towers, 'damage')).toBe(sum(lineBefore.towers, 'damage') + def.damage);
       break;
     case 'minion-upgrade':
       expect(lineAfter.bonus.hp).toBe(lineBefore.bonus.hp + def.hp);
@@ -93,6 +93,35 @@ test('Karte und danach Line antippen spielt die Karte: Hand -1, Energie -Kosten,
       break;
   }
 
+  expect(errors).toEqual([]);
+});
+
+test('das Feld startet mit einer Lane; „Lane +1“ schaltet je eine Lane oben und unten frei (Lvl 2, dann Lvl 3)', async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await openGame(page);
+  const towerCounts = async () => (await readState(page)).players[0].lines.map((line) => line.towers.length);
+  expect(await towerCounts()).toEqual([3, 0, 0, 0, 0]);
+  expect(await hasVisibleText(page, 'Start-Lane')).toBe(true);
+  expect(await hasVisibleText(page, 'Lvl 2 oben · mit Lane +1 (Lvl 2)')).toBe(true);
+  expect(await hasVisibleText(page, 'Lvl 2 oben')).toBe(false);
+
+  for (const [level, towers, shown] of [
+    [2, [3, 1, 1, 0, 0], 'Lvl 2 unten'],
+    [3, [3, 1, 1, 1, 1], 'Lvl 3 oben'],
+  ] as const) {
+    await page.evaluate(() => {
+      const scene = window.game!.scene.getScene('main') as unknown as { state: { players: { hand: string[]; energy: number }[] } };
+      scene.state.players[0]!.hand = ['line-upgrade'];
+      scene.state.players[0]!.energy = 10;
+    });
+    await tapCard(page, 0);
+    await expect.poll(async () => (await readState(page)).players[0].level).toBe(level);
+    expect(await towerCounts()).toEqual(towers);
+    await expect.poll(() => hasVisibleText(page, shown)).toBe(true);
+  }
+  expect((await readState(page)).players[1].level).toBe(1);
   expect(errors).toEqual([]);
 });
 
@@ -121,7 +150,7 @@ test('eine nicht bezahlbare Karte auf eine Line zu spielen ändert den Zustand n
   const index = state.players[0].hand.indexOf(target!);
   await tapCard(page, index);
   await expect.poll(() => readSelected(page)).toBe(index);
-  await tapLine(page, 2);
+  await tapLine(page, 0);
   // Die Auswahl endet mit dem Versuch; der Zustand bleibt gleich.
   await expect.poll(() => readSelected(page)).toBeNull();
   expect(await readState(page)).toEqual(state);
@@ -187,12 +216,12 @@ test('das Spiel endet spätestens nach MAX_ROUNDS Runden mit Ergebnis und Overla
   expect(over.outcome).not.toBeNull();
   expect(rounds).toBeLessThanOrEqual(MAX_ROUNDS);
   // Zuerst das Statistik-Overlay; Tippen daneben startet nichts, „Schließen“ blendet es aus.
-  await expect.poll(() => hasVisibleText(page, 'Karten pro Line')).toBe(true);
+  await expect.poll(() => hasVisibleText(page, 'Karten pro Lane')).toBe(true);
   await expect.poll(() => hasVisibleText(page, 'Schaden je Typ')).toBe(true);
   await tap(page, 180, 30);
   expect((await readState(page)).phase).toBe('over');
   await tap(page, 180, 524);
-  await expect.poll(() => hasVisibleText(page, 'Karten pro Line')).toBe(false);
+  await expect.poll(() => hasVisibleText(page, 'Karten pro Lane')).toBe(false);
   expect((await readState(page)).phase).toBe('over');
   await expect.poll(() => hasVisibleText(page, 'Tippen für ein neues Spiel')).toBe(true);
 
@@ -222,11 +251,12 @@ async function summonOn(page: Page, line: number): Promise<Minion> {
 
 const minionById = (state: MatchState, id: number) => state.players[0].minions.find((m) => m.id === id);
 
-test('Drag: ein Minion auf einen freien Slot einer anderen Line gezogen setzt line und position, Energie bleibt', async ({
+test('Drag: ein Minion auf einen freien Slot einer anderen Lane gezogen setzt line und position, Energie bleibt', async ({
   page,
 }) => {
   const errors = collectErrors(page);
   await openGame(page);
+  await unlockField(page);
   const placed = await summonOn(page, 0);
   const before = await readState(page);
 
@@ -263,6 +293,7 @@ test('Drag: ein Minion auf einen anderen freien Slot derselben Line gezogen änd
 test('Drag: ein belegter Slot lässt den Zustand unverändert und zeigt „Platz ist belegt“', async ({ page }) => {
   const errors = collectErrors(page);
   await openGame(page);
+  await unlockField(page);
   const first = await summonOn(page, 0);
   // Mit Seed 1 reicht die Energie nur für eine der beiden Summon-Karten der Starthand; für die zweite aufstocken.
   await page.evaluate(() => {
@@ -272,7 +303,7 @@ test('Drag: ein belegter Slot lässt den Zustand unverändert und zeigt „Platz
   await summonOn(page, 1);
   const before = await readState(page);
 
-  // Der zweite Minion steht auf Slot 0 von Line 1; der erste wird darauf gezogen.
+  // Der zweite Minion steht auf Slot 0 von Lane 1; der erste wird darauf gezogen.
   await drag(page, minionPoint(first), slotPoint(1, 0));
   await expect.poll(() => hasVisibleText(page, 'Platz ist belegt')).toBe(true);
   expect(await readState(page)).toEqual(before);
@@ -320,6 +351,7 @@ test('Drag: eine Bewegung unter DRAG_THRESHOLD verschiebt den Minion nicht, die 
 test('Drag: nach „Bereit“ und in der Kampfphase lässt sich kein Minion mehr ziehen', async ({ page }) => {
   const errors = collectErrors(page);
   await openGame(page);
+  await unlockField(page, 3);
   const placed = await summonOn(page, 0);
 
   await tapReady(page);

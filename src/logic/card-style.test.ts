@@ -45,6 +45,14 @@ describe('cardStats', () => {
   });
 });
 
+describe('cardStats mit leeren Werten', () => {
+  it('zeigt Werte, sobald Leben oder Schaden gesetzt ist, und nichts, wenn beides 0 ist', () => {
+    expect(cardStats(getCardDef('tower-damage'))).toEqual({ hp: 0, damage: 4, bonus: true });
+    expect(cardStats({ ...getCardDef('tower-hp'), hp: 0, damage: 0 } as CardDef)).toBeNull();
+    expect(cardStats({ ...getCardDef('tower-hp'), hp: 0, damage: 4 } as CardDef)).toEqual({ hp: 0, damage: 4, bonus: true });
+  });
+});
+
 describe('describeCard', () => {
   it('beschreibt jede Karte mit nicht leerem Text', () => {
     for (const def of CARD_DEFS) expect(describeCard(def)).not.toBe('');
@@ -58,7 +66,7 @@ describe('describeCard', () => {
     expect(describeCard(getCardDef('summon-archer'))).toBe('7 Fernschaden\n20 Leben');
     expect(describeCard(getCardDef('summon-healer'))).toBe('Heilt 5/s\n20 Leben');
     expect(describeCard(getCardDef('minion-upgrade-all'))).toBe('Alle: +5 Leben\n+1 Schaden');
-    expect(describeCard(getCardDef('minion-upgrade-line'))).toBe('Line: +10 Leben\n+2 Schaden');
-    expect(describeCard(getCardDef('line-upgrade'))).toBe('Line +1 Stufe');
+    expect(describeCard(getCardDef('minion-upgrade-line'))).toBe('Lane: +10 Leben\n+2 Schaden');
+    expect(describeCard(getCardDef('line-upgrade'))).toBe('Lane +1 Stufe\noben + unten');
   });
 });

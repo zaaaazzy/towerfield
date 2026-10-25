@@ -7,6 +7,7 @@
 import { botStep } from './bot';
 import { type Strategies, strategiesForSeed } from './balance-sim';
 import { getCardDef } from './cards';
+import { laneName } from './lanes';
 import { advance, createMatch, type MatchState, type PlayerIndex, setReady } from './match';
 import { type ActionError, applyAction, type RecordedAction, type RecordedMatch } from './match-record';
 
@@ -169,12 +170,12 @@ export function playerName(player: PlayerIndex): string {
   return PLAYER_NAMES[player];
 }
 
-/** Kommentartext zu einem Ereignis, z. B. „Runde 2 · Blau spielt Minion auf Line 3“. */
+/** Kommentartext zu einem Ereignis, z. B. „Runde 2 · Blau spielt Minion auf Lvl 2 oben“. */
 export function describeEvent(event: ReplayEvent): string {
   const prefix = `Runde ${event.round} · ${playerName(event.player)}`;
   if (event.action === 'ready') return `${prefix} ist bereit`;
   const name = getCardDef(event.cardId).name;
-  const target = event.line === null ? '' : ` auf Line ${event.line + 1}`;
+  const target = event.line === null ? '' : ` auf ${laneName(event.line)}`;
   switch (event.action) {
     case 'move':
       return `${prefix} verschiebt ${name}${target}${event.slot === undefined ? '' : `, Platz ${event.slot + 1}`}`;
@@ -194,12 +195,12 @@ const ABORT_TEXT: Readonly<Record<ReplayAbortReason, string>> = {
   'already-ready': 'Der Spieler war schon bereit.',
   'no-such-card': 'Die Karte ist nicht auf der Hand.',
   'not-enough-energy': 'Zu wenig Energie.',
-  'invalid-line': 'Ungültige Line.',
+  'invalid-line': 'Ungültige oder noch nicht freie Lane.',
   'invalid-slot': 'Ungültiger Platz.',
   'slot-taken': 'Der Platz ist belegt.',
   'no-such-minion': 'Den Minion gibt es nicht.',
-  'line-full': 'Die Line ist voll.',
-  'max-level': 'Die Line hat die Höchststufe.',
+  'line-full': 'Die Lane ist voll.',
+  'max-level': 'Das Feld hat die Höchststufe.',
 };
 
 /** Hinweistext zum Abbruch, z. B. „Replay abgebrochen bei Zug 7: Zu wenig Energie.“ */

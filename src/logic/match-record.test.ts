@@ -80,6 +80,33 @@ describe('Aufzeichnung und Nachspielen', () => {
     expect(result.state.players[0].hand).toHaveLength(actions.length - expectedIndex);
   });
 
+  it('lehnt „Lane ausbauen“ mit Ziel-Lane, „Bereit“ im Kampf und Zug auf gesperrter Lane ab', () => {
+    const state = createMatch(1);
+    state.players[0].hand = ['line-upgrade', 'summon-minion'];
+    state.players[0].energy = 8;
+    expect(applyAction(state, { type: 'play', round: 1, player: 0, cardId: 'line-upgrade', line: 0 })).toMatchObject({
+      ok: false,
+      reason: 'invalid-line',
+    });
+    const upgraded = applyAction(state, { type: 'play', round: 1, player: 0, cardId: 'line-upgrade', line: null });
+    expect(upgraded.ok).toBe(true);
+    expect(upgraded.state.players[0].level).toBe(2);
+    expect(applyAction(state, { type: 'play', round: 1, player: 0, cardId: 'summon-minion', line: 1 })).toMatchObject({
+      ok: false,
+      reason: 'invalid-line',
+    });
+    const combat = setReady(setReady(state, 0), 1);
+    expect(applyAction(combat, { type: 'ready', round: 1, player: 0 })).toMatchObject({
+      ok: false,
+      reason: 'not-planning',
+    });
+  });
+
+  it('wirft beim Kodieren einer unbekannten Karte', () => {
+    const record = appendAction(createRecord(1), { type: 'play', round: 1, player: 0, cardId: 'gibt-es-nicht', line: null });
+    expect(() => encodeMatch(record)).toThrow('Unbekannte Karte');
+  });
+
   it('lehnt Aktionen für nicht vorhandene Karten, Minions und doppeltes Bereit ab, ohne zu werfen', () => {
     const state = createMatch(1);
     const missing = (type: RecordedAction['type']): RecordedAction => {
@@ -108,7 +135,7 @@ describe('Aufzeichnen verändert nichts', () => {
     const state = createMatch(7);
     const snapshot = structuredClone(state);
     const cardId = state.players[0].hand[0]!;
-    const line = getCardDef(cardId).target === 'line' ? 1 : undefined;
+    const line = getCardDef(cardId).target === 'line' ? 0 : undefined;
     const direct = playCard(state, 0, 0, line);
     const record = createRecord(7);
     const recorded = performAction(state, record, 0, { type: 'play', cardId, line: line ?? null });
@@ -182,43 +209,68 @@ describe('encodeMatch / decodeMatch', () => {
     const valid = encodeMatch(record);
     const bad = [
       '',
-      'v1.',
-      'v1..r10',
+      'v2.',
+      'v2..r10',
       'v0.r10',
-      'v2.r10',
-      '1.r10',
-      'V1.r10',
-      'v1.x10',
-      'v1.r90',
-      'v1.r00',
-      'v1.r12',
-      'v1.r10-1',
-      'v1.r10-',
-      'v1.p10',
-      'v1.p10-',
-      'v1.p10-99',
-      'v1.p10-01',
-      'v1.p10--1',
-      'v1.p10-0-3',
-      'v1.p10-0-1-2',
-      'v1.p10-1.5',
-      'v1.m10-1-1',
-      'v1.m10-1-3-0',
-      'v1.m10-1-1-0-0',
-      'v1.u10',
-      'v1.u10-1-1',
-      'v1.p10-9999999',
-      'v1.p10-0%20',
+      'v1.r10',
+      'v3.r10',
+      '2.r10',
+      'V2.r10',
+      'v2.x10',
+      'v2.r90',
+      'v2.r00',
+      'v2.r12',
+      'v2.r10-1',
+      'v2.r10-',
+      'v2.p10',
+      'v2.p10-',
+      'v2.p10-99',
+      'v2.p10-01',
+      'v2.p10--1',
+      'v2.p10-0-5',
+      'v2.p10-0-1-2',
+      'v2.p10-1.5',
+      'v2.m10-1-1',
+      'v2.m10-1-5-0',
+      'v2.m10-1-1-0-0',
+      'v2.u10',
+      'v2.u10-1-1',
+      'v2.p10-9999999',
+      'v2.p10-0%20',
       '<script>',
-      'v1.r10 ',
+      'v2.r10 ',
       `${valid}.`,
       `${valid}.zz`,
-      'v1'.padEnd(MAX_MOVES_LENGTH + 1, '.'),
-      `v1${'.r10'.repeat(MAX_MOVES_LENGTH)}`,
+      'v2'.padEnd(MAX_MOVES_LENGTH + 1, '.'),
+      `v2${'.r10'.repeat(MAX_MOVES_LENGTH)}`,
     ];
     for (const text of bad) expect(decodeMatch(1, text), text).toBeNull();
     expect(decodeMatch(1, undefined as unknown as string)).toBeNull();
     expect(decodeMatch(1, null as unknown as string)).toBeNull();
+  });
+
+  it('lehnt Links aus der Version 1 (vertikales Layout) ab, nimmt aber alle fünf Lane-Indizes an', () => {
+    expect(RECORD_VERSION).toBe(2);
+    expect(decodeMatch(1, 'v1.p10-0-0.r10')).toBeNull();
+    for (const lane of [0, 1, 2, 3, 4]) {
+      expect(decodeMatch(1, `v2.p10-0-${lane}`)?.actions).toEqual([
+        { type: 'play', round: 1, player: 0, cardId: 'summon-minion', line: lane },
+      ]);
+      expect(decodeMatch(1, `v2.m10-1-${lane}-0`)?.actions).toEqual([
+        { type: 'move', round: 1, player: 0, minionId: 1, line: lane, slot: 0 },
+      ]);
+    }
+    expect(decodeMatch(1, 'v2.p10-0-5')).toBeNull();
+  });
+
+  it('bricht das Nachspielen ab, wenn eine Aktion eine noch gesperrte Lane nutzt', () => {
+    const seed = 3;
+    const cardId = createMatch(seed).players[0].hand.find((id) => getCardDef(id).type === 'summon')!;
+    const result = replayRecorded({
+      ...createRecord(seed),
+      actions: [{ type: 'play', round: 1, player: 0, cardId, line: 3 }],
+    });
+    expect(result).toMatchObject({ ok: false, reason: 'invalid-line', index: 0 });
   });
 
   it('weist abgeschnittene Zeichenfolgen ab oder liefert eine gültige, nie eine Ausnahme', () => {
@@ -237,13 +289,13 @@ describe('encodeMatch / decodeMatch', () => {
 
   it('lehnt einen unzulässigen Seed ab', () => {
     for (const seed of [-1, 1.5, 2 ** 32, Number.NaN, Number.POSITIVE_INFINITY]) {
-      expect(decodeMatch(seed, 'v1')).toBeNull();
+      expect(decodeMatch(seed, 'v2')).toBeNull();
     }
-    expect(decodeMatch(0, 'v1')).toEqual({ ...createRecord(0) });
+    expect(decodeMatch(0, 'v2')).toEqual({ ...createRecord(0) });
   });
 
   it('manipulierte, aber lesbare Daten bricht erst das Nachspielen ab', () => {
-    const text = encodeMatch(playScriptedMatch(5).record).replace(/^v1\./, 'v1.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0.');
+    const text = encodeMatch(playScriptedMatch(5).record).replace(/^v2\./, 'v2.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0.');
     const decoded = decodeMatch(5, text);
     expect(decoded).not.toBeNull();
     const result = replayRecorded(decoded!);
@@ -262,7 +314,7 @@ describe('encodeMatch / decodeMatch', () => {
       'minion-upgrade-line',
       'minion-upgrade-all',
     ]);
-    expect(RECORD_VERSION).toBe(1);
+    expect(RECORD_VERSION).toBe(2);
   });
 });
 

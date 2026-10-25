@@ -11,10 +11,11 @@ import {
   energyForRound,
   HAND_LIMIT,
   hpOutcome,
+  createLaneTowers,
+  laneSlotCounts,
   lineCapacity,
   LINE_COUNT,
   MAX_ENERGY,
-  MAX_LINE_LEVEL,
   MAX_ROUNDS,
   type MatchState,
   moveMinion,
@@ -23,9 +24,12 @@ import {
   respawnSurvivors,
   setReady,
   START_HAND,
+  TOWER_DAMAGE,
+  TOWER_HP,
   undoSummon,
 } from './match';
-import { LINE_LENGTH, MINION_RANGE, TICK_MS } from './combat';
+import { LINE_LENGTH, MINION_RANGE, TICK_MS, towersAlive } from './combat';
+import { isLaneUnlocked, MAX_FIELD_LEVEL, unlockedLanes } from './lanes';
 import { PLACEMENT_ZONE_END, slotPosition } from './placement';
 
 /** Index der ersten Handkarte mit dieser ID, im Test garantiert vorhanden (sonst Testfehler). */
@@ -45,8 +49,20 @@ function withHand(state: MatchState, hand: string[], energy = MAX_ENERGY): Match
   return copy;
 }
 
+/** Zustand, in dem beide Spieler das Feld auf `level` ausgebaut haben (mit den Towern der frisch freien Lanes). */
+function withLevel(state: MatchState, level: number): MatchState {
+  const copy = structuredClone(state);
+  for (const player of copy.players) {
+    player.level = level;
+    player.lines.forEach((lane, index) => {
+      if (isLaneUnlocked(level, index) && lane.towers.length === 0) lane.towers = createLaneTowers(index);
+    });
+  }
+  return copy;
+}
+
 describe('Statistik', () => {
-  const start = () => withHand(createMatch(3), ['summon-minion', 'summon-archer', 'summon-minion']);
+  const start = () => withLevel(withHand(createMatch(3), ['summon-minion', 'summon-archer', 'summon-minion']), 3);
 
   it('zählt eine Beschwörung für Karte und Line', () => {
     const result = playCard(start(), 0, 0, 1);
@@ -88,7 +104,8 @@ describe('Statistik', () => {
     expect(state.round).toBeGreaterThan(1);
     const damage = state.stats.damage['summon-minion']!;
     expect(damage.towerDamage).toBeGreaterThan(0);
-    expect(damage.towerDamage).toBeLessThanOrEqual(state.players[1].lines[0]!.tower.maxHp + 1e-6);
+    const startLaneHp = state.players[1].lines[0]!.towers.reduce((sum, tower) => sum + tower.maxHp, 0);
+    expect(damage.towerDamage).toBeLessThanOrEqual(startLaneHp + 1e-6);
     expect(Object.keys(state.stats.damage)).toEqual(['summon-minion']);
   });
 
@@ -118,16 +135,22 @@ function playMatch(seed: number, stepMs: number, human: 'bot' | 'pass'): MatchSt
 }
 
 describe('Spielstart', () => {
-  it('hat für beide Spieler genau 3 Lines mit je 1 Tower', () => {
+  it('hat für beide Spieler genau eine freie Lane (die Start-Lane) mit drei Towern, die übrigen Lanes sind leer', () => {
     const state = createMatch(42);
     for (const player of state.players) {
+      expect(player.level).toBe(1);
       expect(player.lines).toHaveLength(LINE_COUNT);
-      expect(LINE_COUNT).toBe(3);
-      for (const line of player.lines) {
-        expect(line.level).toBe(1);
-        expect(line.tower.hp).toBeGreaterThan(0);
-      }
+      expect(LINE_COUNT).toBe(5);
+      expect(player.lines.map((line) => line.towers.length)).toEqual([3, 0, 0, 0, 0]);
+      expect(player.lines[0]!.towers.map((tower) => tower.offset)).toEqual([0, 8, 16]);
+      for (const tower of player.lines[0]!.towers) expect(tower.hp).toBe(TOWER_HP);
     }
+  });
+
+  it('zählt zu Spielbeginn drei lebende Tower je Spieler', () => {
+    const state = createMatch(42);
+    expect(towersAlive(state.players[0])).toBe(3);
+    expect(towersAlive(state.players[1])).toBe(3);
   });
 
   it('gibt beiden Spielern exakt START_HAND identische Karten und gleiche Energie', () => {
@@ -341,55 +364,104 @@ describe('Karten ausspielen', () => {
     expect(playCard(state, 0, 0, 0)).toMatchObject({ ok: false, reason: 'already-ready' });
   });
 
-  it('erhöht mit „Line ausbauen“ die Stufe genau um 1 und verbraucht die Karte', () => {
+  it('schaltet mit „Lane ausbauen“ (Lvl 2) je eine Lane oberhalb und unterhalb frei und verbraucht die Karte', () => {
     const state = withHand(createMatch(1), ['line-upgrade', 'summon-minion']);
-    const result = playCard(state, 0, 0, 2);
+    const result = playCard(state, 0, 0);
     expect(result.ok).toBe(true);
     const player = result.state.players[0];
-    expect(player.lines[2]!.level).toBe(2);
-    expect(player.lines[0]!.level).toBe(1);
+    expect(player.level).toBe(2);
+    expect(unlockedLanes(player.level)).toEqual([1, 0, 2]);
+    expect(player.lines.map((line) => line.towers.length)).toEqual([3, 1, 1, 0, 0]);
+    for (const tower of [...player.lines[1]!.towers, ...player.lines[2]!.towers]) {
+      expect(tower).toEqual({ offset: 0, hp: TOWER_HP, maxHp: TOWER_HP, damage: TOWER_DAMAGE });
+    }
     expect(player.hand).toEqual(['summon-minion']);
     expect(player.energy).toBe(MAX_ENERGY - getCardDef('line-upgrade').cost);
     // Gegner und Ausgangszustand bleiben unberührt.
-    expect(result.state.players[1].lines[2]!.level).toBe(1);
-    expect(state.players[0].lines[2]!.level).toBe(1);
+    expect(result.state.players[1].level).toBe(1);
+    expect(result.state.players[1].lines.map((line) => line.towers.length)).toEqual([3, 0, 0, 0, 0]);
+    expect(state.players[0].level).toBe(1);
   });
 
-  it('erhöht mit „Line ausbauen“ die Kapazität und stoppt bei der maximalen Stufe', () => {
+  it('schaltet mit der zweiten Ausbaustufe (Lvl 3) je eine weitere Lane oben und unten frei und stoppt dort', () => {
     expect(lineCapacity(2)).toBe(lineCapacity(1) + 1);
-    let state = withHand(createMatch(1), Array(MAX_LINE_LEVEL + 1).fill('line-upgrade'), 100);
-    for (let level = 1; level < MAX_LINE_LEVEL; level += 1) {
-      const result = playCard(state, 0, 0, 0);
+    let state = withHand(createMatch(1), Array(MAX_FIELD_LEVEL + 1).fill('line-upgrade'), 100);
+    for (let level = 1; level < MAX_FIELD_LEVEL; level += 1) {
+      const result = playCard(state, 0, 0);
       if (!result.ok) throw new Error(result.reason);
       state = result.state;
     }
-    expect(state.players[0].lines[0]!.level).toBe(MAX_LINE_LEVEL);
-    expect(playCard(state, 0, 0, 0)).toMatchObject({ ok: false, reason: 'max-level' });
+    const player = state.players[0];
+    expect(player.level).toBe(MAX_FIELD_LEVEL);
+    expect(unlockedLanes(player.level)).toEqual([3, 1, 0, 2, 4]);
+    expect(player.lines.map((line) => line.towers.length)).toEqual([3, 1, 1, 1, 1]);
+    expect(playCard(state, 0, 0)).toMatchObject({ ok: false, reason: 'max-level' });
   });
 
-  it('baut mit „Tower ausbauen“ Leben oder Schaden des gewählten Towers aus', () => {
-    const base = withHand(createMatch(1), ['tower-hp', 'tower-damage']);
+  it('ignoriert bei „Lane ausbauen“ eine mitgegebene Lane, denn die Karte hat kein Ziel', () => {
+    const state = withHand(createMatch(1), ['line-upgrade']);
+    const result = playCard(state, 0, 0, 3);
+    expect(result.ok).toBe(true);
+    expect(result.state.players[0].level).toBe(2);
+  });
+
+  it('lässt Beschwörungen nur auf freien Lanes zu', () => {
+    const state = withHand(createMatch(1), ['summon-minion', 'summon-minion']);
+    expect(playCard(state, 0, 0, 1)).toMatchObject({ ok: false, reason: 'invalid-line' });
+    expect(playCard(state, 0, 0, 4)).toMatchObject({ ok: false, reason: 'invalid-line' });
+    expect(playCard(state, 0, 0, 0).ok).toBe(true);
+    const grown = withLevel(state, 2);
+    expect(playCard(grown, 0, 0, 1).ok).toBe(true);
+    expect(playCard(grown, 0, 0, 2).ok).toBe(true);
+    expect(playCard(grown, 0, 0, 3)).toMatchObject({ ok: false, reason: 'invalid-line' });
+    expect(playCard(withLevel(state, 3), 0, 0, 4).ok).toBe(true);
+  });
+
+  it('liefert die Slot-Zahlen je Lane: gesperrte Lanes haben keine', () => {
+    expect(laneSlotCounts(1)).toEqual([lineCapacity(1), 0, 0, 0, 0]);
+    expect(laneSlotCounts(2)).toEqual([lineCapacity(2), lineCapacity(2), lineCapacity(2), 0, 0]);
+    expect(laneSlotCounts(3)).toEqual(Array(5).fill(lineCapacity(3)));
+  });
+
+  it('baut mit „Tower ausbauen“ Leben oder Schaden eines Towers der gewählten Lane aus', () => {
+    const base = withLevel(withHand(createMatch(1), ['tower-hp', 'tower-damage']), 2);
     const hp = playCard(base, 0, 0, 1);
     if (!hp.ok) throw new Error(hp.reason);
-    expect(hp.state.players[0].lines[1]!.tower.hp).toBeGreaterThan(base.players[0].lines[1]!.tower.hp);
-    expect(hp.state.players[0].lines[1]!.tower.maxHp).toBe(hp.state.players[0].lines[1]!.tower.hp);
+    const [single] = hp.state.players[0].lines[1]!.towers;
+    expect(single!.hp).toBeGreaterThan(base.players[0].lines[1]!.towers[0]!.hp);
+    expect(single!.maxHp).toBe(single!.hp);
     const damage = playCard(base, 0, 1, 1);
     if (!damage.ok) throw new Error(damage.reason);
-    expect(damage.state.players[0].lines[1]!.tower.damage).toBeGreaterThan(base.players[0].lines[1]!.tower.damage);
-    expect(damage.state.players[0].lines[0]!.tower).toEqual(base.players[0].lines[0]!.tower);
+    expect(damage.state.players[0].lines[1]!.towers[0]!.damage).toBeGreaterThan(base.players[0].lines[1]!.towers[0]!.damage);
+    expect(damage.state.players[0].lines[0]!.towers).toEqual(base.players[0].lines[0]!.towers);
   });
 
-  it('beschwört ein Minion auf der gewählten Line und lehnt es bei voller Line ab', () => {
-    let state = withHand(createMatch(1), Array(lineCapacity(1) + 1).fill('summon-minion'), 100);
-    for (let index = 0; index < lineCapacity(1); index += 1) {
+  it('verstärkt auf der Start-Lane den lebenden Tower mit den wenigsten Lebenspunkten, sonst den ersten', () => {
+    const base = withHand(createMatch(1), ['tower-hp', 'tower-hp']);
+    base.players[0].lines[0]!.towers[1]!.hp = 40;
+    const hurt = playCard(base, 0, 0, 0);
+    if (!hurt.ok) throw new Error(hurt.reason);
+    expect(hurt.state.players[0].lines[0]!.towers.map((tower) => tower.hp)).toEqual([TOWER_HP, 70, TOWER_HP]);
+    expect(hurt.state.players[0].lines[0]!.towers.map((tower) => tower.maxHp)).toEqual([TOWER_HP, TOWER_HP + 30, TOWER_HP]);
+    // Sind alle Tower der Lane zerstört, trifft das Upgrade den ersten.
+    const dead = structuredClone(base);
+    for (const tower of dead.players[0].lines[0]!.towers) tower.hp = 0;
+    const revived = playCard(dead, 0, 0, 0);
+    if (!revived.ok) throw new Error(revived.reason);
+    expect(revived.state.players[0].lines[0]!.towers.map((tower) => tower.hp)).toEqual([30, 0, 0]);
+  });
+
+  it('beschwört ein Minion auf der gewählten Lane und lehnt es bei voller Lane ab', () => {
+    let state = withLevel(withHand(createMatch(1), Array(lineCapacity(2) + 1).fill('summon-minion'), 100), 2);
+    for (let index = 0; index < lineCapacity(2); index += 1) {
       const result = playCard(state, 0, 0, 1);
       if (!result.ok) throw new Error(result.reason);
       state = result.state;
     }
-    expect(state.players[0].minions.filter((m) => m.line === 1)).toHaveLength(lineCapacity(1));
+    expect(state.players[0].minions.filter((m) => m.line === 1)).toHaveLength(lineCapacity(2));
     expect(state.players[1].minions).toHaveLength(0);
     expect(playCard(state, 0, 0, 1)).toMatchObject({ ok: false, reason: 'line-full' });
-    // Eine andere Line ist frei.
+    // Eine andere Lane ist frei.
     expect(playCard(state, 0, 0, 0).ok).toBe(true);
   });
 
@@ -426,7 +498,7 @@ describe('Karten ausspielen', () => {
     }
     expect(state.players[0].minions.map((m) => m.speed)).toEqual([8, 10]);
     state = withHand(state, ['summon-brute'], 20);
-    const later = playCard(state, 0, 0, 1);
+    const later = playCard(state, 0, 0, 0);
     if (!later.ok) throw new Error(later.reason);
     expect(later.state.players[0].minions.at(-1)!.speed).toBe(8);
   });
@@ -456,14 +528,14 @@ describe('Karten ausspielen', () => {
     expect(other!.maxHp).toBe(other!.hp);
   });
 
-  it('wirkt „Minion verbessern“ je nach Umfang auf eine oder alle Lines', () => {
-    const base = withHand(createMatch(1), ['minion-upgrade-line', 'minion-upgrade-all'], 10);
+  it('wirkt „Minion verbessern“ je nach Umfang auf eine oder alle Lanes', () => {
+    const base = withLevel(withHand(createMatch(1), ['minion-upgrade-line', 'minion-upgrade-all'], 10), 2);
     const one = playCard(base, 0, 0, 2);
     if (!one.ok) throw new Error(one.reason);
-    expect(one.state.players[0].lines.map((l) => l.bonus.hp > 0)).toEqual([false, false, true]);
+    expect(one.state.players[0].lines.map((l) => l.bonus.hp > 0)).toEqual([false, false, true, false, false]);
     const all = playCard(base, 0, 1);
     if (!all.ok) throw new Error(all.reason);
-    expect(all.state.players[0].lines.map((l) => l.bonus.hp > 0)).toEqual([true, true, true]);
+    expect(all.state.players[0].lines.map((l) => l.bonus.hp > 0)).toEqual([true, true, true, true, true]);
     expect(all.state.players[1].lines.every((l) => l.bonus.hp === 0)).toBe(true);
   });
 
@@ -489,39 +561,60 @@ describe('Karten ausspielen', () => {
 });
 
 describe('Sieg', () => {
-  it('lässt den Spieler verlieren, dessen drei Tower zerstört sind', () => {
+  /** Alle Tower beider Spieler zerstört, bis auf die mit den angegebenen (Lane, Tower)-Indizes, die 0,1 LP behalten. */
+  function lastTowers(state: MatchState, survivors: [number, number][]): void {
+    state.players.forEach((player, index) => {
+      player.lines.forEach((line, lane) =>
+        line.towers.forEach((tower, towerIndex) => {
+          const [wantedLane, wantedTower] = survivors[index]!;
+          tower.hp = lane === wantedLane && towerIndex === wantedTower ? 0.1 : 0;
+        }),
+      );
+    });
+  }
+  const attacker = (line: number, position: number) => ({
+    id: 1,
+    line,
+    position,
+    hp: 50,
+    damage: 20,
+    range: MINION_RANGE,
+    speed: 10,
+  });
+
+  it('lässt den Spieler verlieren, dessen Tower alle zerstört sind', () => {
     const state = createMatch(1);
-    state.players[0].lines.forEach((line) => (line.tower.hp = 0));
+    for (const line of state.players[0].lines) for (const tower of line.towers) tower.hp = 0;
     expect(destroyedOutcome(state)).toBe('player1');
     const other = createMatch(1);
-    other.players[1].lines.forEach((line) => (line.tower.hp = 0));
+    for (const line of other.players[1].lines) for (const tower of line.towers) tower.hp = 0;
     expect(destroyedOutcome(other)).toBe('player0');
     const partial = createMatch(1);
-    partial.players[0].lines[0]!.tower.hp = 0;
+    partial.players[0].lines[0]!.towers[0]!.hp = 0;
     expect(destroyedOutcome(partial)).toBeNull();
   });
 
   it('wertet gleichzeitige Zerstörung aller Tower als Unentschieden', () => {
-    let state = setReady(setReady(createMatch(1), 0), 1);
-    state = structuredClone(state);
-    // Letzter Tower: Spieler 0 auf Line 0, Spieler 1 auf Line 1; je ein Minion kurz davor.
-    for (const [index, player] of state.players.entries()) {
-      player.lines.forEach((line, lineIndex) => {
-        line.tower.hp = lineIndex === index ? 0.1 : 0;
-      });
-    }
-    state.players[0].minions.push({ id: 1, line: 1, position: LINE_LENGTH - MINION_RANGE, hp: 50, damage: 20, range: MINION_RANGE, speed: 10 });
-    state.players[1].minions.push({ id: 1, line: 0, position: LINE_LENGTH - MINION_RANGE, hp: 50, damage: 20, range: MINION_RANGE, speed: 10 });
+    let state = setReady(setReady(withLevel(createMatch(1), 2), 0), 1);
+    // Letzter Tower: Spieler 0 der vordere der Start-Lane, Spieler 1 der Tower der Lane 1; je ein Minion kurz davor.
+    lastTowers(state, [
+      [0, 2],
+      [1, 0],
+    ]);
+    state.players[0].minions.push(attacker(1, LINE_LENGTH - MINION_RANGE));
+    state.players[1].minions.push(attacker(0, LINE_LENGTH - 16 - MINION_RANGE));
     state = advance(state, TICK_MS);
     expect(state.phase).toBe('over');
     expect(state.outcome).toBe('draw');
   });
 
   it('beendet das Spiel mit Sieg, sobald nur ein Spieler keine Tower mehr hat', () => {
-    let state = setReady(setReady(createMatch(1), 0), 1);
-    state = structuredClone(state);
-    state.players[1].lines.forEach((line, index) => (line.tower.hp = index === 1 ? 0.1 : 0));
-    state.players[0].minions.push({ id: 1, line: 1, position: LINE_LENGTH - MINION_RANGE, hp: 50, damage: 20, range: MINION_RANGE, speed: 10 });
+    let state = setReady(setReady(withLevel(createMatch(1), 2), 0), 1);
+    lastTowers(state, [
+      [0, 0],
+      [1, 0],
+    ]);
+    state.players[0].minions.push(attacker(1, LINE_LENGTH - MINION_RANGE));
     state = advance(state, TICK_MS);
     expect(state.phase).toBe('over');
     expect(state.outcome).toBe('player0');
@@ -530,9 +623,9 @@ describe('Sieg', () => {
   it('vergleicht nach der letzten Runde die Tower-Lebenspunkte, bei Gleichstand Unentschieden', () => {
     const state = createMatch(1);
     expect(hpOutcome(state)).toBe('draw');
-    state.players[0].lines[0]!.tower.hp -= 1;
+    state.players[0].lines[0]!.towers[0]!.hp -= 1;
     expect(hpOutcome(state)).toBe('player1');
-    state.players[1].lines[2]!.tower.hp -= 5;
+    state.players[1].lines[0]!.towers[1]!.hp -= 5;
     expect(hpOutcome(state)).toBe('player0');
   });
 
@@ -589,13 +682,32 @@ describe('Respawn der Überlebenden', () => {
   });
 
   function withMinions(minions: ReturnType<typeof minion>[]): MatchState {
-    const state = structuredClone(createMatch(3));
+    const state = withLevel(createMatch(3), MAX_FIELD_LEVEL);
     state.players[0].minions = minions;
     state.players[0].placements = minions.map((m) => ({ minionId: m.id, cardId: 'summon-minion' }));
     return state;
   }
 
-  it('setzt Überlebende nach id aufsteigend auf die niedrigsten freien Slots ihrer Line', () => {
+  it('setzt Überlebende auf allen freien Lanes mit unveränderten Werten in die nächste Planung, Tote entfallen', () => {
+    // Nur Spieler 0 hat das Feld ausgebaut; der Gegner hat auf diesen Lanes keine Tower, die Überlebenden bleiben heil.
+    const state = createMatch(3);
+    state.players[0].level = MAX_FIELD_LEVEL;
+    const survivors = [minion(4, 1, 50), minion(2, 2, 50), minion(7, 4, 50), minion(8, 3, 50)];
+    state.players[0].minions = [...survivors, minion(9, 1, 50, 0)];
+    const ready = setReady(setReady(state, 0), 1);
+    const next = advance(ready, COMBAT_TICKS * TICK_MS);
+    expect(next.phase).toBe('planning');
+    expect(next.round).toBe(2);
+    expect(next.players[0].minions.map((m) => m.id)).toEqual([4, 2, 7, 8]);
+    for (const original of survivors) {
+      const back = next.players[0].minions.find((m) => m.id === original.id)!;
+      expect(back).toEqual({ ...original, position: slotPosition(0) });
+    }
+    expect(next.players[0].minions.some((m) => m.id === 9)).toBe(false);
+    expect(next.players[0].placements).toEqual([]);
+  });
+
+  it('setzt Überlebende nach id aufsteigend auf die niedrigsten freien Slots ihrer Lane', () => {
     const state = withMinions([minion(5, 1, 40), minion(2, 1, 33), minion(9, 0, 12), minion(3, 1, 50)]);
     respawnSurvivors(state.players[0]);
     const byId = (id: number) => state.players[0].minions.find((m) => m.id === id)!;
@@ -605,7 +717,7 @@ describe('Respawn der Überlebenden', () => {
     expect(byId(9).position).toBe(slotPosition(0));
   });
 
-  it('behält Line und Werte, entfernt Tote und bleibt in der Zone', () => {
+  it('behält Lane und Werte, entfernt Tote und bleibt in der Zone', () => {
     const state = withMinions([minion(1, 2, 45), minion(2, 2, 10, 0)]);
     respawnSurvivors(state.players[0]);
     expect(state.players[0].minions).toEqual([{ ...minion(1, 2, 45), position: slotPosition(0) }]);
@@ -626,7 +738,7 @@ describe('Respawn der Überlebenden', () => {
     }
   });
 
-  it('entfernt bei übervoller Line keinen Minion und bleibt in der Zone', () => {
+  it('entfernt bei übervoller Lane keinen Minion und bleibt in der Zone', () => {
     const state = withMinions(Array.from({ length: 12 }, (_, i) => minion(i + 1, 0, 40 + i)));
     respawnSurvivors(state.players[0]);
     expect(state.players[0].minions).toHaveLength(12);
