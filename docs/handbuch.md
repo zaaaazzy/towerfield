@@ -214,6 +214,7 @@ Schaden, Minions alle.
 
 `SYNERGY_DEFS` listet Paare (`id`, `name`, `cards`, `condition` `sameLine`/`anyLine`, `modifier` `{ stat: 'range', amount }`).
 Umgesetzt: `archer-line-upgrade` (`summon-archer` + `line-upgrade`, `sameLine`, Reichweite +2).
+Anwendung mit Beispielen: [anwendung-synergien.md](anwendung-synergien.md).
 
 - `activeSynergies(played, defs?)` wertet `PlayedCard[]` (`cardId`, `line?`, `minionId?`) reihenfolgeunabhängig aus: je
   Definition und Line höchstens ein Treffer, sortiert nach Definition und Line (`line: null` bei `anyLine`). Eine Karte
