@@ -8,12 +8,13 @@ import {
   TICK_SECONDS,
   TOWER_RANGE,
   totalTowerHp,
+  towerDistance,
   towersAlive,
 } from './combat';
 
 function player(towerHp = 100, towerDamage = 8): CombatPlayer {
   return {
-    lines: [0, 1, 2].map(() => ({ tower: { hp: towerHp, maxHp: towerHp, damage: towerDamage } })),
+    lines: [0, 1, 2].map(() => ({ towers: [{ hp: towerHp, maxHp: towerHp, damage: towerDamage }] })),
     minions: [],
   };
 }
@@ -117,7 +118,7 @@ describe('Kampf', () => {
   it('überschreitet LINE_LENGTH auch bei hohem Tempo nicht', () => {
     const players: [CombatPlayer, CombatPlayer] = [player(), player()];
     players[0].minions.push(minion(1, 0, 0, 30, 6, 500));
-    players[1].lines[0]!.tower.hp = 0;
+    players[1].lines[0]!.towers[0]!.hp = 0;
     for (let tick = 0; tick < 20; tick += 1) combatTick(players, TICK_SECONDS);
     expect(players[0].minions[0]!.position).toBeLessThanOrEqual(LINE_LENGTH);
   });
@@ -201,7 +202,7 @@ describe('Kampf', () => {
     const players: [CombatPlayer, CombatPlayer] = [player(), player()];
     players[0].minions.push(minion(1, 0, LINE_LENGTH - MINION_RANGE, 1000, 10));
     combatTick(players, 1);
-    expect(players[1].lines[0]!.tower.hp).toBe(90);
+    expect(players[1].lines[0]!.towers[0]!.hp).toBe(90);
     expect(totalTowerHp(players[1])).toBe(290);
   });
 
@@ -225,13 +226,13 @@ describe('Kampf', () => {
     const ranged: [CombatPlayer, CombatPlayer] = [player(), player()];
     ranged[0].minions.push(minion(1, 0, LINE_LENGTH - 14, 30, 7, MINION_SPEED, 14));
     combatTick(ranged, 1);
-    expect(ranged[1].lines[0]!.tower.hp).toBe(93);
+    expect(ranged[1].lines[0]!.towers[0]!.hp).toBe(93);
     expect(ranged[0].minions[0]!.position).toBe(LINE_LENGTH - 14);
 
     const melee: [CombatPlayer, CombatPlayer] = [player(), player()];
     melee[0].minions.push(minion(1, 0, LINE_LENGTH - 14, 30, 7));
     combatTick(melee, 1);
-    expect(melee[1].lines[0]!.tower.hp).toBe(100);
+    expect(melee[1].lines[0]!.towers[0]!.hp).toBe(100);
     expect(melee[0].minions[0]!.position).toBeCloseTo(LINE_LENGTH - 4, 6);
   });
 
@@ -257,7 +258,7 @@ describe('Kampf', () => {
     const players: [CombatPlayer, CombatPlayer] = [player(5), player()];
     players[1].minions.push(minion(1, 0, LINE_LENGTH - MINION_RANGE, 1000, 100));
     combatTick(players, 1);
-    expect(players[0].lines[0]!.tower.hp).toBe(0);
+    expect(players[0].lines[0]!.towers[0]!.hp).toBe(0);
     expect(towersAlive(players[0])).toBe(2);
   });
 
@@ -308,6 +309,13 @@ describe('Heiler', () => {
     expect(players[1].minions.map((m) => m.hp)).toEqual([10, 5]);
   });
 
+  it('behandelt einen Verbündeten ohne maxHp als unverwundet (maxHp fehlt: es gilt hp)', () => {
+    const bare = minion(2, 0, 12, 10) as unknown as ReturnType<typeof wounded>;
+    const players = setup(healer(1, 0, 10), bare);
+    combatTick(players, 1);
+    expect(players[0].minions[1]!.hp).toBe(10);
+  });
+
   it('übersteigt maxHp nie', () => {
     const players = setup(healer(1, 0, 10), wounded(2, 0, 12, 29));
     combatTick(players, 1);
@@ -323,10 +331,10 @@ describe('Heiler', () => {
   it('verursacht weder Minion- noch Tower-Schaden und läuft weiter', () => {
     const players = setup(healer(1, 0, LINE_LENGTH - 4));
     players[1].minions.push(minion(9, 0, 4 + 2, 30, 0));
-    const towerBefore = players[1].lines[0]!.tower.hp;
+    const towerBefore = players[1].lines[0]!.towers[0]!.hp;
     combatTick(players, 1);
     expect(players[1].minions[0]!.hp).toBe(30);
-    expect(players[1].lines[0]!.tower.hp).toBe(towerBefore);
+    expect(players[1].lines[0]!.towers[0]!.hp).toBe(towerBefore);
     expect(players[0].minions[0]!.position).toBe(LINE_LENGTH);
   });
 
@@ -357,5 +365,87 @@ describe('Heiler', () => {
     }
     expect(a[0]).toEqual(b[1]);
     expect(a[1]).toEqual(b[0]);
+  });
+});
+
+describe('Mehrere Tower auf einer Lane', () => {
+  /** Verteidiger mit drei Towern bei 0, 8 und 16 auf Lane 0 (wie die Start-Lane), Lane 1 ohne Tower. */
+  function defender(): CombatPlayer {
+    const tower = (offset: number) => ({ offset, hp: 100, maxHp: 100, damage: 8 });
+    return { lines: [{ towers: [tower(0), tower(8), tower(16)] }, { towers: [] }], minions: [] };
+  }
+  function attacker(): CombatPlayer {
+    return { lines: [{ towers: [] }, { towers: [] }], minions: [] };
+  }
+
+  it('misst den Abstand zum Tower von seinem Standort aus', () => {
+    expect(towerDistance({ offset: 16, hp: 1, maxHp: 1, damage: 0 }, 70)).toBe(14);
+    expect(towerDistance({ hp: 1, maxHp: 1, damage: 0 }, 70)).toBe(30);
+  });
+
+  it('greift zuerst den vordersten Tower an, den dem Angreifer nächsten', () => {
+    const players: [CombatPlayer, CombatPlayer] = [attacker(), defender()];
+    // Position 80 des Angreifers: Abstand zu den Towern bei 16, 8 und 0 ist 4, 12 und 20.
+    players[0].minions.push(minion(1, 0, 80, 30, 6));
+    combatTick(players, 1);
+    const [back, middle, front] = players[1].lines[0]!.towers;
+    expect(front!.hp).toBe(94);
+    expect(middle!.hp).toBe(100);
+    expect(back!.hp).toBe(100);
+    expect(players[0].minions[0]!.position).toBe(80);
+  });
+
+  it('wendet sich dem nächsten Tower zu, sobald der vorderste fällt, und läuft dafür weiter', () => {
+    const players: [CombatPlayer, CombatPlayer] = [attacker(), defender()];
+    players[1].lines[0]!.towers[2]!.hp = 0;
+    players[0].minions.push(minion(1, 0, 80, 1000, 6));
+    combatTick(players, 1);
+    // Der Tower bei 8 ist 12 entfernt (außerhalb der Reichweite 4): der Minion rückt vor, statt zu schlagen.
+    expect(players[1].lines[0]!.towers[1]!.hp).toBe(100);
+    expect(players[0].minions[0]!.position).toBeCloseTo(90, 6);
+    combatTick(players, 1);
+    expect(players[1].lines[0]!.towers[1]!.hp).toBe(94);
+  });
+
+  it('lässt jeden Tower von seinem Standort aus schießen', () => {
+    const players: [CombatPlayer, CombatPlayer] = [attacker(), defender()];
+    // Minion bei Position 60: Abstand 40 zum Tower bei 0, 32 zum Tower bei 8, 24 zum Tower bei 16 (Reichweite 20).
+    players[0].minions.push(minion(1, 0, 60, 1000, 0));
+    combatTick(players, 1);
+    expect(players[0].minions[0]!.hp).toBe(1000);
+    // Bei Position 64 erreicht nur der vordere Tower (Abstand 20), bei 72 auch der mittlere (Abstand 20).
+    players[0].minions[0]!.position = 64;
+    combatTick(players, 1);
+    expect(players[0].minions[0]!.hp).toBe(992);
+    players[0].minions[0]!.position = 72;
+    combatTick(players, 1);
+    expect(players[0].minions[0]!.hp).toBe(976);
+  });
+
+  it('zählt lebende Tower und ihre Lebenspunkte über alle Tower aller Lanes', () => {
+    const player = defender();
+    expect(towersAlive(player)).toBe(3);
+    expect(totalTowerHp(player)).toBe(300);
+    player.lines[0]!.towers[1]!.hp = 0;
+    expect(towersAlive(player)).toBe(2);
+    expect(totalTowerHp(player)).toBe(200);
+  });
+
+  it('meldet Tower-Schaden mit dem Rest-HP-Deckel des getroffenen Towers', () => {
+    const players: [CombatPlayer, CombatPlayer] = [attacker(), defender()];
+    players[1].lines[0]!.towers[2]!.hp = 2;
+    players[0].minions.push(minion(1, 0, 80, 30, 6));
+    const calls: [number, number, string, number][] = [];
+    combatTick(players, 1, (side, id, kind, amount) => void calls.push([side, id, kind, amount]));
+    expect(calls).toEqual([[0, 1, 'tower', 2]]);
+    expect(players[1].lines[0]!.towers[2]!.hp).toBe(0);
+  });
+
+  it('lässt Minions auf einer Lane ohne Tower bis ans Ende laufen, ohne etwas zu treffen', () => {
+    const players: [CombatPlayer, CombatPlayer] = [attacker(), defender()];
+    players[0].minions.push(minion(1, 1, 90, 30, 6));
+    for (let tick = 0; tick < 40; tick += 1) combatTick(players);
+    expect(players[0].minions[0]!.position).toBe(LINE_LENGTH);
+    expect(totalTowerHp(players[1])).toBe(300);
   });
 });

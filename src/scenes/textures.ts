@@ -12,12 +12,13 @@ export const TEXTURE_KEYS = { backdrop: 'backdrop', spark: 'spark', glow: 'glow'
 export interface FieldGeometry {
   width: number;
   height: number;
-  lineCenters: readonly number[];
-  /** y des gegnerischen und des eigenen Towers. */
-  topY: number;
-  bottomY: number;
-  /** Halbe Breite eines Wegs. */
-  pathHalfWidth: number;
+  /** y-Mitte jeder Lane (waagrechte Wege), von oben nach unten oder in Lane-Reihenfolge. */
+  laneCenters: readonly number[];
+  /** x des linken (eigenen) und des rechten (gegnerischen) Lane-Endes. */
+  leftX: number;
+  rightX: number;
+  /** Halbe Höhe eines Wegs. */
+  pathHalfHeight: number;
   /** Oberkante des Hand-Tischs. */
   handTop: number;
 }
@@ -70,8 +71,10 @@ function paintBackdrop(ctx: CanvasRenderingContext2D, width: number, height: num
 function paintField(ctx: CanvasRenderingContext2D, field: FieldGeometry, random: () => number): void {
   const left = 8;
   const right = field.width - 8;
-  const top = field.topY - 46;
-  const bottom = field.bottomY + 48;
+  const topLane = Math.min(...field.laneCenters);
+  const bottomLane = Math.max(...field.laneCenters);
+  const top = topLane - field.pathHalfHeight - 14;
+  const bottom = bottomLane + field.pathHalfHeight + 22;
 
   // Boden mit Rahmen und Körnung.
   const ground = ctx.createLinearGradient(0, top, 0, bottom);
@@ -88,14 +91,14 @@ function paintField(ctx: CanvasRenderingContext2D, field: FieldGeometry, random:
     ctx.fillStyle = random() < 0.5 ? css(PALETTE.black, 0.12) : css(PALETTE.stone, 0.08);
     ctx.fillRect(left + random() * (right - left), top + random() * (bottom - top), 1 + random() * 2, 1 + random() * 2);
   }
-  // Mittellinie des Felds.
-  const middle = (field.topY + field.bottomY) / 2;
-  const band = ctx.createLinearGradient(0, middle - 20, 0, middle + 20);
+  // Mittellinie des Felds (senkrecht, dort treffen sich die Wellen).
+  const middle = (field.leftX + field.rightX) / 2;
+  const band = ctx.createLinearGradient(middle - 20, 0, middle + 20, 0);
   band.addColorStop(0, css(PALETTE.gold, 0));
   band.addColorStop(0.5, css(PALETTE.gold, 0.12));
   band.addColorStop(1, css(PALETTE.gold, 0));
   ctx.fillStyle = band;
-  ctx.fillRect(left, middle - 20, right - left, 40);
+  ctx.fillRect(middle - 20, top, 40, bottom - top);
   ctx.restore();
   ctx.lineWidth = 3;
   ctx.strokeStyle = css(PALETTE.bronzeDark);
@@ -109,12 +112,12 @@ function paintField(ctx: CanvasRenderingContext2D, field: FieldGeometry, random:
   ctx.stroke();
 
   // Wege: Steinplatten mit Fugen und Rand.
-  for (const center of field.lineCenters) {
-    const x = center - field.pathHalfWidth;
-    const w = field.pathHalfWidth * 2;
-    const y = field.topY;
-    const h = field.bottomY - field.topY;
-    const path = ctx.createLinearGradient(x, 0, x + w, 0);
+  for (const center of field.laneCenters) {
+    const x = field.leftX - 14;
+    const w = field.rightX - field.leftX + 28;
+    const h = field.pathHalfHeight * 2;
+    const y = center - field.pathHalfHeight;
+    const path = ctx.createLinearGradient(0, y, 0, y + h);
     path.addColorStop(0, css(0x2e2a4a));
     path.addColorStop(0.5, css(PALETTE.path));
     path.addColorStop(1, css(0x2e2a4a));
@@ -122,12 +125,12 @@ function paintField(ctx: CanvasRenderingContext2D, field: FieldGeometry, random:
     ctx.fillRect(x, y, w, h);
     ctx.strokeStyle = css(PALETTE.pathEdge, 0.7);
     ctx.lineWidth = 1;
-    for (let row = 0, py = y; py < y + h; row += 1, py += 12) {
+    for (let column = 0, px = x; px < x + w; column += 1, px += 12) {
       ctx.beginPath();
-      ctx.moveTo(x, py);
-      ctx.lineTo(x + w, py);
-      ctx.moveTo(x + (row % 2 === 0 ? w * 0.35 : w * 0.65), py);
-      ctx.lineTo(x + (row % 2 === 0 ? w * 0.35 : w * 0.65), py + 12);
+      ctx.moveTo(px, y);
+      ctx.lineTo(px, y + h);
+      ctx.moveTo(px, y + (column % 2 === 0 ? h * 0.35 : h * 0.65));
+      ctx.lineTo(px + 12, y + (column % 2 === 0 ? h * 0.35 : h * 0.65));
       ctx.stroke();
     }
     for (let index = 0; index < 60; index += 1) {

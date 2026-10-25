@@ -10,8 +10,10 @@ import {
   facing,
   flashKey,
   flashStrength,
+  laneStagger,
   minionRadius,
   minionShape,
+  STAGGER_STEP,
   updateFlashes,
 } from './minion-look';
 
@@ -37,9 +39,22 @@ describe('minionRadius', () => {
 });
 
 describe('facing', () => {
-  it('Spieler schaut nach oben, Bot nach unten', () => {
-    expect(facing(0)).toBe(-1);
-    expect(facing(1)).toBe(1);
+  it('Spieler schaut nach rechts, Bot nach links (die Lane läuft waagrecht)', () => {
+    expect(facing(0)).toBe(1);
+    expect(facing(1)).toBe(-1);
+  });
+});
+
+describe('laneStagger', () => {
+  it('verteilt Minions nach ID auf drei Bahnen quer zur Lane', () => {
+    expect([3, 1, 2].map(laneStagger)).toEqual([-STAGGER_STEP, 0, STAGGER_STEP].map((v) => v));
+    expect(laneStagger(3)).toBe(laneStagger(0));
+  });
+
+  it('ist stabil: dieselbe ID ergibt immer denselben Versatz, benachbarte IDs verschiedene', () => {
+    expect(laneStagger(7)).toBe(laneStagger(7));
+    expect(new Set([1, 2, 3].map(laneStagger)).size).toBe(3);
+    for (const id of [1, 2, 3, 50]) expect(Math.abs(laneStagger(id))).toBeLessThanOrEqual(STAGGER_STEP);
   });
 });
 
@@ -84,7 +99,7 @@ describe('updateFlashes', () => {
     expect(next.get(flashKey(0, 5))).toBe(FLASH_MS);
   });
   it('ignoriert andere Ereignisse', () => {
-    const events: FxEvent[] = [{ kind: 'tower-damage', owner: 0, line: 0, amount: 2 }];
+    const events: FxEvent[] = [{ kind: 'tower-damage', owner: 0, line: 0, tower: 0, amount: 2 }];
     expect(updateFlashes(new Map(), events, 16).size).toBe(0);
   });
   it('lässt Blitze mit der Zeit ablaufen und entfernt sie', () => {

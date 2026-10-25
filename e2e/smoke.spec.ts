@@ -7,7 +7,7 @@ import { cardPoint, collectErrors, fastForwardCombat, openGame, readState, tap, 
 
 /** Was der Test von der Szene liest (nur Typ, der Code läuft im Browser). */
 interface MainSceneView {
-  current: { phase: string; players: { lines: unknown[]; hand: unknown[] }[] };
+  current: { phase: string; players: { lines: { towers: unknown[] }[]; hand: unknown[] }[] };
 }
 
 test('das Spiel startet, zeichnet in den Canvas und meldet keine Fehler', async ({ page }) => {
@@ -50,19 +50,22 @@ test('das Spiel startet, zeichnet in den Canvas und meldet keine Fehler', async 
   // Hintergrund, Raster, Figur, Stern und Text: ein leerer oder einfarbiger Canvas fällt hier auf.
   expect(colors).toBeGreaterThan(3);
 
-  // Ohne Eingabe: 3 Lines je Spieler mit Tower, START_HAND Handkarten, Planungsphase.
+  // Ohne Eingabe: je Spieler genau eine freie Lane (die Start-Lane) mit drei Towern, START_HAND Handkarten, Planung.
   const view = () =>
     page.evaluate(() => {
       const state = (window.game!.scene.getScene('main') as unknown as MainSceneView).current;
       return {
         phase: state.phase,
-        lines: state.players.map((player) => player.lines.length),
+        towers: state.players.map((player) => player.lines.map((line) => line.towers.length)),
         hands: state.players.map((player) => player.hand.length),
       };
     });
   const start = await view();
   expect(start.phase).toBe('planning');
-  expect(start.lines).toEqual([3, 3]);
+  expect(start.towers).toEqual([
+    [3, 0, 0, 0, 0],
+    [3, 0, 0, 0, 0],
+  ]);
   expect(start.hands[0]).toBe(START_HAND);
 
   // Tippen auf „Bereit“ (unten rechts; Spielkoordinaten 360x640) startet die Kampfphase.
@@ -157,7 +160,7 @@ test('?replay=<seed>: die Replay-Szene startet ohne Eingabe, zeigt Spielfeld und
   await expect.poll(async () => (await scene()).comments.length, { timeout: 10_000 }).toBeGreaterThan(0);
   const state = await scene();
   expect(state.texts.some((text) => text.includes('spielt'))).toBe(true);
-  expect(state.texts).toContain('Line 1 · Stufe 1');
+  expect(state.texts).toContain('Start-Lane');
 
   const colors = await page.evaluate(
     () =>
@@ -275,7 +278,7 @@ test('?replay=<seed>&moves=<gültig>: die Replay-Szene spielt die aufgezeichnete
   expect(state).toEqual({ aborted: null, scripted: true });
   const texts = await visibleTexts(page);
   for (const text of wanted) expect(texts).toContain(text);
-  expect(texts).toContain('Line 1 · Stufe 1');
+  expect(texts).toContain('Start-Lane');
   expect(errors).toEqual([]);
 });
 
@@ -291,7 +294,7 @@ test('?replay=<seed>&moves=<ungültig>: kein Konsolenfehler, das Replay bleibt m
   await page.waitForFunction(() => window.game?.scene.isActive('main') && !window.game.scene.isActive('replay'));
 
   // Lesbar, aber regelwidrig (sechsmal dieselbe Karte): das Replay bricht an der ersten ungültigen Aktion ab.
-  await page.goto('/?replay=7&moves=v1.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0');
+  await page.goto('/?replay=7&moves=v2.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0');
   await page.waitForFunction(() => window.game?.scene.isActive('replay') && window.game.loop.frame > 10);
   await page.waitForFunction(
     () => (window.game!.scene.getScene('replay') as unknown as RecordedReplayView).current.aborted !== null,
@@ -302,7 +305,7 @@ test('?replay=<seed>&moves=<ungültig>: kein Konsolenfehler, das Replay bleibt m
   expect((await visibleTexts(page)).some((text) => text.startsWith('Replay abgebrochen bei Zug'))).toBe(true);
 
   // Leerer Wert und Quatsch ohne Punkte und Ziffern.
-  for (const moves of ['', '%00%FF', 'v1.p10-']) {
+  for (const moves of ['', '%00%FF', 'v2.p10-', 'v1.p10-0']) {
     await page.goto(`/?replay=7&moves=${moves}`);
     await page.waitForFunction(() => window.game?.scene.isActive('replay') && window.game.loop.frame > 5);
     await expect.poll(async () => (await visibleTexts(page)).includes('Replay gestoppt')).toBe(true);
@@ -375,7 +378,7 @@ test('Kartenfilter: Tasten-Reihenfolge, Abwahl, nicht passende Karten tot, echte
   const box = (await canvas.boundingBox())!;
   const at = (x: number, y: number) => ({ x: box.x + (x / 360) * box.width, y: box.y + (y / 640) * box.height });
   const click = (point: { x: number; y: number }) => page.mouse.click(point.x, point.y);
-  const fixedHand = ['tower-hp', 'summon-minion', 'line-upgrade', 'summon-brute'];
+  const fixedHand = ['tower-hp', 'summon-minion', 'minion-upgrade-line', 'summon-brute'];
   const cardAtIndex = (index: number, exclusive = false) => {
     const point = cardPoint(fixedHand, index, exclusive);
     return at(point.x, point.y);
@@ -394,10 +397,11 @@ test('Kartenfilter: Tasten-Reihenfolge, Abwahl, nicht passende Karten tot, echte
   await page.evaluate(() => {
     const scene = window.game!.scene.getScene('main') as unknown as FilterSceneView;
     const human = scene.state.players[0]!;
-    human.hand = ['tower-hp', 'summon-minion', 'line-upgrade', 'summon-brute'];
+    human.hand = ['tower-hp', 'summon-minion', 'minion-upgrade-line', 'summon-brute'];
     human.energy = 10;
   });
-  // Anzeige: Minion, Brocken (Einheiten links), dann Line-Upgrade und Tower Leben; Hand-Indizes bleiben unsortiert.
+  // Anzeige: Minion, Brocken (Einheiten links), dann Minion-Upgrade und Tower Leben; Hand-Indizes bleiben unsortiert.
+  // („Lane +1“ hat kein Ziel und wird beim Antippen sofort gespielt, taugt daher nicht zum Auswählen.)
 
   // Minion wählen, auf „Beschwörung“ schalten: Auswahl bleibt, Karte ist sichtbar.
   await click(cardAtIndex(1));
@@ -425,9 +429,9 @@ test('Kartenfilter: Tasten-Reihenfolge, Abwahl, nicht passende Karten tot, echte
 
   // Bei „Beschwörung“ wird der Brocken mit dem echten Hand-Index 3 gespielt.
   await click(cardAtIndex(3));
-  await click(at(60, 300));
+  await click(at(180, 232)); // Start-Lane
   const after = await read();
-  expect(after.hand).toEqual(['tower-hp', 'summon-minion', 'line-upgrade']);
+  expect(after.hand).toEqual(['tower-hp', 'summon-minion', 'minion-upgrade-line']);
   expect(after.selected).toBeNull();
 
   expect(errors).toEqual([]);

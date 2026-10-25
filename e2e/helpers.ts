@@ -2,7 +2,8 @@ import { expect, type Page } from '@playwright/test';
 import { getCardDef } from '../src/logic/cards';
 import { cardAt, fanLayout, HAND_FAN, poseContains, sortHand } from '../src/logic/hand-layout';
 import type { MatchState } from '../src/logic/match';
-import { type LineGeometry, positionToY, slotPosition } from '../src/logic/placement';
+import { laneStagger } from '../src/logic/minion-look';
+import { type LineGeometry, positionToX, slotPosition } from '../src/logic/placement';
 
 /** Spielfläche in Spielkoordinaten (wie `VIEW` in der Szene). */
 const VIEW = { width: 360, height: 640 };
@@ -75,15 +76,16 @@ export async function cardPointOf(page: Page, index: number): Promise<{ x: numbe
   return cardPoint((await readState(page)).players[0].hand, index);
 }
 
-export const LINE_X = [60, 180, 300];
-const LINE_TAP_Y = 250;
+/** y-Mitte der Lane `Lane-Index` (Start-Lane 232, Reihen im Abstand 70), Spiegel von `FIELD` in `field-view.ts`. */
+export const LANE_Y = [232, 162, 302, 92, 372];
+const LANE_TAP_X = 180;
 export const READY_BUTTON = { x: 290, y: 612 };
 
 /**
  * Spiegel von `GEOMETRY`/`FIELD` aus `src/scenes/field-view.ts`. Die Datei importiert Phaser und läuft nicht im
  * Node-Prozess der Tests; die Positionsberechnung selbst kommt aus `src/logic/placement.ts`.
  */
-const GEOMETRY: LineGeometry = { lineCenters: LINE_X, lineHalfWidth: 50, ownTowerY: 400, enemyTowerY: 90 };
+const GEOMETRY: LineGeometry = { laneCenters: LANE_Y, laneHalfHeight: 33, ownTowerX: 30, enemyTowerX: 330 };
 
 /** Schwelle der Szene, ab der eine Bewegung als Ziehen gilt (`DRAG_THRESHOLD` in `main-scene.ts`). */
 export const DRAG_THRESHOLD = 8;
@@ -93,19 +95,27 @@ export interface Point {
   y: number;
 }
 
-/** Spielkoordinaten des Slots `slot` auf der Line `line` (Mitte der Line). */
+/** Spielkoordinaten des Slots `slot` auf der Lane `line` (Mitte der Lane). */
 export function slotPoint(line: number, slot: number): Point {
-  return { x: LINE_X[line]!, y: positionToY(slotPosition(slot), GEOMETRY) };
+  return { x: positionToX(slotPosition(slot), GEOMETRY), y: LANE_Y[line]! };
 }
 
-/** Spielkoordinaten, an denen die Szene einen eigenen Minion zeichnet (greifbar, mit seitlichem Versatz je `id`). */
+/** Spielkoordinaten, an denen die Szene einen eigenen Minion zeichnet (greifbar, mit Querversatz je `id`). */
 export function minionPoint(minion: { id: number; line: number; position: number }): Point {
-  return { x: LINE_X[minion.line]! + (minion.id % 2 === 0 ? 8 : -8), y: positionToY(minion.position, GEOMETRY) };
+  return { x: positionToX(minion.position, GEOMETRY), y: LANE_Y[minion.line]! + laneStagger(minion.id) };
 }
 
-/** Punkt zwischen zwei Lines, der zu keiner Line gehört. */
+/** Punkt zwischen der Start-Lane und der Lane darüber, der zu keiner Lane gehört. */
 export function pointBetweenLines(): Point {
-  return { x: (LINE_X[0]! + LINE_X[1]!) / 2, y: slotPoint(0, 1).y };
+  return { x: slotPoint(0, 1).x, y: (LANE_Y[0]! + LANE_Y[1]!) / 2 };
+}
+
+/** Schaltet die Lanes der Ausbaustufe `level` für den Menschen frei (setzt nur `level` im Szenenzustand der Tests). */
+export function unlockField(page: Page, level = 2): Promise<void> {
+  return page.evaluate((wanted) => {
+    const scene = window.game!.scene.getScene('main') as unknown as { state: { players: { level: number }[] } };
+    scene.state.players[0]!.level = wanted;
+  }, level);
 }
 
 /**
@@ -130,7 +140,7 @@ export async function tapCard(page: Page, index: number): Promise<void> {
   const point = await cardPointOf(page, index);
   await tap(page, point.x, point.y);
 }
-export const tapLine = (page: Page, line: number) => tap(page, LINE_X[line]!, LINE_TAP_Y);
+export const tapLine = (page: Page, line: number) => tap(page, LANE_TAP_X, LANE_Y[line]!);
 export const tapReady = (page: Page) => tap(page, READY_BUTTON.x, READY_BUTTON.y);
 
 /** Kopie des aktuellen Spielzustands (aus `scene.current`, nicht aus Pixeln). */

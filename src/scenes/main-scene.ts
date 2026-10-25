@@ -8,9 +8,10 @@ import {
   createMatch,
   type MatchState,
   MAX_ROUNDS,
-  lineCapacity,
+  laneSlotCounts,
   moveMinion,
 } from '../logic/match';
+import { LANE_COUNT, laneShortName } from '../logic/lanes';
 import { botPlanRecorded, createRecord, performAction, type RecordedMatch } from '../logic/match-record';
 import { HAND_FILTER_NAMES, type HandFilter, isCardVisible, nextHandFilter } from '../logic/hand-filter';
 import { updateFlashes } from '../logic/minion-look';
@@ -26,7 +27,7 @@ import {
   GEOMETRY,
   HUMAN,
   BOT,
-  lineY,
+  lineX,
   type MinionAnim,
   minionPoint,
   towerPoint,
@@ -43,24 +44,20 @@ export const VIEW = { width: 360, height: 640 };
 export const BACKDROP_FIELD = {
   width: VIEW.width,
   height: VIEW.height,
-  lineCenters: FIELD.lineCenters,
-  topY: FIELD.enemyTowerY,
-  bottomY: FIELD.ownTowerY,
-  pathHalfWidth: FIELD.pathHalfWidth,
+  laneCenters: FIELD.laneCenters,
+  leftX: FIELD.ownTowerX,
+  rightX: FIELD.enemyTowerX,
+  pathHalfHeight: FIELD.pathHalfHeight,
   handTop: 440,
 };
 
 /** Wie Effekte Ereignisse auf Bildschirmpunkte abbilden; auch von der Replay-Szene genutzt. */
 export const FX_LOCATOR: Locator = {
   minion: (owner, line, position, id) => minionPoint(owner, { id, line, position }),
-  tower: (owner, line) => towerPoint(owner, line),
+  tower: (owner, line, tower) => towerPoint(owner, line, tower),
 };
 
 const LAYOUT = {
-  lineCenters: FIELD.lineCenters,
-  lineHalfWidth: FIELD.lineHalfWidth,
-  enemyTowerY: FIELD.enemyTowerY,
-  ownTowerY: FIELD.ownTowerY,
   handTop: 440,
   button: { x: 230, y: 592, width: 120, height: 40 },
   /** Filtertaste für die Hand: schaltet bei jedem Tipp weiter, links neben `button`, unter den Karten. */
@@ -319,8 +316,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   private targetAt(x: number, y: number): DropTarget | null {
-    const counts = this.state.players[HUMAN].lines.map((line) => lineCapacity(line.level));
-    return dropTargetAt(x, y, GEOMETRY, counts);
+    return dropTargetAt(x, y, GEOMETRY, laneSlotCounts(this.state.players[HUMAN].level));
   }
 
   private handleTap(x: number, y: number): void {
@@ -363,8 +359,8 @@ export class MainScene extends Phaser.Scene {
       return;
     }
     if (this.selected === null) return;
-    const line = LAYOUT.lineCenters.findIndex((center) => Math.abs(x - center) <= LAYOUT.lineHalfWidth);
-    if (line >= 0 && y >= LAYOUT.enemyTowerY - 30 && y <= LAYOUT.handTop - 4) this.play(this.selected, line);
+    const target = this.targetAt(x, y);
+    if (target && y <= LAYOUT.handTop - 4) this.play(this.selected, target.line);
   }
 
   /** Ist die Handkarte mit diesem Hand-Index beim aktiven Filter sichtbar und antippbar? */
@@ -400,9 +396,9 @@ export class MainScene extends Phaser.Scene {
       case 'not-enough-energy':
         return 'Nicht genug Energie';
       case 'line-full':
-        return 'Line ist voll';
+        return 'Lane ist voll';
       case 'max-level':
-        return 'Line ist auf Höchststufe';
+        return 'Feld ist auf Höchststufe';
       case 'slot-taken':
         return 'Platz ist belegt';
       case 'invalid-slot':
@@ -438,17 +434,18 @@ export class MainScene extends Phaser.Scene {
     const drag = this.drag?.dragging ? this.drag : null;
     if (drag?.target) {
       const color = drag.valid ? PALETTE.good : PALETTE.bad;
-      const center = LAYOUT.lineCenters[drag.target.line]!;
+      const center = FIELD.laneCenters[drag.target.line]!;
+      const left = FIELD.ownTowerX - 14;
       g.lineStyle(2, color, 0.8).strokeRoundedRect(
-        center - LAYOUT.lineHalfWidth,
-        LAYOUT.enemyTowerY - 30,
-        LAYOUT.lineHalfWidth * 2,
-        LAYOUT.ownTowerY - LAYOUT.enemyTowerY + 42,
+        left,
+        center - FIELD.laneHalfHeight,
+        FIELD.enemyTowerX - FIELD.ownTowerX + 28,
+        FIELD.laneHalfHeight * 2,
         8,
       );
       if (drag.target.slot !== null) {
-        const slotY = lineY(HUMAN, slotPosition(drag.target.slot));
-        g.fillStyle(color, 0.5).fillCircle(center, slotY, GRAB_RADIUS);
+        const slotX = lineX(HUMAN, slotPosition(drag.target.slot));
+        g.fillStyle(color, 0.5).fillCircle(slotX, center, GRAB_RADIUS * 0.6);
       }
     }
 
@@ -552,10 +549,10 @@ export class MainScene extends Phaser.Scene {
     g.fillStyle(PALETTE.gold, 0.6).fillRect(x + 12, y + 38, width - 24, 1);
 
     const left = x + 12;
-    const columns = [x + 150, x + 200, x + 250];
+    const columns = Array.from({ length: LANE_COUNT }, (_, lane) => x + 120 + lane * 42);
     let row = y + 54;
-    this.label('Karten pro Line', left, row, { size: 12, color: TEXT.gold, origin: 0, font: 'heading', bold: true });
-    columns.forEach((column, line) => this.label(`L${line + 1}`, column, row, { size: 11, color: TEXT.dim }));
+    this.label('Karten pro Lane', left, row, { size: 12, color: TEXT.gold, origin: 0, font: 'heading', bold: true });
+    columns.forEach((column, lane) => this.label(laneShortName(lane), column, row, { size: 9, color: TEXT.dim }));
     const played = Object.entries(state.stats.played);
     if (played.length === 0) this.label('Keine Beschwörungen', left, (row += 18), { size: 11, color: TEXT.dim, origin: 0 });
     for (const [cardId, counts] of played) {

@@ -1,17 +1,36 @@
 import { describe, expect, it } from 'vitest';
 import { botPlan, botStep } from './bot';
 import { getCardDef } from './cards';
+import { isLaneUnlocked, MAX_FIELD_LEVEL, unlockedLanes } from './lanes';
 import {
   BASE_ENERGY,
+  createLaneTowers,
   createMatch,
   lineCapacity,
   LINE_COUNT,
-  MAX_LINE_LEVEL,
   type MatchState,
   type PlayerIndex,
 } from './match';
 
 const cost = (id: string) => getCardDef(id).cost;
+
+/** Baut das Feld von Spieler 1 auf `level` aus (mit den Towern der frisch freien Lanes). */
+function grow(state: MatchState, level: number): MatchState {
+  const player = state.players[1];
+  player.level = level;
+  player.lines.forEach((lane, index) => {
+    if (isLaneUnlocked(level, index) && lane.towers.length === 0) lane.towers = createLaneTowers(index);
+  });
+  return state;
+}
+
+/** Setzt die Lebenspunkte einer Lane von Spieler 1: der erste Tower bekommt `hp`, weitere Tower sind zerstört. */
+function setLaneHp(state: MatchState, lane: number, hp: number): void {
+  state.players[1].lines[lane]!.towers.forEach((tower, index) => (tower.hp = index === 0 ? hp : 0));
+}
+
+const laneHp = (state: MatchState, lane: number) =>
+  state.players[1].lines[lane]!.towers.reduce((sum, tower) => sum + tower.hp, 0);
 
 /** Zustand mit gesetzter Hand und Energie für Spieler 1; alles andere bleibt wie von `createMatch`. */
 function withHand(hand: string[], energy: number, seed = 4): MatchState {
@@ -45,8 +64,8 @@ describe('Bot', () => {
     expect(botPlan(createMatch(4), 1)).toEqual(botPlan(createMatch(4), 1));
   });
 
-  it('verteilt Minions zuerst auf Lines ohne Minions', () => {
-    const state: MatchState = createMatch(4);
+  it('verteilt Minions zuerst auf Lanes ohne Minions', () => {
+    const state: MatchState = grow(createMatch(4), 2);
     state.players[1].hand = ['summon-minion', 'summon-minion', 'summon-minion'];
     state.players[1].energy = 3;
     const after = botPlan(state, 1);
@@ -230,15 +249,15 @@ describe('Bot', () => {
       expect(new Set(lines.map((line) => line.bonus.hp)).size).toBe(1);
     });
 
-    it('spielt mehrere gleiche Karten und wählt die Line nach jeder Karte neu', () => {
-      const state = withHand(['tower-hp', 'tower-hp', 'tower-hp'], 3 * cost('tower-hp'));
-      state.players[1].lines[0]!.tower.hp = 100;
-      state.players[1].lines[1]!.tower.hp = 60;
-      state.players[1].lines[2]!.tower.hp = 80;
+    it('spielt mehrere gleiche Karten und wählt die Lane nach jeder Karte neu', () => {
+      const state = grow(withHand(['tower-hp', 'tower-hp', 'tower-hp'], 3 * cost('tower-hp')), 2);
+      setLaneHp(state, 0, 100);
+      setLaneHp(state, 1, 60);
+      setLaneHp(state, 2, 80);
       const gain = (getCardDef('tower-hp') as { hp: number }).hp;
       const after = botPlan(state, 1);
-      // Reihenfolge der Wahl: Line 1 (60), dann Line 2 (80), dann wieder die dann schwächste.
-      const hp = after.players[1].lines.map((line) => line.tower.hp);
+      // Reihenfolge der Wahl: Lane 1 (60), dann Lane 2 (80), dann wieder die dann schwächste.
+      const hp = [0, 1, 2].map((lane) => laneHp(after, lane));
       expect(hp.reduce((a, b) => a + b, 0)).toBe(100 + 60 + 80 + 3 * gain);
       expect(hp[1]).toBeGreaterThan(60);
       expect(hp[2]).toBeGreaterThan(80);
@@ -259,13 +278,13 @@ describe('Bot', () => {
       expect(after.players[1].energy).toBe(0);
       expect(after.players[1].hand).toEqual(['summon-brute', 'minion-upgrade-all', 'tower-damage']);
       expect(after.players[1].minions).toHaveLength(1);
-      expect(after.players[1].lines.reduce((sum, line) => sum + line.level, 0)).toBe(LINE_COUNT + 1);
+      expect(after.players[1].level).toBe(2);
     });
   });
 
-  describe('Linienwahl', () => {
-    it('summon: wählt die Line mit den wenigsten Minions', () => {
-      const state = withHand(['summon-minion'], 1);
+  describe('Lane-Wahl', () => {
+    it('summon: wählt die Lane mit den wenigsten Minions', () => {
+      const state = grow(withHand(['summon-minion'], 1), 2);
       addMinions(state, 0, 2);
       addMinions(state, 1, 1);
       addMinions(state, 2, 1);
@@ -273,14 +292,21 @@ describe('Bot', () => {
       expect([0, 1, 2].map((line) => minionCount(after, line))).toEqual([2, 2, 1]);
     });
 
-    it('summon: wählt bei gleich vielen Minions die niedrigste Line', () => {
-      const after = botPlan(withHand(['summon-minion'], 1), 1);
+    it('summon: wählt bei gleich vielen Minions die niedrigste Lane', () => {
+      const after = botPlan(grow(withHand(['summon-minion'], 1), 3), 1);
       expect(after.players[1].minions.map((m) => m.line)).toEqual([0]);
     });
 
-    it('summon: weicht auf eine freie Line aus, wenn andere Lines voll sind', () => {
-      const state = withHand(['summon-minion'], 1);
-      const capacity = lineCapacity(state.players[1].lines[0]!.level);
+    it('summon: nutzt nur freie Lanes, auf Lvl 1 also nur die Start-Lane', () => {
+      const state = withHand(['summon-minion', 'summon-minion', 'summon-minion'], 3);
+      const after = botPlan(state, 1);
+      expect(after.players[1].minions.map((m) => m.line)).toEqual([0, 0, 0]);
+      for (const lane of [1, 2, 3, 4]) expect(minionCount(after, lane)).toBe(0);
+    });
+
+    it('summon: weicht auf eine freie Lane aus, wenn andere Lanes voll sind', () => {
+      const state = grow(withHand(['summon-minion'], 1), 2);
+      const capacity = lineCapacity(state.players[1].level);
       addMinions(state, 0, capacity);
       addMinions(state, 1, capacity);
       const after = botPlan(state, 1);
@@ -289,9 +315,9 @@ describe('Bot', () => {
       expect(minionCount(after, 1)).toBe(capacity);
     });
 
-    it('summon: überspringt eine volle Line und nimmt bei Gleichstand die niedrigste freie', () => {
-      const state = withHand(['summon-minion'], 1);
-      const capacity = lineCapacity(state.players[1].lines[0]!.level);
+    it('summon: überspringt eine volle Lane und nimmt bei Gleichstand die niedrigste freie', () => {
+      const state = grow(withHand(['summon-minion'], 1), 2);
+      const capacity = lineCapacity(state.players[1].level);
       addMinions(state, 0, capacity);
       addMinions(state, 1, 2);
       addMinions(state, 2, 2);
@@ -301,11 +327,9 @@ describe('Bot', () => {
       expect(minionCount(after, 2)).toBe(2);
     });
 
-    it('summon: lässt die Karte auf der Hand, wenn alle Lines voll sind', () => {
-      const state = withHand(['summon-minion'], 3);
-      for (let line = 0; line < LINE_COUNT; line += 1) {
-        addMinions(state, line, lineCapacity(state.players[1].lines[line]!.level));
-      }
+    it('summon: lässt die Karte auf der Hand, wenn alle freien Lanes voll sind', () => {
+      const state = grow(withHand(['summon-minion'], 3), 2);
+      for (const line of unlockedLanes(2)) addMinions(state, line, lineCapacity(state.players[1].level));
       const after = botPlan(state, 1);
       expect(after.players[1].hand).toEqual(['summon-minion']);
       expect(after.players[1].energy).toBe(3);
@@ -313,45 +337,55 @@ describe('Bot', () => {
       expect(after.ready[1]).toBe(true);
     });
 
-    it('line-upgrade: wählt die Line mit dem niedrigsten Level', () => {
-      const state = withHand(['line-upgrade'], cost('line-upgrade'));
-      [3, 2, 4].forEach((level, line) => (state.players[1].lines[line]!.level = level));
-      const after = botPlan(state, 1);
-      expect(after.players[1].lines.map((line) => line.level)).toEqual([3, 3, 4]);
+    it('line-upgrade: spielt die Karte ohne Zielline und schaltet die nächsten Lanes frei', () => {
+      const move = botStep(withHand(['line-upgrade'], cost('line-upgrade')), 1);
+      expect(move!.cardId).toBe('line-upgrade');
+      expect(move!.line).toBeUndefined();
+      expect(move!.state.players[1].level).toBe(2);
+      expect(move!.state.players[1].lines.map((line) => line.towers.length)).toEqual([3, 1, 1, 0, 0]);
     });
 
-    it('line-upgrade: lässt Lines auf MAX_LINE_LEVEL aus', () => {
-      const state = withHand(['line-upgrade'], cost('line-upgrade'));
-      [MAX_LINE_LEVEL, MAX_LINE_LEVEL, MAX_LINE_LEVEL - 1].forEach(
-        (level, line) => (state.players[1].lines[line]!.level = level),
-      );
+    it('line-upgrade: baut Lvl 1 → 2 → 3 aus und lässt danach die Karte auf der Hand', () => {
+      const state = withHand(['line-upgrade', 'line-upgrade', 'line-upgrade'], 3 * cost('line-upgrade'));
       const after = botPlan(state, 1);
-      expect(after.players[1].lines.map((line) => line.level)).toEqual([MAX_LINE_LEVEL, MAX_LINE_LEVEL, MAX_LINE_LEVEL]);
-      expect(after.players[1].hand).toEqual([]);
+      expect(after.players[1].level).toBe(MAX_FIELD_LEVEL);
+      expect(after.players[1].lines.map((line) => line.towers.length)).toEqual([3, 1, 1, 1, 1]);
+      expect(after.players[1].hand).toEqual(['line-upgrade']);
+      expect(after.players[1].energy).toBe(cost('line-upgrade'));
+      expect(after.ready[1]).toBe(true);
     });
 
-    it('line-upgrade: bleibt auf der Hand, wenn alle Lines auf MAX_LINE_LEVEL stehen', () => {
-      const state = withHand(['line-upgrade'], cost('line-upgrade'));
-      for (const line of state.players[1].lines) line.level = MAX_LINE_LEVEL;
+    it('line-upgrade: bleibt auf der Hand, wenn das Feld schon auf MAX_FIELD_LEVEL steht', () => {
+      const state = grow(withHand(['line-upgrade'], cost('line-upgrade')), MAX_FIELD_LEVEL);
       const after = botPlan(state, 1);
       expect(after.players[1]).toEqual(state.players[1]);
       expect(after.ready[1]).toBe(true);
     });
 
-    it('tower-hp: wählt die Line mit dem niedrigsten Tower-HP', () => {
-      const state = withHand(['tower-hp'], cost('tower-hp'));
-      [100, 55, 80].forEach((hp, line) => (state.players[1].lines[line]!.tower.hp = hp));
-      const after = botPlan(state, 1);
-      const gain = (getCardDef('tower-hp') as { hp: number }).hp;
-      expect(after.players[1].lines.map((line) => line.tower.hp)).toEqual([100, 55 + gain, 80]);
+    it('nutzt nach dem Ausbau die neuen Lanes für Beschwörungen', () => {
+      const next = structuredClone(botPlan(withHand(['line-upgrade'], cost('line-upgrade')), 1));
+      expect(next.players[1].level).toBe(2);
+      next.ready[1] = false;
+      next.players[1].hand = ['summon-minion', 'summon-minion', 'summon-minion'];
+      next.players[1].energy = 3;
+      const after = botPlan(next, 1);
+      expect(after.players[1].minions.map((m) => m.line)).toEqual([0, 1, 2]);
     });
 
-    it('minion-upgrade-line: wählt die Line mit dem höchsten bonus.hp', () => {
-      const state = withHand(['minion-upgrade-line'], cost('minion-upgrade-line'));
+    it('tower-hp: wählt die Lane mit den wenigsten Tower-Lebenspunkten', () => {
+      const state = grow(withHand(['tower-hp'], cost('tower-hp')), 2);
+      [100, 55, 80].forEach((hp, lane) => setLaneHp(state, lane, hp));
+      const after = botPlan(state, 1);
+      const gain = (getCardDef('tower-hp') as { hp: number }).hp;
+      expect([0, 1, 2].map((lane) => laneHp(after, lane))).toEqual([100, 55 + gain, 80]);
+    });
+
+    it('minion-upgrade-line: wählt die Lane mit dem höchsten bonus.hp', () => {
+      const state = grow(withHand(['minion-upgrade-line'], cost('minion-upgrade-line')), 2);
       [0, 10, 5].forEach((hp, line) => (state.players[1].lines[line]!.bonus.hp = hp));
       const gain = (getCardDef('minion-upgrade-line') as { hp: number }).hp;
       const after = botPlan(state, 1);
-      expect(after.players[1].lines.map((line) => line.bonus.hp)).toEqual([0, 10 + gain, 5]);
+      expect(after.players[1].lines.map((line) => line.bonus.hp)).toEqual([0, 10 + gain, 5, 0, 0]);
     });
   });
 

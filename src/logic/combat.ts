@@ -4,7 +4,10 @@
  * aus demselben Zustand berechnet und gleichzeitig angewendet, damit die Spielerreihenfolge nichts ändert.
  */
 
-/** Länge einer Line in Einheiten. Position 0 liegt am eigenen Tower, `LINE_LENGTH` am gegnerischen. */
+/**
+ * Länge einer Lane in Einheiten. Die Lane läuft waagrecht: Position 0 liegt am eigenen (linken) Ende, `LINE_LENGTH`
+ * am gegnerischen (rechten). Jeder Spieler zählt vom eigenen Ende aus.
+ */
 export const LINE_LENGTH = 100;
 /** Feste Schrittweite der Simulation, unabhängig von der Bildwiederholrate. */
 export const TICK_MS = 50;
@@ -16,6 +19,8 @@ export const MINION_SPEED = 10;
 export const TOWER_RANGE = 20;
 
 export interface Tower {
+  /** Standort auf der Lane, vom eigenen Ende aus; fehlt er, steht der Tower am Ende (0). */
+  offset?: number;
   hp: number;
   maxHp: number;
   /** Schaden pro Sekunde. */
@@ -24,8 +29,9 @@ export interface Tower {
 
 export interface Minion {
   id: number;
+  /** Index der Lane. */
   line: number;
-  /** Weg vom eigenen Tower aus (0 bis `LINE_LENGTH`). */
+  /** Weg vom eigenen Ende der Lane aus (0 bis `LINE_LENGTH`). */
   position: number;
   hp: number;
   /** Obergrenze für Heilung; beim Beschwören gleich `hp`. Fehlt es, gilt `hp`. */
@@ -40,19 +46,38 @@ export interface Minion {
   speed: number;
 }
 
-/** Was der Kampf von einem Spieler braucht; `lines[i].tower` ist der Tower der Line i. */
+/** Was der Kampf von einem Spieler braucht; `lines[i].towers` sind die Tower der Lane i (leer: Lane nicht frei). */
 export interface CombatPlayer {
-  lines: { tower: Tower }[];
+  lines: { towers: Tower[] }[];
   minions: Minion[];
 }
 
-/** Abstand zweier gegnerischer Minions auf derselben Line. */
+/** Abstand zweier gegnerischer Minions auf derselben Lane. */
 export function gap(a: Minion, b: Minion): number {
   return LINE_LENGTH - a.position - b.position;
 }
 
+/** Abstand eines gegnerischen Minions (Position `position`, vom anderen Ende gezählt) zu einem Tower der Lane. */
+export function towerDistance(tower: Tower, position: number): number {
+  return LINE_LENGTH - position - (tower.offset ?? 0);
+}
+
+/** Index des lebenden Towers, der dem anrückenden Minion am nächsten steht, oder `-1`, wenn keiner lebt. */
+function nearestTower(towers: readonly Tower[], position: number): number {
+  let best = -1;
+  let bestDistance = Infinity;
+  towers.forEach((tower, index) => {
+    const distance = towerDistance(tower, position);
+    if (tower.hp > 0 && distance < bestDistance) {
+      best = index;
+      bestDistance = distance;
+    }
+  });
+  return best;
+}
+
 /**
- * Index des Verbündeten, den der Heiler `healerIndex` heilt: gleiche Line, im Abstand `range`, verwundet und am Leben,
+ * Index des Verbündeten, den der Heiler `healerIndex` heilt: gleiche Lane, im Abstand `range`, verwundet und am Leben,
  * nie der Heiler selbst; niedrigster HP-Anteil, bei Gleichstand der kleinere Index. `-1`, wenn es keinen gibt.
  */
 function healTarget(allies: Minion[], healerIndex: number): number {
@@ -89,9 +114,17 @@ export function combatTick(
 ): void {
   const minionDamage = players.map((player) => player.minions.map(() => 0));
   const healing = players.map((player) => player.minions.map(() => 0));
-  const towerDamage = players.map((player) => player.lines.map(() => 0));
-  /** Treffer von Minions für den Sammler; Ziel ist ein Minion-Index oder (bei `kind` 'tower') ein Line-Index. */
-  const hits: { side: number; minionId: number; kind: 'minion' | 'tower'; targetSide: number; target: number; amount: number }[] = [];
+  const towerDamage = players.map((player) => player.lines.map((line) => line.towers.map(() => 0)));
+  /** Treffer von Minions für den Sammler; Ziel ist ein Minion-Index oder (bei `kind` 'tower') Lane und Tower. */
+  const hits: {
+    side: number;
+    minionId: number;
+    kind: 'minion' | 'tower';
+    targetSide: number;
+    target: number;
+    tower: number;
+    amount: number;
+  }[] = [];
   const nextPosition = players.map((player) => player.minions.map((minion) => minion.position));
 
   for (const side of [0, 1] as const) {
@@ -118,38 +151,45 @@ export function combatTick(
       });
       if (target >= 0) {
         minionDamage[enemySide]![target]! += minion.damage * deltaSeconds;
-        hits.push({ side, minionId: minion.id, kind: 'minion', targetSide: enemySide, target, amount: minion.damage * deltaSeconds });
+        hits.push({ side, minionId: minion.id, kind: 'minion', targetSide: enemySide, target, tower: -1, amount: minion.damage * deltaSeconds });
         return;
       }
-      const tower = enemy.lines[minion.line]!.tower;
-      if (tower.hp > 0 && LINE_LENGTH - minion.position <= minion.range) {
-        towerDamage[enemySide]![minion.line]! += minion.damage * deltaSeconds;
-        hits.push({ side, minionId: minion.id, kind: 'tower', targetSide: enemySide, target: minion.line, amount: minion.damage * deltaSeconds });
+      const towers = enemy.lines[minion.line]!.towers;
+      const tower = nearestTower(towers, minion.position);
+      if (tower >= 0 && towerDistance(towers[tower]!, minion.position) <= minion.range) {
+        towerDamage[enemySide]![minion.line]![tower]! += minion.damage * deltaSeconds;
+        hits.push({ side, minionId: minion.id, kind: 'tower', targetSide: enemySide, target: minion.line, tower, amount: minion.damage * deltaSeconds });
         return;
       }
       nextPosition[side]![index] = Math.min(LINE_LENGTH, minion.position + minion.speed * deltaSeconds);
     });
 
     me.lines.forEach((line, lineIndex) => {
-      if (line.tower.hp <= 0) return;
-      let target = -1;
-      let furthest = -Infinity;
-      enemy.minions.forEach((other, otherIndex) => {
-        if (other.line !== lineIndex || LINE_LENGTH - other.position > TOWER_RANGE) return;
-        if (other.position > furthest) {
-          furthest = other.position;
-          target = otherIndex;
-        }
-      });
-      if (target >= 0) minionDamage[enemySide]![target]! += line.tower.damage * deltaSeconds;
+      for (const tower of line.towers) {
+        if (tower.hp <= 0) continue;
+        let target = -1;
+        let furthest = -Infinity;
+        enemy.minions.forEach((other, otherIndex) => {
+          if (other.line !== lineIndex || towerDistance(tower, other.position) > TOWER_RANGE) return;
+          if (other.position > furthest) {
+            furthest = other.position;
+            target = otherIndex;
+          }
+        });
+        if (target >= 0) minionDamage[enemySide]![target]! += tower.damage * deltaSeconds;
+      }
     });
   }
 
   if (collector) {
     for (const hit of hits) {
       const target = players[hit.targetSide]!;
-      const incoming = hit.kind === 'minion' ? minionDamage[hit.targetSide]![hit.target]! : towerDamage[hit.targetSide]![hit.target]!;
-      const remaining = hit.kind === 'minion' ? target.minions[hit.target]!.hp : target.lines[hit.target]!.tower.hp;
+      const incoming =
+        hit.kind === 'minion'
+          ? minionDamage[hit.targetSide]![hit.target]!
+          : towerDamage[hit.targetSide]![hit.target]![hit.tower]!;
+      const remaining =
+        hit.kind === 'minion' ? target.minions[hit.target]!.hp : target.lines[hit.target]!.towers[hit.tower]!.hp;
       const share = incoming > remaining ? remaining / incoming : 1;
       collector(hit.side, hit.minionId, hit.kind, hit.amount * share);
     }
@@ -162,15 +202,17 @@ export function combatTick(
     });
     player.minions = player.minions.filter((minion) => minion.hp > 1e-9);
     player.lines.forEach((line, index) => {
-      line.tower.hp = Math.max(0, line.tower.hp - towerDamage[side]![index]!);
+      line.towers.forEach((tower, towerIndex) => {
+        tower.hp = Math.max(0, tower.hp - towerDamage[side]![index]![towerIndex]!);
+      });
     });
   });
 }
 
 export function towersAlive(player: CombatPlayer): number {
-  return player.lines.filter((line) => line.tower.hp > 0).length;
+  return player.lines.reduce((sum, line) => sum + line.towers.filter((tower) => tower.hp > 0).length, 0);
 }
 
 export function totalTowerHp(player: CombatPlayer): number {
-  return player.lines.reduce((sum, line) => sum + line.tower.hp, 0);
+  return player.lines.reduce((sum, line) => sum + line.towers.reduce((inner, tower) => inner + tower.hp, 0), 0);
 }

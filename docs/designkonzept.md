@@ -1,7 +1,9 @@
 # Designkonzept TowerField
 
 Verbindliches Konzept für das 1v1-Kartenspiel mit Minion-Kämpfen. Stand: Auftrag „Designkonzept: Karten, Minions,
-Slots und Iso-Map“. Werte sind Startwerte; endgültiges Balancing folgt (Abschnitt 9). Konstanten stehen in
+Slots und Iso-Map“. **Hinweis:** Das Spielfeld ist seitdem von drei senkrechten Lines auf waagrechte Lanes mit
+Level-Ausbau umgestellt; wo dieses Dokument „Line“, „3 Lines“ oder `MAX_LINE_LEVEL` nennt, gilt
+[anwendung-horizontale-lane.md](anwendung-horizontale-lane.md). Werte sind Startwerte; endgültiges Balancing folgt (Abschnitt 9). Konstanten stehen in
 `src/logic/` (`cards.ts`, `match.ts`, `combat.ts`, `placement.ts`, `iso.ts`).
 
 ## 1. Leitidee

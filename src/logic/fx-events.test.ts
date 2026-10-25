@@ -39,24 +39,49 @@ describe('diffFx', () => {
     expect(diffFx(prev, next)).toEqual([{ kind: 'minion-death', owner: 0, minionId: 1, line: 0, position: 10 }]);
   });
 
-  it('meldet Turmschaden und den Fall eines Towers', () => {
+  it('meldet im Kampf keinen Tod für Minions, die noch leben', () => {
+    const prev = withMinion();
+    prev.phase = 'combat';
+    expect(diffFx(prev, structuredClone(prev))).toEqual([]);
+  });
+
+  it('meldet Turmschaden und den Fall eines Towers samt Tower-Index auf der Lane', () => {
     const prev = createMatch(1);
     const hurt = structuredClone(prev);
-    hurt.players[1].lines[2]!.tower.hp -= 12;
-    expect(diffFx(prev, hurt)).toEqual([{ kind: 'tower-damage', owner: 1, line: 2, amount: 12 }]);
+    hurt.players[1].lines[0]!.towers[2]!.hp -= 12;
+    expect(diffFx(prev, hurt)).toEqual([{ kind: 'tower-damage', owner: 1, line: 0, tower: 2, amount: 12 }]);
 
     const down = structuredClone(prev);
-    down.players[1].lines[2]!.tower.hp = 0;
+    down.players[1].lines[0]!.towers[1]!.hp = 0;
     expect(diffFx(prev, down)).toEqual([
-      { kind: 'tower-damage', owner: 1, line: 2, amount: prev.players[1].lines[2]!.tower.hp },
-      { kind: 'tower-down', owner: 1, line: 2 },
+      { kind: 'tower-damage', owner: 1, line: 0, tower: 1, amount: prev.players[1].lines[0]!.towers[1]!.hp },
+      { kind: 'tower-down', owner: 1, line: 0, tower: 1 },
     ]);
+  });
+
+  it('unterscheidet die drei Tower der Start-Lane', () => {
+    const prev = createMatch(1);
+    const next = structuredClone(prev);
+    next.players[0].lines[0]!.towers[0]!.hp -= 1;
+    next.players[0].lines[0]!.towers[2]!.hp -= 3;
+    expect(diffFx(prev, next)).toEqual([
+      { kind: 'tower-damage', owner: 0, line: 0, tower: 0, amount: 1 },
+      { kind: 'tower-damage', owner: 0, line: 0, tower: 2, amount: 3 },
+    ]);
+  });
+
+  it('meldet für eine frisch freigeschaltete Lane keinen Turmschaden', () => {
+    const prev = createMatch(1);
+    const next = structuredClone(prev);
+    next.players[0].level = 2;
+    next.players[0].lines[1]!.towers = [{ offset: 0, hp: 100, maxHp: 100, damage: 8 }];
+    expect(diffFx(prev, next)).toEqual([]);
   });
 
   it('verändert die Eingaben nicht', () => {
     const prev = withMinion();
     const next = structuredClone(prev);
-    next.players[1].lines[0]!.tower.hp -= 5;
+    next.players[1].lines[0]!.towers[0]!.hp -= 5;
     const snapshot = structuredClone({ prev, next });
     diffFx(prev, next);
     expect({ prev, next }).toEqual(snapshot);

@@ -3,10 +3,10 @@
  * zurücknehmen, bereit) samt Runde, dazu ein kompaktes URL-Format und das Nachspielen mit Prüfung.
  * Ohne Phaser, DOM und Canvas. Die Regeln kommen unverändert aus `match.ts`; hier wird nur mitgeschrieben.
  *
- * Format (Version 1, nur Zeichen `0-9 a-z . -`, damit nichts maskiert werden muss):
- *   `v1` gefolgt von Aktionen, je mit `.` davor. Eine Aktion beginnt mit Typbuchstabe, Runde (1 Ziffer) und Spieler
+ * Format (Version 2, nur Zeichen `0-9 a-z . -`, damit nichts maskiert werden muss):
+ *   `v2` gefolgt von Aktionen, je mit `.` davor. Eine Aktion beginnt mit Typbuchstabe, Runde (1 Ziffer) und Spieler
  *   (0/1), danach Felder mit `-`:
- *   `p<R><P>-<Kartenindex>[-<Line>]` Karte spielen · `m<R><P>-<Minion>-<Line>-<Slot>` verschieben ·
+ *   `p<R><P>-<Kartenindex>[-<Lane>]` Karte spielen · `m<R><P>-<Minion>-<Lane>-<Slot>` verschieben ·
  *   `u<R><P>-<Minion>` zurücknehmen · `r<R><P>` bereit.
  * Der Kartenindex ist die Position in `CARD_DEFS`. Ändern sich Regeln oder Kartenliste, muss `RECORD_VERSION` steigen,
  * damit alte Links als ungültig erkannt werden (der Test in `match-record.test.ts` hält die Kartenliste fest).
@@ -29,7 +29,8 @@ import {
   undoSummon,
 } from './match';
 
-export const RECORD_VERSION = 1;
+/** Version 2: horizontales Lane-Layout (Lane-Indizes 0 bis 4, `line-upgrade` ohne Ziel); Links aus Version 1 gelten nicht mehr. */
+export const RECORD_VERSION = 2;
 /** Obergrenze für Länge und Aktionszahl beim Dekodieren; ein Match mit 8 Runden bleibt weit darunter. */
 export const MAX_MOVES_LENGTH = 4000;
 const MAX_ACTIONS = 800;

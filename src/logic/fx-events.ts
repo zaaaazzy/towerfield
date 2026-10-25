@@ -8,8 +8,8 @@ export type FxEvent =
   | { kind: 'summon'; owner: number; minionId: number; line: number; position: number }
   | { kind: 'minion-damage'; owner: number; minionId: number; line: number; position: number; amount: number }
   | { kind: 'minion-death'; owner: number; minionId: number; line: number; position: number }
-  | { kind: 'tower-damage'; owner: number; line: number; amount: number }
-  | { kind: 'tower-down'; owner: number; line: number };
+  | { kind: 'tower-damage'; owner: number; line: number; tower: number; amount: number }
+  | { kind: 'tower-down'; owner: number; line: number; tower: number };
 
 /** Schaden unterhalb dieser Schwelle gilt als Rundungsrauschen. */
 const EPSILON = 1e-6;
@@ -49,11 +49,13 @@ export function diffFx(prev: MatchState, next: MatchState): FxEvent[] {
       }
     }
     after.lines.forEach((line, index) => {
-      const old = before.lines[index];
-      if (!old) return;
-      const lost = old.tower.hp - line.tower.hp;
-      if (lost > EPSILON) events.push({ kind: 'tower-damage', owner, line: index, amount: lost });
-      if (old.tower.hp > 0 && line.tower.hp <= 0) events.push({ kind: 'tower-down', owner, line: index });
+      line.towers.forEach((tower, towerIndex) => {
+        const old = before.lines[index]!.towers[towerIndex];
+        if (!old) return; // frisch freigeschaltete Lane
+        const lost = old.hp - tower.hp;
+        if (lost > EPSILON) events.push({ kind: 'tower-damage', owner, line: index, tower: towerIndex, amount: lost });
+        if (old.hp > 0 && tower.hp <= 0) events.push({ kind: 'tower-down', owner, line: index, tower: towerIndex });
+      });
     });
   }
   return events;

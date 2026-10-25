@@ -16,7 +16,7 @@ export interface Point {
 /** Wie die Szene Ereignisse auf Bildschirmpunkte abbildet. */
 export interface Locator {
   minion(owner: number, line: number, position: number, id: number): Point;
-  tower(owner: number, line: number): Point;
+  tower(owner: number, line: number, tower: number): Point;
 }
 
 /** Schaden wird je Ziel gesammelt und als eine Zahl gezeigt (sonst gäbe es je Tick eine Zahl). */
@@ -72,13 +72,13 @@ export class Effects {
           break;
         }
         case 'tower-damage':
-          this.collect(`t:${event.owner}:${event.line}`, event.amount, {
-            point: this.locate.tower(event.owner, event.line),
+          this.collect(`t:${event.owner}:${event.line}:${event.tower}`, event.amount, {
+            point: this.locate.tower(event.owner, event.line, event.tower),
             tower: true,
           });
           break;
         case 'tower-down': {
-          const at = this.locate.tower(event.owner, event.line);
+          const at = this.locate.tower(event.owner, event.line, event.tower);
           this.burst('down', PALETTE.gold, at, 36);
           this.burst('down', teamColor(event.owner), at, 20);
           this.ring(at, PALETTE.gold, 2.2);
