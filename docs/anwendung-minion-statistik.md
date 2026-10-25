@@ -30,3 +30,27 @@ startet ein neues Spiel. Das Overlay startet nichts von sich aus.
 ## Abgrenzung
 
 Keine Gegner-Statistik, keine Speicherung über das Match hinaus, keine Änderung an Balance, Regeln oder Kampfablauf.
+
+## Geänderte Dateien
+
+- `src/logic/match-stats.ts`, `src/logic/match-stats.test.ts` (neu): Statistik-Typen, Zählfunktionen, Tests
+- `src/logic/combat.ts`, `src/logic/combat.test.ts`: optionaler Sammler als dritter Parameter von `combatTick`
+- `src/logic/match.ts`, `src/logic/match.test.ts`: `MatchState.stats`, Pflege in `playCard`, `undoSummon`,
+  `moveMinion` und `advance`
+- `src/scenes/main-scene.ts`: Overlay (`renderStats`) bei `phase === 'over'`
+- `e2e/gameplay.spec.ts`: Neustart-Test prüft zuerst das Overlay, tippt daneben (kein Neustart), schließt es und
+  startet dann neu
+
+## Worauf zu achten ist
+
+- Der Neustart nach Match-Ende braucht jetzt zuerst „Schließen“ (Button bei ca. x 180, y 524), dann ein Tippen.
+  Tests, die direkt nach Match-Ende neu starten, müssen das berücksichtigen.
+- `statsClosed` in der Szene wird in `create()` zurückgesetzt, damit das Overlay in jeder neuen Partie wieder erscheint.
+- Das Panel hat feste Höhe. Bei sehr vielen gespielten Kartentypen (über etwa 10) könnten die Zeilen den
+  Schließen-Button überlappen; bei den aktuellen Karten reicht der Platz.
+- `cardByMinion` darf nicht aus `PlayerState.placements` abgeleitet werden, das wird pro Planungsphase geleert.
+- Neue Schadensquellen in `combatTick` müssen den Sammler mit dem gedeckelten Wert aufrufen, sonst stimmt die Summe nicht.
+
+## Prüfung
+
+Typprüfung, Unit-Tests und Smoke-Test liefen grün (Smoke: 10 von 10, keine Konsolenfehler). Der Review war freigegeben.
