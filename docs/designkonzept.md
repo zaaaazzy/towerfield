@@ -75,7 +75,7 @@ zurücknehmbar.
 | `MAX_ROUNDS`, `COMBAT_TICKS` | `match.ts` | 8 / 400 | unverändert | Spieldauer ca. 8 × (Planung + 20 s) |
 | `TOWER_RANGE` | `combat.ts` | 20 | 20 (umgesetzt, vorher 25) | Fernkämpfer (Reichweite 14) sollen den Tower überhaupt erst treffen, wenn sie in seiner Reichweite stehen, aber nicht lange ungestraft |
 | `MINION_RANGE` | `combat.ts` | 4 (alle) | je Rolle (4 / 14), Feld am Minion | Rollen brauchen unterschiedliche Reichweite (Abschnitt 4) |
-| `MINION_SPEED` | `combat.ts` | 10 (alle) | je Rolle (10 / 8 / 10) | Tank langsamer, damit Wellen sich staffeln |
+| `MINION_SPEED` | `combat.ts` | 10 (alle) | Standardwert 10 bleibt; Tempo je Minion im Feld `speed` (umgesetzt: Minion 10, Brocken 8) | Tank langsamer, damit Wellen sich staffeln; Upgrades ändern das Tempo nicht |
 | `LINE_COUNT`, `BASE_CAPACITY`, `MAX_LINE_LEVEL`, `TOWER_HP`, `TOWER_DAMAGE` | `match.ts` | 3 / 2 / 5 / 100 / 8 | unverändert | Erst nach Spieltests anpassen |
 
 ## 4. Minions (HotS-Stil)
@@ -90,7 +90,7 @@ zurücknehmbar.
 | Rolle | Beispielkarte | LP | Schaden/s | Reichweite | Tempo | Status |
 |---|---|---|---|---|---|---|
 | Nahkampf | Minion | 30 | 6 | 4 | 10 | vorhanden |
-| Tank | Brocken | 80 | 12 | 4 | 8 | vorhanden (Tempo ändert sich) |
+| Tank | Brocken | 80 | 12 | 4 | 8 | vorhanden |
 | Fernkampf | Bogenschütze (`summon-archer`, Kosten 2, 2 Kopien) | 20 | 7 | 14 | 10 | neu, Folgeauftrag 5 |
 
 ## 5. Platzierung (Mechabellum-Stil)

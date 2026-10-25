@@ -334,6 +334,27 @@ describe('Karten ausspielen', () => {
     expect(newer!.damage).toBeGreaterThan(older!.damage);
   });
 
+  it('übernimmt das Tempo der Karte und lässt es durch Upgrades unverändert', () => {
+    let state = withHand(createMatch(1), ['summon-brute', 'summon-minion', 'minion-upgrade-all', 'minion-upgrade-line'], 20);
+    const brute = playCard(state, 0, find(state, 0, 'summon-brute'), 0);
+    if (!brute.ok) throw new Error(brute.reason);
+    state = brute.state;
+    const minion = playCard(state, 0, find(state, 0, 'summon-minion'), 0);
+    if (!minion.ok) throw new Error(minion.reason);
+    state = minion.state;
+    expect(state.players[0].minions.map((m) => m.speed)).toEqual([8, 10]);
+    for (const id of ['minion-upgrade-all', 'minion-upgrade-line']) {
+      const upgrade = playCard(state, 0, find(state, 0, id), 0);
+      if (!upgrade.ok) throw new Error(upgrade.reason);
+      state = upgrade.state;
+    }
+    expect(state.players[0].minions.map((m) => m.speed)).toEqual([8, 10]);
+    state = withHand(state, ['summon-brute'], 20);
+    const later = playCard(state, 0, 0, 1);
+    if (!later.ok) throw new Error(later.reason);
+    expect(later.state.players[0].minions.at(-1)!.speed).toBe(8);
+  });
+
   it('wirkt „Minion verbessern“ je nach Umfang auf eine oder alle Lines', () => {
     const base = withHand(createMatch(1), ['minion-upgrade-line', 'minion-upgrade-all'], 10);
     const one = playCard(base, 0, 0, 2);
@@ -388,8 +409,8 @@ describe('Sieg', () => {
         line.tower.hp = lineIndex === index ? 0.1 : 0;
       });
     }
-    state.players[0].minions.push({ id: 1, line: 1, position: LINE_LENGTH - MINION_RANGE, hp: 50, damage: 20 });
-    state.players[1].minions.push({ id: 1, line: 0, position: LINE_LENGTH - MINION_RANGE, hp: 50, damage: 20 });
+    state.players[0].minions.push({ id: 1, line: 1, position: LINE_LENGTH - MINION_RANGE, hp: 50, damage: 20, speed: 10 });
+    state.players[1].minions.push({ id: 1, line: 0, position: LINE_LENGTH - MINION_RANGE, hp: 50, damage: 20, speed: 10 });
     state = advance(state, TICK_MS);
     expect(state.phase).toBe('over');
     expect(state.outcome).toBe('draw');
@@ -399,7 +420,7 @@ describe('Sieg', () => {
     let state = setReady(setReady(createMatch(1), 0), 1);
     state = structuredClone(state);
     state.players[1].lines.forEach((line, index) => (line.tower.hp = index === 1 ? 0.1 : 0));
-    state.players[0].minions.push({ id: 1, line: 1, position: LINE_LENGTH - MINION_RANGE, hp: 50, damage: 20 });
+    state.players[0].minions.push({ id: 1, line: 1, position: LINE_LENGTH - MINION_RANGE, hp: 50, damage: 20, speed: 10 });
     state = advance(state, TICK_MS);
     expect(state.phase).toBe('over');
     expect(state.outcome).toBe('player0');

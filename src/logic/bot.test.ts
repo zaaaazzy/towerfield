@@ -25,7 +25,7 @@ function withHand(hand: string[], energy: number, seed = 4): MatchState {
 function addMinions(state: MatchState, line: number, count: number): void {
   const player = state.players[1];
   for (let index = 0; index < count; index += 1) {
-    player.minions.push({ id: 100 + player.minions.length, line, position: index, hp: 30, damage: 6 });
+    player.minions.push({ id: 100 + player.minions.length, line, position: index, hp: 30, damage: 6, speed: 10 });
   }
 }
 

@@ -18,8 +18,8 @@ function player(towerHp = 100, towerDamage = 8): CombatPlayer {
   };
 }
 
-function minion(id: number, line: number, position: number, hp = 30, damage = 6) {
-  return { id, line, position, hp, damage };
+function minion(id: number, line: number, position: number, hp = 30, damage = 6, speed = MINION_SPEED) {
+  return { id, line, position, hp, damage, speed };
 }
 
 describe('Kampf', () => {
@@ -28,6 +28,33 @@ describe('Kampf', () => {
     players[0].minions.push(minion(1, 0, 0));
     for (let tick = 0; tick < 20; tick += 1) combatTick(players, TICK_SECONDS);
     expect(players[0].minions[0]!.position).toBeCloseTo(MINION_SPEED * 1, 6);
+  });
+
+  it('bewegt Minions je nach eigenem Tempo und lässt sie 2 Einheiten auseinanderlaufen', () => {
+    const players: [CombatPlayer, CombatPlayer] = [player(), player()];
+    players[0].minions.push(minion(1, 0, 0, 30, 6, 8), minion(2, 0, 0, 30, 6, 10));
+    for (let tick = 0; tick < 20; tick += 1) combatTick(players, TICK_SECONDS);
+    const [slow, fast] = players[0].minions;
+    expect(slow!.position).toBeCloseTo(8, 6);
+    expect(fast!.position).toBeCloseTo(10, 6);
+    expect(fast!.position - slow!.position).toBeCloseTo(2, 6);
+  });
+
+  it('hält ein Minion unabhängig vom Tempo an, sobald ein Ziel oder der Tower in Reichweite ist', () => {
+    const players: [CombatPlayer, CombatPlayer] = [player(), player()];
+    players[0].minions.push(minion(1, 0, LINE_LENGTH - MINION_RANGE, 30, 6, 50), minion(2, 1, 48, 1000, 6, 50));
+    players[1].minions.push(minion(1, 1, 48, 1000, 6, 50));
+    combatTick(players);
+    expect(players[0].minions[0]!.position).toBe(LINE_LENGTH - MINION_RANGE);
+    expect(players[0].minions[1]!.position).toBe(48);
+  });
+
+  it('überschreitet LINE_LENGTH auch bei hohem Tempo nicht', () => {
+    const players: [CombatPlayer, CombatPlayer] = [player(), player()];
+    players[0].minions.push(minion(1, 0, 0, 30, 6, 500));
+    players[1].lines[0]!.tower.hp = 0;
+    for (let tick = 0; tick < 20; tick += 1) combatTick(players, TICK_SECONDS);
+    expect(players[0].minions[0]!.position).toBeLessThanOrEqual(LINE_LENGTH);
   });
 
   it('lässt gegnerische Minions in der Mitte aufeinandertreffen und sich bekämpfen', () => {
