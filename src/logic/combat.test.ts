@@ -276,3 +276,86 @@ describe('Kampf', () => {
     expect(a[1]).toEqual(b[0]);
   });
 });
+
+describe('Heiler', () => {
+  const healer = (id: number, line: number, position: number, damage = 5) => ({
+    ...minion(id, line, position, 20, damage, MINION_SPEED, 10),
+    maxHp: 20,
+    heals: true,
+  });
+  const wounded = (id: number, line: number, position: number, hp: number, maxHp = 30) => ({
+    ...minion(id, line, position, hp, 6),
+    maxHp,
+  });
+  const setup = (...own: ReturnType<typeof wounded>[]): [CombatPlayer, CombatPlayer] => {
+    const players: [CombatPlayer, CombatPlayer] = [player(), player()];
+    players[0].minions.push(...own);
+    return players;
+  };
+
+  it('heilt einen verwundeten Verbündeten in Reichweite um damage * deltaSeconds', () => {
+    const players = setup(healer(1, 0, 10), wounded(2, 0, 15, 10));
+    combatTick(players, 0.5);
+    expect(players[0].minions[1]!.hp).toBeCloseTo(12.5);
+  });
+
+  it('heilt nicht außerhalb der Reichweite, auf anderer Line, Gegner oder sich selbst', () => {
+    const players = setup(healer(1, 0, 10), wounded(2, 0, 21, 10), wounded(3, 1, 10, 10));
+    players[1].minions.push(wounded(4, 0, 10, 10));
+    players[1].minions.push({ ...healer(5, 2, 5), hp: 5 });
+    combatTick(players, 1);
+    expect(players[0].minions.map((m) => m.hp)).toEqual([20, 10, 10]);
+    expect(players[1].minions.map((m) => m.hp)).toEqual([10, 5]);
+  });
+
+  it('übersteigt maxHp nie', () => {
+    const players = setup(healer(1, 0, 10), wounded(2, 0, 12, 29));
+    combatTick(players, 1);
+    expect(players[0].minions[1]!.hp).toBe(30);
+  });
+
+  it('wählt den niedrigsten HP-Anteil, bei Gleichstand den kleineren Index', () => {
+    const players = setup(healer(1, 0, 10), wounded(2, 0, 12, 15), wounded(3, 0, 12, 6), wounded(4, 0, 12, 6));
+    combatTick(players, 1);
+    expect(players[0].minions.map((m) => m.hp)).toEqual([20, 15, 11, 6]);
+  });
+
+  it('verursacht weder Minion- noch Tower-Schaden und läuft weiter', () => {
+    const players = setup(healer(1, 0, LINE_LENGTH - 4));
+    players[1].minions.push(minion(9, 0, 4 + 2, 30, 0));
+    const towerBefore = players[1].lines[0]!.tower.hp;
+    combatTick(players, 1);
+    expect(players[1].minions[0]!.hp).toBe(30);
+    expect(players[1].lines[0]!.tower.hp).toBe(towerBefore);
+    expect(players[0].minions[0]!.position).toBe(LINE_LENGTH);
+  });
+
+  it('belebt keinen Minion wieder, der im selben Tick stirbt', () => {
+    const players = setup(healer(1, 0, 45), wounded(2, 0, 50, 1));
+    players[1].minions.push(minion(7, 0, 48, 30, 60));
+    combatTick(players, 1);
+    expect(players[0].minions.map((m) => m.id)).toEqual([1]);
+  });
+
+  it('verrechnet Heilung und Schaden im selben Tick', () => {
+    const players = setup(healer(1, 0, 45), wounded(2, 0, 50, 10));
+    players[1].minions.push(minion(7, 0, 48, 30, 6));
+    combatTick(players, 1);
+    expect(players[0].minions[1]!.hp).toBeCloseTo(9);
+  });
+
+  it('hängt nicht von der Spielerreihenfolge ab', () => {
+    const a: [CombatPlayer, CombatPlayer] = [player(), player()];
+    const b: [CombatPlayer, CombatPlayer] = [player(), player()];
+    a[0].minions.push(healer(1, 0, 40), wounded(2, 0, 44, 12));
+    a[1].minions.push(minion(7, 0, 56, 30, 6));
+    b[1].minions.push(healer(1, 0, 40), wounded(2, 0, 44, 12));
+    b[0].minions.push(minion(7, 0, 56, 30, 6));
+    for (let tick = 0; tick < 40; tick += 1) {
+      combatTick(a);
+      combatTick(b);
+    }
+    expect(a[0]).toEqual(b[1]);
+    expect(a[1]).toEqual(b[0]);
+  });
+});

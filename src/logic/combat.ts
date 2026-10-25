@@ -28,6 +28,10 @@ export interface Minion {
   /** Weg vom eigenen Tower aus (0 bis `LINE_LENGTH`). */
   position: number;
   hp: number;
+  /** Obergrenze für Heilung; beim Beschwören gleich `hp`. Fehlt es, gilt `hp`. */
+  maxHp?: number;
+  /** Heilt statt anzugreifen: `damage` ist dann Heilung in HP pro Sekunde. */
+  heals?: boolean;
   /** Schaden pro Sekunde. */
   damage: number;
   /** Reichweite in Einheiten. */
@@ -48,6 +52,27 @@ export function gap(a: Minion, b: Minion): number {
 }
 
 /**
+ * Index des Verbündeten, den der Heiler `healerIndex` heilt: gleiche Line, im Abstand `range`, verwundet und am Leben,
+ * nie der Heiler selbst; niedrigster HP-Anteil, bei Gleichstand der kleinere Index. `-1`, wenn es keinen gibt.
+ */
+function healTarget(allies: Minion[], healerIndex: number): number {
+  const healer = allies[healerIndex]!;
+  let target = -1;
+  let lowest = Infinity;
+  allies.forEach((ally, index) => {
+    const maxHp = ally.maxHp ?? ally.hp;
+    if (index === healerIndex || ally.line !== healer.line || ally.hp <= 1e-9 || ally.hp >= maxHp) return;
+    if (Math.abs(ally.position - healer.position) > healer.range) return;
+    const ratio = ally.hp / maxHp;
+    if (ratio < lowest) {
+      lowest = ratio;
+      target = index;
+    }
+  });
+  return target;
+}
+
+/**
  * Meldet den tatsächlich verursachten Schaden eines Minions (`side`, `minionId`) an Minions oder Tower.
  * Der Betrag ist auf die Rest-HP des Ziels gedeckelt; bei mehreren Angreifern wird er anteilig verteilt.
  */
@@ -63,6 +88,7 @@ export function combatTick(
   collector?: DamageCollector,
 ): void {
   const minionDamage = players.map((player) => player.minions.map(() => 0));
+  const healing = players.map((player) => player.minions.map(() => 0));
   const towerDamage = players.map((player) => player.lines.map(() => 0));
   /** Treffer von Minions für den Sammler; Ziel ist ein Minion-Index oder (bei `kind` 'tower') ein Line-Index. */
   const hits: { side: number; minionId: number; kind: 'minion' | 'tower'; targetSide: number; target: number; amount: number }[] = [];
@@ -74,6 +100,12 @@ export function combatTick(
     const enemy = players[enemySide];
 
     me.minions.forEach((minion, index) => {
+      if (minion.heals) {
+        const ally = healTarget(me.minions, index);
+        if (ally >= 0) healing[side]![ally]! += minion.damage * deltaSeconds;
+        nextPosition[side]![index] = Math.min(LINE_LENGTH, minion.position + minion.speed * deltaSeconds);
+        return;
+      }
       let target = -1;
       let best = Infinity;
       enemy.minions.forEach((other, otherIndex) => {
@@ -126,7 +158,7 @@ export function combatTick(
   players.forEach((player, side) => {
     player.minions.forEach((minion, index) => {
       minion.position = nextPosition[side]![index]!;
-      minion.hp -= minionDamage[side]![index]!;
+      minion.hp = Math.min(minion.maxHp ?? minion.hp, minion.hp - minionDamage[side]![index]! + healing[side]![index]!);
     });
     player.minions = player.minions.filter((minion) => minion.hp > 1e-9);
     player.lines.forEach((line, index) => {

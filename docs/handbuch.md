@@ -1,7 +1,7 @@
 # TowerField – Technisches Handbuch
 
-Stand: Auftrag „Kartenfilter für die Hand im Match“ (Version 0.1.0). Der Stand baut auf den
-Aufträgen „Replay-Szene“, „Minion-Statistik-Overlay nach Match-Ende“, „Fernkämpfer Bogenschütze“, „Start- und Zieh-Konstanten“, „E2E-Tests“, „Dev-Szene mit Balancing-Statistik“,
+Stand: Auftrag „Heiler-Karte mit Heilung für Minions derselben Line“ (Version 0.1.0). Der Stand baut auf den
+Aufträgen „Kartenfilter für die Hand im Match“, „Replay-Szene“, „Minion-Statistik-Overlay nach Match-Ende“, „Fernkämpfer Bogenschütze“, „Start- und Zieh-Konstanten“, „E2E-Tests“, „Dev-Szene mit Balancing-Statistik“,
 „Minion-Tempo“, „Tower-Reichweite 20“, „Energie-Maximum 8“, „Bot-Strategie“, „Handlimit“, „Drag-and-Drop“,
 „Designkonzept“ und „Kern-Logik“ auf.
 
@@ -12,11 +12,26 @@ Aufträgen „Replay-Szene“, „Minion-Statistik-Overlay nach Match-Ende“, �
 >   Schnittstellen (`botStep`, `botPlan`).
 > - Aus dem bisherigen Handbuch und den Einzeldokumenten übernommen, nicht neu gegen den Code geprüft: Kartenwerte,
 >   Rundenablauf, Platzierung, `main-scene.ts`, Tests.
-> - Ich habe keine Tests und keinen Build ausgeführt. Laut Tester: Typecheck grün, `hand-filter.test.ts` (17 Tests) grün,
->   Smoke 14 bestanden. Der Review war freigegeben.
+> - Heiler: gegen `cards.ts`, `combat.ts` (Felder `maxHp`, `heals`, Heilformel) und `match.ts` (Beschwören) geprüft sowie
+>   gegen `docs/anwendung-heiler.md`.
+> - Ich habe keine Tests und keinen Build ausgeführt. Laut Tester: Typecheck grün, Vitest zu Bot, Karten, Kampf und Match
+>   (132 Tests) grün, Smoke 14 bestanden. Der Review war freigegeben.
 > - Nichts committet. Zeilenangaben für `main-scene.ts` sind ungefähr.
 
 ## Änderungen in diesem Stand
+
+| Thema | Vorher | Jetzt | Datei |
+|---|---|---|---|
+| Heiler-Karte | keine | `summon-healer`: Kosten 2, 20 LP, 5 Heilung/s, Reichweite 10, 1 Kopie im Deck | `cards.ts` |
+| Heilung im Kampf | keine | `combatTick` heilt pro Tick einen verwundeten Verbündeten derselben Line | `combat.ts` |
+| `Minion` | ohne `maxHp`, `heals` | optionale Felder `maxHp` und `heals`; `match.ts` setzt sie beim Beschwören | `combat.ts`, `match.ts` |
+| Bot | Prioritätsliste ohne Heiler | `summon-healer` direkt hinter `summon-archer` | `bot.ts` |
+| Anzeige | – | Heiler mit grünem Punkt in der Mitte | `main-scene.ts` |
+
+Nicht geändert (Heiler): `match-stats.ts` und `DamageCollector` (Heilung zählt nicht als Schaden), Tower-Regeln,
+Szenen, Smoke-Test. Details: `docs/anwendung-heiler.md`.
+
+Frühere Änderung (Kartenfilter):
 
 | Thema | Vorher | Jetzt | Datei |
 |---|---|---|---|
@@ -24,6 +39,7 @@ Aufträgen „Replay-Szene“, „Minion-Statistik-Overlay nach Match-Ende“, �
 | Smoke-Test | – | Fall „Kartenfilter“ (Reihenfolge, Abwahl, tote Karten, echter Hand-Index) | `e2e/smoke.spec.ts` |
 
 Nicht geändert (Kartenfilter): `match.ts`, `combat.ts`, `bot.ts`, `cards.ts`, Bot, Match-Ablauf, Statistik-Overlay.
+(Gilt für den Stand vor dem Heiler.)
 
 Frühere Änderung (Replay):
 
@@ -58,7 +74,7 @@ Mobiles 1-gegen-1-Tower-Defense-Spiel mit Karten im Browser (Phaser 3, TypeScrip
 
 Weiterführend unter `docs/`: `designkonzept.md` (Soll-Regeln) und die `anwendung-*.md` je Auftrag (Bogenschütze,
 Start-/Zieh-Konstanten, Handlimit, Iso-Platzierung, Drag-and-Drop, Bot-Tests, Energie-Maximum, Tower-Reichweite,
-Minion-Tempo, Balance-Szene, E2E, Minion-Statistik, Replay, Kartenfilter).
+Minion-Tempo, Balance-Szene, E2E, Minion-Statistik, Replay, Kartenfilter, Heiler).
 
 ### Umsetzungsstand
 
@@ -66,6 +82,7 @@ Minion-Tempo, Balance-Szene, E2E, Minion-Statistik, Replay, Kartenfilter).
 |---|---|
 | Kernlogik (Karten, Runden, Kampf, Bot) | fertig, getestet |
 | Reichweite je Minion, Bogenschütze | umgesetzt |
+| **Heiler (`summon-healer`)** | **umgesetzt, getestet** |
 | Start 5 / Ziehen 3, Handlimit 10, Energie-Max. 8, Tower-Reichweite 20, Minion-Tempo | umgesetzt |
 | Minion-Statistik und Overlay nach Match-Ende | umgesetzt, getestet |
 | Replay-Szene `?replay=<seed>` | umgesetzt, getestet |
@@ -98,6 +115,7 @@ Deck-Länge: `START_HAND + DRAW_PER_ROUND * (MAX_ROUNDS - 1)` = 26 Karten, Misch
 | `summon-minion` | Minion | 1 | 30 LP, 6 Schaden/s | 4 | 10 | 4 |
 | `summon-brute` | Brocken | 2 | 80 LP, 12 Schaden/s | 4 | 8 | 2 |
 | `summon-archer` | Bogenschütze | 2 | 20 LP, 7 Schaden/s | 14 | 10 | 2 |
+| `summon-healer` | Heiler | 2 | 20 LP, heilt 5 LP/s (`damage`), greift nie an | 10 | 10 | 1 |
 | `line-upgrade` | Line +1 | 2 | Stufe +1 (max. 5), ein Slot mehr | – | – | 2 |
 | `tower-hp` | Tower Leben | 1 | +30 max. LP und +30 LP | – | – | 2 |
 | `tower-damage` | Tower Schaden | 2 | +4 Schaden/s | – | – | 1 |
@@ -118,6 +136,25 @@ Eine abgelehnte Karte lässt den Zustand unverändert (`PlayResult.ok === false`
 - Tower (100 LP, 8 Schaden/s) treffen den am weitesten vorgerückten Gegner innerhalb `TOWER_RANGE = 20`.
 - Beide Seiten werden pro Tick aus demselben Zustand berechnet und gleichzeitig angewendet.
 - Minions mit `hp <= 1e-9` werden nach dem Tick entfernt.
+- Optionale Felder: `maxHp` (fehlt es, gilt `hp` als Maximum) und `heals` (Heiler-Merkmal). Literale in Tests brauchen
+  beide nicht.
+
+#### Heilung
+
+- `CardDef` für `summon` hat das optionale Feld `role?: 'healer'`. Beim Beschwören setzt `playCard` `maxHp = def.hp +
+  Line-Bonus` und bei `role === 'healer'` zusätzlich `heals: true`.
+- Ein Heiler heilt pro Tick `damage * deltaSeconds` auf **einen** Verbündeten: gleiche Line, Abstand
+  `|position − heiler.position| <= range`, lebend, verwundet (`hp < maxHp`), nicht er selbst. Gewählt wird der niedrigste
+  HP-Anteil, bei Gleichstand der kleinere Index (kein Zufall).
+- Der Heiler greift nie an, weder Minion noch Tower, auch ohne Ziel. Er läuft immer mit seinem Tempo weiter.
+- Heilung wird wie Schaden aus dem Zustand vor dem Tick berechnet und danach angewendet:
+  `hp = min(maxHp, hp − Schaden + Heilung)`. Wer im selben Tick auf `hp <= 1e-9` fällt, wird entfernt; Heilung belebt
+  nicht wieder. Das Ergebnis hängt nicht von der Spielerreihenfolge ab.
+- Minion-Upgrades wirken nur über den Line-Bonus beim Beschwören; bereits stehende Minions und ihr `maxHp` ändern sich
+  nicht.
+- Heilung erscheint nicht in `DamageCollector` und `match-stats.ts`. Eine Heilstatistik wäre eine eigene Änderung.
+- Mehrere Heiler wirken gleichzeitig aus demselben Vorzustand und können dasselbe Ziel gemeinsam heilen.
+- Das Deck hat eine Karte mehr im Pool, die Kartenreihenfolge je Seed ändert sich (bleibt deterministisch).
 
 ### Platzierung
 
@@ -329,6 +366,9 @@ Vor jeder Übergabe müssen `npm run build`, `npm test` und `npm run test:smoke`
 - `e2e/smoke.spec.ts`: Canvas zeichnet, keine Konsolenfehler, Dev-Szene `balance`, Drag eines Minions, `?replay=`
   (Canvas, Kommentar, Ende mit Ergebnis und Teilen-URL, Neustart per Taste) und ungültiges `?replay=` fällt auf
   `MainScene` zurück.
+- Heiler: `combat.test.ts` (Heilung pro Tick, Reichweite, Line, Gegner, `maxHp`-Grenze, keine Selbstheilung, Zielwahl,
+  kein Schaden, vertauschte Spielerreihenfolge), `cards.test.ts` (Karte, Deck), `match.test.ts` (`maxHp` mit Line-Bonus),
+  `bot.test.ts` (Heiler nach `PRIORITY`, `botPlan` deterministisch).
 - Fixtures mit `Minion`-Literalen brauchen `range` und `speed`. Das Deck ändert sich bei neuen Karten, feste
   Kartenreihenfolgen in Tests müssen dann angepasst werden.
 
@@ -341,6 +381,8 @@ Vor jeder Übergabe müssen `npm run build`, `npm test` und `npm run test:smoke`
   (laut Auftrag ausgeschlossen).
 - Smoke-Test „Drag eines beschworenen Minions“: überspringt sich per `test.skip`, wenn die Starthand keinen Minion
   enthält (`smoke.spec.ts`, ca. Zeile 261). Im letzten Lauf liefen alle 14 Fälle.
+- Heiler: Balance (Werte sind Startwerte) und Stehenbleiben hinter Verbündeten sind nicht Teil des Auftrags. Der Panel-
+  und Filtertext der Szene enthält keine Heiler-Sonderfälle; der Typ `summon` fällt unter „Beschwörung“.
 - Hand-UI, Undo-Knopf, Iso-Szene, Projektile, Tempo-Anzeige auf Karten.
 - Reviewer-Hinweise: lange `hits.push(...)`-Zeilen in `combat.ts` ggf. mit Hilfstyp lesbarer machen; fehlendes
   Leerzeichen in `this.graphics =this.add.graphics();` in `main-scene.ts`.

@@ -39,6 +39,25 @@ describe('Karten', () => {
     expect(buildDeck(7, passLength * 3).filter((id) => id === 'summon-archer')).toHaveLength(6);
   });
 
+  it('definiert den Heiler als Summon-Karte mit Reichweite 10, positivem Wert und Ziel Line', () => {
+    expect(getCardDef('summon-healer')).toMatchObject({
+      name: 'Heiler',
+      type: 'summon',
+      target: 'line',
+      range: 10,
+      speed: 10,
+      role: 'healer',
+    });
+    expect(getCardDef('summon-healer')).toHaveProperty('damage');
+    expect((getCardDef('summon-healer') as { damage: number }).damage).toBeGreaterThan(0);
+  });
+
+  it('legt den Heiler einmal pro Durchgang ins Deck, deterministisch pro Seed', () => {
+    expect(buildDeck(1, 17).filter((id) => id === 'summon-healer')).toHaveLength(1);
+    expect(buildDeck(3, 34).filter((id) => id === 'summon-healer')).toHaveLength(2);
+    expect(buildDeck(3, 34)).toEqual(buildDeck(3, 34));
+  });
+
   it('wirft bei einer unbekannten Karte', () => {
     expect(() => getCardDef('gibt-es-nicht')).toThrow();
   });

@@ -92,6 +92,7 @@ zurücknehmbar.
 | Nahkampf | Minion | 30 | 6 | 4 | 10 | vorhanden |
 | Tank | Brocken | 80 | 12 | 4 | 8 | vorhanden |
 | Fernkampf | Bogenschütze (`summon-archer`, Kosten 2, 2 Kopien) | 20 | 7 | 14 | 10 | vorhanden |
+| Heiler | Heiler (`summon-healer`, Kosten 2, 1 Kopie) | 20 | 5 (Heilung/s) | 10 | 10 | vorhanden, siehe [Heiler](anwendung-heiler.md) |
 
 ## 5. Platzierung (Mechabellum-Stil)
 
