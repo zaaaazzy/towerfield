@@ -6,7 +6,7 @@
  * bleibt zufallsfrei.
  */
 import { applyMinionBuff } from './buff';
-import { buildDeck, getCardDef } from './cards';
+import { buildDeck, getCardDef, summonCount } from './cards';
 import {
   combatTick,
   type CombatPlayer,
@@ -31,7 +31,7 @@ import {
   TOWER_SHIELD,
 } from './round-events';
 import { isLaneUnlocked, LANE_COUNT, laneTowerOffsets, laneUnlockLevel, MAX_FIELD_LEVEL } from './lanes';
-import { firstFreeSlot, isSlotFree, isValidSlot, slotPosition, validSlots } from './placement';
+import { firstFreeSlot, freeSlots, isSlotFree, isValidSlot, slotPosition, validSlots } from './placement';
 import { type ActiveSynergy, activeSynergies, type PlayedCard, synergyBonus } from './synergies';
 
 /** Zahl der Lanes des voll ausgebauten Feldes (Lvl 3); `PlayerState.lines` hat immer so viele Einträge. */
@@ -82,7 +82,7 @@ export interface PlayerState extends CombatPlayer {
   lines: LineState[];
   nextMinionId: number;
   /** In dieser Planungsphase beschworene Minions samt Karte; nur sie lassen sich verschieben oder zurücknehmen. */
-  placements: { minionId: number; cardId: string }[];
+  placements: { minionId: number; cardId: string; /** Id des ersten Minions derselben Karte: Einheiten einer Karte teilen sich die Gruppe (Undo). */ group: number }[];
   /** Alle in dieser Runde gespielten Karten mit Ziel-Lane; `startRound` leert die Liste. */
   played: PlayedCard[];
   /** Daraus folgende aktive Synergien (nur diese Runde, nur für die Minions dieses Spielers), siehe `synergies.ts`. */
@@ -316,20 +316,21 @@ export function playCard(
   if (cardId === undefined) return reject(state, 'no-such-card');
   const def = getCardDef(cardId);
   if (current.energy < def.cost) return reject(state, 'not-enough-energy');
-  let summonSlot = 0;
+  let summonSlots: number[] = [];
   if (def.target === 'line') {
     if (lineIndex === undefined || !isLaneUnlocked(current.level, lineIndex)) return reject(state, 'invalid-line');
     const towers = current.lines[lineIndex]!.towers;
     if (def.type === 'summon') {
-      if (slot === undefined) {
-        const free = firstFreeSlot(current.minions, lineIndex, towers);
-        if (free === undefined) return reject(state, 'line-full');
-        summonSlot = free;
-      } else {
+      const count = summonCount(cardId, state.round);
+      const free = freeSlots(current.minions, lineIndex, towers);
+      if (slot !== undefined) {
         if (!isValidSlot(towers, slot)) return reject(state, 'invalid-slot');
         if (!isSlotFree(current.minions, lineIndex, slot)) return reject(state, 'slot-taken');
-        summonSlot = slot;
       }
+      // Bis zu `count` Slots: der gewünschte zuerst, dann die niedrigsten freien. Reicht der Platz nicht, wird auf die
+      // freien Slots begrenzt; ist keiner frei, wird abgelehnt.
+      if (free.length === 0) return reject(state, 'line-full');
+      summonSlots = slot === undefined ? free.slice(0, count) : [slot, ...free.filter((s) => s !== slot)].slice(0, count);
     }
     if (def.type === 'lane-card') {
       if (!towers.some((tower) => tower.hp > 0)) return reject(state, 'invalid-line');
@@ -374,24 +375,26 @@ export function playCard(
       specializeTarget(line!.towers)!.specialization = def.path;
       break;
     case 'summon': {
-      const minion: Minion = {
-        id: player.nextMinionId,
-        line: lineIndex!,
-        position: slotPosition(line!.towers, summonSlot),
-        slot: summonSlot,
-        hp: def.hp + line!.bonus.hp,
-        damage: def.damage + line!.bonus.damage,
-        range: def.range ?? MINION_RANGE,
-        speed: def.speed ?? MINION_SPEED,
-        maxHp: def.hp + line!.bonus.hp,
-        ...(def.role === 'healer' ? { heals: true } : {}),
-        ...(def.explodes ? { explodes: { ...def.explodes } } : {}),
-      };
-      player.nextMinionId += 1;
-      player.minions.push(minion);
-      player.placements.push({ minionId: minion.id, cardId });
-      played.minionId = minion.id;
-      if (playerIndex === STATS_PLAYER) recordSummon(next.stats, minion.id, cardId, minion.line);
+      for (const summonSlot of summonSlots) {
+        const minion: Minion = {
+          id: player.nextMinionId,
+          line: lineIndex!,
+          position: slotPosition(line!.towers, summonSlot),
+          slot: summonSlot,
+          hp: def.hp + line!.bonus.hp,
+          damage: def.damage + line!.bonus.damage,
+          range: def.range ?? MINION_RANGE,
+          speed: def.speed ?? MINION_SPEED,
+          maxHp: def.hp + line!.bonus.hp,
+          ...(def.role === 'healer' ? { heals: true } : {}),
+          ...(def.explodes ? { explodes: { ...def.explodes } } : {}),
+        };
+        player.nextMinionId += 1;
+        player.minions.push(minion);
+        player.placements.push({ minionId: minion.id, cardId, group: played.minionId ?? minion.id });
+        played.minionId ??= minion.id;
+        if (playerIndex === STATS_PLAYER) recordSummon(next.stats, minion.id, cardId, minion.line);
+      }
       break;
     }
     case 'minion-upgrade':
@@ -475,12 +478,13 @@ export function undoSummon(state: MatchState, playerIndex: PlayerIndex, minionId
   if (!placement) return reject(state, 'no-such-minion');
   const next = structuredClone(state);
   const player = next.players[playerIndex];
+  const ids = new Set(player.placements.filter((p) => p.group === placement.group).map((p) => p.minionId));
   if (playerIndex === STATS_PLAYER) {
-    recordUndo(next.stats, minionId, player.minions.find((m) => m.id === minionId)!.line);
+    for (const m of player.minions) if (ids.has(m.id)) recordUndo(next.stats, m.id, m.line);
   }
-  player.minions = player.minions.filter((m) => m.id !== minionId);
-  player.placements = player.placements.filter((p) => p.minionId !== minionId);
-  player.played = player.played.filter((p) => p.minionId !== minionId);
+  player.minions = player.minions.filter((m) => !ids.has(m.id));
+  player.placements = player.placements.filter((p) => !ids.has(p.minionId));
+  player.played = player.played.filter((p) => p.minionId === undefined || !ids.has(p.minionId));
   refreshSynergies(player);
   player.energy += getCardDef(placement.cardId).cost;
   player.hand.push(placement.cardId);
@@ -519,6 +523,11 @@ export function hpOutcome(state: MatchState): Outcome {
   return hp0 > hp1 ? 'player0' : 'player1';
 }
 
+/** Lebt noch ein Minion irgendeines Spielers? Ohne Minions endet die Kampfphase sofort. */
+export function anyMinionAlive(state: MatchState): boolean {
+  return state.players.some((player) => player.minions.some((m) => m.hp > 0));
+}
+
 function finish(state: MatchState, outcome: Outcome): void {
   state.phase = 'over';
   state.outcome = outcome;
@@ -544,7 +553,7 @@ export function advance(state: MatchState, deltaMs: number): MatchState {
     const destroyed = destroyedOutcome(next);
     if (destroyed) {
       finish(next, destroyed);
-    } else if (next.combatTicks >= COMBAT_TICKS) {
+    } else if (next.combatTicks >= COMBAT_TICKS || !anyMinionAlive(next)) {
       if (next.round >= MAX_ROUNDS) finish(next, hpOutcome(next));
       else startRound(next, next.round + 1);
     }
