@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   combatTick,
   type CombatPlayer,
+  explosionVictims,
   LINE_LENGTH,
   MINION_RANGE,
   MINION_SPEED,
@@ -447,5 +448,169 @@ describe('Mehrere Tower auf einer Lane', () => {
     for (let tick = 0; tick < 40; tick += 1) combatTick(players);
     expect(players[0].minions[0]!.position).toBe(LINE_LENGTH);
     expect(totalTowerHp(players[1])).toBe(300);
+  });
+});
+
+describe('Zerstörer', () => {
+  const BLAST = { radius: 10, damage: 15 };
+  /** Zerstörer; Tempo 0, damit die Positionen im Test fest bleiben. */
+  const destroyer = (id: number, line: number, position: number, hp = 40, damage = 8) => ({
+    ...minion(id, line, position, hp, damage, 0),
+    explodes: { ...BLAST },
+  });
+  /** Ruhiger Gegner ohne Schaden und Tempo. */
+  const dummy = (id: number, line: number, position: number, hp = 100) => minion(id, line, position, hp, 0, 0);
+  const setup = (own: ReturnType<typeof minion>[], foes: ReturnType<typeof minion>[], towerDamage = 0) => {
+    const players: [CombatPlayer, CombatPlayer] = [player(100, towerDamage), player(100, towerDamage)];
+    players[0].minions.push(...own);
+    players[1].minions.push(...foes);
+    return players;
+  };
+  const hpOf = (p: CombatPlayer, id: number) => p.minions.find((m) => m.id === id)?.hp;
+
+  describe('explosionVictims', () => {
+    const boom = destroyer(1, 0, 50);
+
+    it('trifft lebende Gegner derselben Lane bis genau zum Radius', () => {
+      const foes = [dummy(2, 0, 50), dummy(3, 0, 58), dummy(4, 0, 60), dummy(5, 0, 41), dummy(6, 0, 40)];
+      // Abstand 0, 8, 10, 9 (hinter dem Zerstörer) und 10; Position 61 wäre bei 11.
+      expect(explosionVictims(boom, foes)).toEqual([0, 1, 2, 3, 4]);
+      expect(explosionVictims(boom, [dummy(7, 0, 61), dummy(8, 0, 39)])).toEqual([]);
+    });
+
+    it('lässt andere Lanes und Gefallene aus und trifft ohne explodes nichts', () => {
+      const foes = [dummy(2, 1, 50), { ...dummy(3, 0, 50), hp: 0 }, dummy(4, 0, 50)];
+      expect(explosionVictims(boom, foes)).toEqual([2]);
+      expect(explosionVictims(minion(9, 0, 50), foes)).toEqual([]);
+    });
+  });
+
+  it('verändert Minions ohne explodes nicht: ein gestorbener Nahkämpfer richtet keinen Flächenschaden an', () => {
+    // Gegner hinter dem Gegenüber (Position < 50) stehen ausser Reichweite, aber im Radius einer Explosion.
+    const players = setup([minion(1, 0, 50, 1, 8, 0)], [minion(2, 0, 50, 100, 6, 0), dummy(3, 0, 42)]);
+    combatTick(players, 1);
+    expect(players[0].minions).toHaveLength(0);
+    expect(hpOf(players[1], 3)).toBe(100);
+    expect(hpOf(players[1], 2)).toBe(92);
+  });
+
+  it('trifft beim Tod jeden gegnerischen Minion im Radius einmalig mit dem Explosionsschaden', () => {
+    const players = setup(
+      [destroyer(1, 0, 50, 1), dummy(10, 0, 50)],
+      // Abstand zur Todesposition (x = 50): 8, 10, 11; Minion 6 steht auf einer anderen Lane.
+      [minion(2, 0, 50, 100, 6, 0), dummy(3, 0, 42), dummy(4, 0, 40), dummy(5, 0, 39), dummy(6, 1, 50)],
+    );
+    combatTick(players, 1);
+    expect(players[0].minions.map((m) => m.id)).toEqual([10]);
+    // Der Angreifer verliert 8 aus dem Kampf und 15 durch die Explosion.
+    expect(hpOf(players[1], 2)).toBe(100 - 8 - 15);
+    expect(hpOf(players[1], 3)).toBe(85);
+    expect(hpOf(players[1], 4)).toBe(85);
+    expect(hpOf(players[1], 5)).toBe(100); // ausserhalb des Radius
+    expect(hpOf(players[1], 6)).toBe(100); // andere Lane
+    expect(hpOf(players[0], 10)).toBe(100); // eigener Minion
+  });
+
+  it('explodiert nicht, solange der Zerstörer den Tick überlebt', () => {
+    const players = setup([destroyer(1, 0, 50, 40)], [minion(2, 0, 50, 100, 6, 0), dummy(3, 0, 42)]);
+    combatTick(players, 1);
+    expect(hpOf(players[0], 1)).toBe(34);
+    expect(hpOf(players[1], 3)).toBe(100);
+    expect(hpOf(players[1], 2)).toBe(92);
+  });
+
+  it('explodiert nur einmal, auch wenn der tote Zerstörer in späteren Ticks nicht mehr existiert', () => {
+    const players = setup([destroyer(1, 0, 50, 1)], [minion(2, 0, 50, 100, 6, 0), dummy(3, 0, 42)]);
+    combatTick(players, 1);
+    combatTick(players, 1);
+    expect(hpOf(players[1], 3)).toBe(85);
+  });
+
+  it('der Schaden hängt nicht von delta ab', () => {
+    const small = setup([destroyer(1, 0, 50, 1)], [dummy(2, 0, 42), minion(3, 0, 50, 100, 600, 0)]);
+    const large = setup([destroyer(1, 0, 50, 1)], [dummy(2, 0, 42), minion(3, 0, 50, 100, 600, 0)]);
+    combatTick(small, 0.05);
+    combatTick(large, 1);
+    expect(hpOf(small[1], 2)).toBe(85);
+    expect(hpOf(large[1], 2)).toBe(85);
+  });
+
+  it('explodiert auch, wenn ein Tower ihn tötet', () => {
+    // Der Zerstörer von Spieler 0 steht bei 85, 15 vor dem gegnerischen Tower (Reichweite 20); der Gegner bei 10 ist 5 entfernt.
+    const players = setup([destroyer(1, 0, 85, 40)], [dummy(2, 0, 10)], 100);
+    combatTick(players, 1);
+    expect(players[0].minions).toHaveLength(0);
+    expect(hpOf(players[1], 2)).toBe(85);
+  });
+
+  it('trifft von beiden Seiten gleichzeitig: sich gegenseitig tötende Zerstörer treffen nur Unbeteiligte', () => {
+    const players = setup(
+      [destroyer(1, 0, 50, 1), dummy(10, 0, 45)],
+      [destroyer(2, 0, 50, 1), dummy(11, 0, 45)],
+    );
+    combatTick(players, 1);
+    expect(players[0].minions.map((m) => m.id)).toEqual([10]);
+    expect(players[1].minions.map((m) => m.id)).toEqual([11]);
+    expect(hpOf(players[0], 10)).toBe(85);
+    expect(hpOf(players[1], 11)).toBe(85);
+  });
+
+  it('löst eine Kettenreaktion im selben Tick aus und endet', () => {
+    // Zerstörer 1 fällt im Kampf mit Gegner 2 (Zerstörer, Rest-HP 2). Seine Explosion tötet 2 und 4; deren Explosionen
+    // töten 3 und 5; Gegner 21 steht im Radius aller drei Zerstörer, die danach explodieren, und überlebt mit 55 HP.
+    const players = setup(
+      [destroyer(1, 0, 50, 1, 0), destroyer(3, 0, 45, 10, 0), destroyer(5, 0, 40, 10, 0), dummy(20, 0, 20)],
+      [destroyer(2, 0, 50, 10), destroyer(4, 0, 58, 10, 0), dummy(21, 0, 60)],
+    );
+    combatTick(players, 1);
+    expect(players[0].minions.map((m) => m.id)).toEqual([20]);
+    expect(players[1].minions.map((m) => m.id)).toEqual([21]);
+    expect(hpOf(players[1], 21)).toBe(55);
+  });
+
+  it('beendet auch eine grosse Kette nach endlich vielen Wellen, jeder Zerstörer explodiert genau einmal', () => {
+    // Der Angreifer 100 tötet nur Zerstörer 1; dessen Explosion tötet alle Gegner-Zerstörer, deren Explosionen die
+    // übrigen eigenen, deren Explosionen treffen den Angreifer. Zehn Zerstörer ergeben also zehn Treffer à 15.
+    const own = Array.from({ length: 10 }, (_, i) => destroyer(i + 1, 0, 50 - (i % 3), i === 0 ? 1 : 10, 0));
+    own[0]!.position = 50;
+    const foes = [
+      minion(100, 0, 50, 1000, 100, 0),
+      ...Array.from({ length: 10 }, (_, i) => destroyer(i + 101, 0, 45, 10, 0)),
+    ];
+    const players = setup(own, foes);
+    combatTick(players, 1);
+    expect(players[0].minions).toHaveLength(0);
+    expect(players[1].minions.map((m) => m.id)).toEqual([100]);
+    expect(hpOf(players[1], 100)).toBe(1000 - 10 * 15);
+  });
+
+  it('meldet den Explosionsschaden dem Zerstörer, gedeckelt auf die Rest-HP des Opfers', () => {
+    const players = setup([destroyer(1, 0, 50, 1)], [minion(2, 0, 50, 100, 6, 0), dummy(3, 0, 42, 100), dummy(4, 0, 40, 4)]);
+    const calls: [number, number, string, number][] = [];
+    combatTick(players, 1, (side, id, kind, amount) => void calls.push([side, id, kind, amount]));
+    const blast = calls.filter((c) => c[0] === 0 && c[1] === 1);
+    // Kampfschaden 8 an Minion 2, Explosion 15 an Minion 2, 15 an Minion 3 und nur 4 (Rest-HP) an Minion 4.
+    expect(blast.map((c) => c[3]).sort((a, b) => a - b)).toEqual([4, 8, 15, 15]);
+    expect(calls.every((c) => c[2] === 'minion')).toBe(true);
+  });
+
+  it('teilt den Schaden mehrerer Explosionen auf ein Opfer mit knappen HP anteilig auf', () => {
+    // Zwei Zerstörer ohne HP explodieren gleichzeitig auf ein Opfer mit 10 HP: 30 Schaden, je Meldung nur 5.
+    const players = setup([destroyer(1, 0, 50, 0, 0), destroyer(3, 0, 50, 0, 0)], [dummy(4, 0, 45, 10)]);
+    const calls: [number, number, string, number][] = [];
+    combatTick(players, 1, (side, id, kind, amount) => void calls.push([side, id, kind, amount]));
+    expect(calls).toHaveLength(2);
+    for (const call of calls) expect(call[3]).toBeCloseTo(5, 9);
+    expect(players[1].minions).toHaveLength(0);
+  });
+
+  it('liefert mit und ohne Sammler dasselbe Ergebnis', () => {
+    const build = () =>
+      setup([destroyer(1, 0, 50, 1), dummy(10, 0, 45)], [destroyer(2, 0, 50, 5), dummy(11, 0, 45)]);
+    const plain = build();
+    const counted = build();
+    combatTick(plain, 1);
+    combatTick(counted, 1, () => {});
+    expect(counted).toEqual(plain);
   });
 });

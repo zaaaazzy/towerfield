@@ -35,6 +35,7 @@ export const CARD_ART_IDS: readonly string[] = [
   'summon-brute',
   'summon-archer',
   'summon-healer',
+  'summon-destroyer',
   'line-upgrade',
   'tower-hp',
   'tower-damage',
@@ -71,6 +72,7 @@ export function describeCard(def: CardDef): string {
     case 'minion-upgrade':
       return `${def.scope === 'all' ? 'Alle' : 'Lane'}: +${def.hp} Leben\n+${def.damage} Schaden`;
     case 'summon':
+      if (def.explodes) return `${def.damage} Schaden · ${def.hp} Leben\nTod: ${def.explodes.damage} Fläche`;
       return def.role === 'healer'
         ? `Heilt ${def.damage}/s\n${def.hp} Leben`
         : `${def.damage} ${def.range && def.range > MINION_RANGE ? 'Fernschaden' : 'Schaden'}\n${def.hp} Leben`;

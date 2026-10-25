@@ -528,6 +528,42 @@ describe('Karten ausspielen', () => {
     expect(other!.maxHp).toBe(other!.hp);
   });
 
+  it('gibt nur dem Zerstörer das Explosions-Merkmal, als eigene Kopie der Kartenwerte', () => {
+    let state = withHand(createMatch(1), ['summon-destroyer', 'summon-minion'], 20);
+    for (const id of ['summon-destroyer', 'summon-minion']) {
+      const result = playCard(state, 0, find(state, 0, id), 0);
+      if (!result.ok) throw new Error(result.reason);
+      state = result.state;
+    }
+    const [destroyer, other] = state.players[0].minions;
+    expect(destroyer!.explodes).toEqual({ radius: 10, damage: 15 });
+    expect(destroyer!.explodes).not.toBe((getCardDef('summon-destroyer') as { explodes: object }).explodes);
+    expect(destroyer).toMatchObject({ hp: 40, damage: 8, speed: 8, range: 4 });
+    expect(destroyer!.heals).toBeUndefined();
+    expect(other!.explodes).toBeUndefined();
+  });
+
+  it('rechnet den Explosionsschaden in der Statistik dem Zerstörer zu', () => {
+    let state = withHand(createMatch(1), ['summon-destroyer'], 20);
+    const result = playCard(state, 0, 0, 0);
+    if (!result.ok) throw new Error(result.reason);
+    state = result.state;
+    const destroyer = state.players[0].minions[0]!;
+    destroyer.position = 50;
+    destroyer.hp = 0.2; // fällt im ersten Tick (Gegner macht 0,3)
+    destroyer.maxHp = 0.2;
+    state.players[1].minions.push({ id: 900, line: 0, position: 50, hp: 100, damage: 6, range: 4, speed: 0 });
+    state.players[1].minions.push({ id: 901, line: 0, position: 42, hp: 100, damage: 0, range: 4, speed: 0 });
+    state.phase = 'combat';
+    state.ready = [true, true];
+    const after = advance(state, 50);
+    expect(after.players[0].minions).toHaveLength(0);
+    expect(after.players[1].minions.find((m) => m.id === 901)!.hp).toBe(85);
+    // Kampfschaden 0,4 an Minion 900 plus Explosion: 15 auf 900 und 15 auf 901.
+    expect(after.stats.damage['summon-destroyer']!.minionDamage).toBeCloseTo(0.4 + 30, 6);
+    expect(after.stats.damage['summon-destroyer']!.towerDamage).toBe(0);
+  });
+
   it('wirkt „Minion verbessern“ je nach Umfang auf eine oder alle Lanes', () => {
     const base = withLevel(withHand(createMatch(1), ['minion-upgrade-line', 'minion-upgrade-all'], 10), 2);
     const one = playCard(base, 0, 0, 2);

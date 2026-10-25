@@ -22,6 +22,13 @@ describe('minionShape', () => {
     expect(minionShape({ range: 4 })).toBe('melee');
     expect(minionShape({ range: 14 })).toBe('ranged');
     expect(minionShape({ range: 10, heals: true })).toBe('healer');
+    expect(minionShape({ range: 4, explodes: { radius: 10, damage: 15 } })).toBe('destroyer');
+  });
+
+  it('erkennt den Zerstörer unabhängig von seiner Reichweite und lässt den Heiler Vorrang', () => {
+    const explodes = { radius: 10, damage: 15 };
+    expect(minionShape({ range: 14, explodes })).toBe('destroyer');
+    expect(minionShape({ range: 10, heals: true, explodes })).toBe('healer');
   });
 });
 

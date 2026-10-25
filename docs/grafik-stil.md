@@ -35,7 +35,7 @@ Georgia/Palatino (Serife), Fließtext in Trebuchet/Segoe UI/Verdana.
 - `theme.ts`: Palette, Schriften, Farbverlauf (`fillGradient`), Rahmen-Panel (`drawPanel`), Balken (`drawBar`), Knopf (`drawButton`).
 - `textures.ts`: erzeugt den Hintergrund (Verlauf, Boden, Wege, Holztisch, Vignette) und Partikeltexturen zur Laufzeit per Canvas-Textur. Das Muster nutzt einen festen eigenen Zeichen-Zufall, nicht den Spiel-Seed.
 - `card-view.ts`: Handkarte mit Rahmen, Kopfzeile (Name), Kosten-Kristall, Bildfläche mit Typ-Symbol, Textfeld und Typ-Banner. Hover und Auswahl heben die Karte an (Skalierung bis 110 %, Schatten, Leuchten; Gold bei Auswahl, Typfarbe bei Hover).
-- `field-view.ts`: Tower (Mauerwerk, Wimpel und Schild in Teamfarbe, Schatten, Bodenschein), Minions (Schatten, Leuchten, Form nach Rolle: Kreis, Raute für Fernkämpfer, Kreuz für Heiler, Größe nach Leben, Lebensbalken bei Schaden) und Bauplätze.
+- `field-view.ts`: Tower (Mauerwerk, Wimpel und Schild in Teamfarbe, Schatten, Bodenschein), Minions (Schatten, Leuchten, Form nach Rolle: Kreis, Raute für Fernkämpfer, Kreuz für Heiler, Stachelkugel mit Zündschnur für Zerstörer, Größe nach Leben, Lebensbalken bei Schaden) und Bauplätze.
 - `effects.ts`: Partikel und Leuchtringe für Treffer, Tod, Beschwörung und fallende Tower, Kamerawackeln beim Tower-Fall, aufsteigende Schadenszahlen (Schaden je Ziel gesammelt, höchstens 20 Zahlen und 150 lebende Partikel je Emitter gleichzeitig), kurze Animation beim Ausspielen einer Karte.
 - `src/logic/fx-events.ts`: reine Funktion `diffFx`, die aus zwei Spielzuständen die Effekt-Ereignisse ableitet (mit Test).
 - `src/logic/card-style.ts`: Kartentyp-Stil und Kurztext (`describeCard`) aus den Kartenwerten (mit Test).

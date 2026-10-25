@@ -2,10 +2,10 @@
  * Reine Entscheidungen für das Aussehen der Minions: Form nach Rolle, Größe nach Max-HP, Blickrichtung, Wippen beim
  * Laufen und Trefferblitz. Ohne Phaser; die Szene (`field-view.ts`) zeichnet nur. Zeit kommt immer aus `delta`.
  */
-import { MINION_RANGE } from './combat';
+import { type Explosion, MINION_RANGE } from './combat';
 import type { FxEvent } from './fx-events';
 
-export type MinionShape = 'melee' | 'ranged' | 'healer';
+export type MinionShape = 'melee' | 'ranged' | 'healer' | 'destroyer';
 
 /** Kleinster und größter gezeichneter Radius in Spielpixeln. */
 export const MIN_RADIUS = 6;
@@ -20,9 +20,10 @@ export const FLASH_MS = 180;
 export const BOB_PERIOD_MS = 360;
 export const BOB_AMPLITUDE = 1.4;
 
-/** Heiler zuerst, danach Reichweite über der Nahkampf-Reichweite = Fernkämpfer, sonst Nahkämpfer. */
-export function minionShape(minion: { heals?: boolean; range: number }): MinionShape {
+/** Heiler zuerst, dann Zerstörer (hat `explodes`), danach Reichweite über der Nahkampf-Reichweite = Fernkämpfer, sonst Nahkämpfer. */
+export function minionShape(minion: { heals?: boolean; explodes?: Explosion; range: number }): MinionShape {
   if (minion.heals) return 'healer';
+  if (minion.explodes) return 'destroyer';
   return minion.range > MINION_RANGE ? 'ranged' : 'melee';
 }
 

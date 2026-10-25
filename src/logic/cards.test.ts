@@ -58,6 +58,27 @@ describe('Karten', () => {
     expect(buildDeck(3, 34)).toEqual(buildDeck(3, 34));
   });
 
+  it('definiert den Zerstörer als Summon-Karte mit Rolle destroyer und Explosionswerten', () => {
+    expect(getCardDef('summon-destroyer')).toMatchObject({
+      name: 'Zerstörer',
+      type: 'summon',
+      target: 'line',
+      cost: 2,
+      hp: 40,
+      damage: 8,
+      speed: 8,
+      role: 'destroyer',
+      explodes: { radius: 10, damage: 15 },
+    });
+  });
+
+  it('legt den Zerstörer einmal pro Durchgang ins Deck, deterministisch pro Seed', () => {
+    // Ein Durchgang des Decks hat 17 Karten.
+    expect(buildDeck(2, 17).filter((id) => id === 'summon-destroyer')).toHaveLength(1);
+    expect(buildDeck(3, 34).filter((id) => id === 'summon-destroyer')).toHaveLength(2);
+    expect(buildDeck(3, 34)).toEqual(buildDeck(3, 34));
+  });
+
   it('wirft bei einer unbekannten Karte', () => {
     expect(() => getCardDef('gibt-es-nicht')).toThrow();
   });

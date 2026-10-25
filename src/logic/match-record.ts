@@ -3,8 +3,8 @@
  * zurücknehmen, bereit) samt Runde, dazu ein kompaktes URL-Format und das Nachspielen mit Prüfung.
  * Ohne Phaser, DOM und Canvas. Die Regeln kommen unverändert aus `match.ts`; hier wird nur mitgeschrieben.
  *
- * Format (Version 2, nur Zeichen `0-9 a-z . -`, damit nichts maskiert werden muss):
- *   `v2` gefolgt von Aktionen, je mit `.` davor. Eine Aktion beginnt mit Typbuchstabe, Runde (1 Ziffer) und Spieler
+ * Format (Version 3, nur Zeichen `0-9 a-z . -`, damit nichts maskiert werden muss):
+ *   `v3` gefolgt von Aktionen, je mit `.` davor. Eine Aktion beginnt mit Typbuchstabe, Runde (1 Ziffer) und Spieler
  *   (0/1), danach Felder mit `-`:
  *   `p<R><P>-<Kartenindex>[-<Lane>]` Karte spielen · `m<R><P>-<Minion>-<Lane>-<Slot>` verschieben ·
  *   `u<R><P>-<Minion>` zurücknehmen · `r<R><P>` bereit.
@@ -29,8 +29,11 @@ import {
   undoSummon,
 } from './match';
 
-/** Version 2: horizontales Lane-Layout (Lane-Indizes 0 bis 4, `line-upgrade` ohne Ziel); Links aus Version 1 gelten nicht mehr. */
-export const RECORD_VERSION = 2;
+/**
+ * Version 3: neue Karte `summon-destroyer` (verschiebt Kartenindizes und das gemischte Deck). Version 2 brachte das
+ * horizontale Lane-Layout. Links aus Version 1 und 2 gelten nicht mehr, weil sie sonst ein anderes Match abspielten.
+ */
+export const RECORD_VERSION = 3;
 /** Obergrenze für Länge und Aktionszahl beim Dekodieren; ein Match mit 8 Runden bleibt weit darunter. */
 export const MAX_MOVES_LENGTH = 4000;
 const MAX_ACTIONS = 800;
