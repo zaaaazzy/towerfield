@@ -126,6 +126,34 @@ test('das Feld startet mit einer Lane; „Lane +1“ schaltet je eine Lane oben 
   expect(errors).toEqual([]);
 });
 
+test('Bogenschütze und „Lane +1“ auf derselben Line zeigen die Synergie an der Lane, Spielen und Zustand bleiben bedienbar', async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await openGame(page);
+  await page.evaluate(() => {
+    const scene = window.game!.scene.getScene('main') as unknown as { state: { players: { hand: string[]; energy: number }[] } };
+    scene.state.players[0]!.hand = ['summon-archer', 'line-upgrade'];
+    scene.state.players[0]!.energy = 10;
+  });
+  const label = 'Fernkampf-Ausbau · Reichweite +2';
+  expect(await hasVisibleText(page, label)).toBe(false);
+
+  await tapCard(page, 0);
+  await tapLine(page, 0);
+  await expect.poll(async () => (await readState(page)).players[0].minions.length).toBe(1);
+  expect(await hasVisibleText(page, label)).toBe(false);
+
+  await tapCard(page, 0);
+  await expect.poll(async () => (await readState(page)).players[0].synergies.length).toBe(1);
+  await expect.poll(() => hasVisibleText(page, label)).toBe(true);
+  const player = (await readState(page)).players[0];
+  expect(player.minions[0]).toMatchObject({ rangeBonus: 2 });
+  expect(player.lines[0]!.bonus).toEqual({ hp: 0, damage: 0 });
+
+  expect(errors).toEqual([]);
+});
+
 test('eine nicht bezahlbare Karte auf eine Line zu spielen ändert den Zustand nicht', async ({ page }) => {
   const errors = collectErrors(page);
   await openGame(page);
