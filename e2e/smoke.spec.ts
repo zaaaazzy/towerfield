@@ -93,7 +93,7 @@ test('Dev-Szene balance: zeigt den Bericht, simuliert neu und kehrt zurück, ohn
     page.evaluate(() => (window.game!.scene.getScene('balance') as unknown as BalanceSceneView).current);
   await expect.poll(report, { timeout: 20_000 }).not.toBeNull();
   const first = (await report())!;
-  expect(first.totalMatches).toBe(200);
+  expect(first.totalMatches).toBe(1000);
   expect(first.cards.length).toBeGreaterThan(0);
 
   const box = (await page.locator('#game canvas').boundingBox())!;
@@ -102,7 +102,7 @@ test('Dev-Szene balance: zeigt den Bericht, simuliert neu und kehrt zurück, ohn
 
   // „Neu simulieren“: anderer Seed-Bereich.
   await click(90, 612);
-  await expect.poll(async () => (await report())?.startSeed, { timeout: 20_000 }).toBe(first.startSeed + 200);
+  await expect.poll(async () => (await report())?.startSeed, { timeout: 20_000 }).toBe(first.startSeed + 1000);
 
   // „Zurück“ startet die main-Szene.
   await click(270, 612);
