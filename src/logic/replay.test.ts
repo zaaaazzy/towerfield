@@ -2,12 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { simulateMatch, strategiesForSeed } from './balance-sim';
 import { CARD_DEFS } from './cards';
 import { advance } from './match';
+import { decodeMatch, encodeMatch, type RecordedAction, type RecordedMatch } from './match-record';
+import { playScriptedMatch } from './match-record-fixture';
 import {
   combatDelta,
+  createInvalidReplay,
+  createRecordedReplay,
   createReplay,
+  describeAbort,
   describeEvent,
+  isReplayAborted,
   isReplayOver,
   PLAY_PAUSE_MS,
+  type ReplayAbortReason,
   type ReplayEvent,
   type ReplayState,
   SLOWMO_FACTOR,
@@ -108,6 +115,107 @@ describe('Replay-Logik', () => {
     expect(stepReplay(replay, 1000)).toBe(replay);
     const fresh = createReplay(3);
     expect(stepReplay(fresh, 0)).toBe(fresh);
+  });
+});
+
+describe('Replay einer Aufzeichnung', () => {
+  function runRecorded(record: RecordedMatch): ReplayState {
+    let replay = createRecordedReplay(record);
+    for (let steps = 0; steps < MAX_STEPS && !isReplayOver(replay) && !isReplayAborted(replay); steps += 1) {
+      replay = stepReplay(replay, FRAME_MS);
+    }
+    return replay;
+  }
+
+  it('endet mit demselben MatchState wie das Original und zeigt die Züge in der gespielten Reihenfolge', () => {
+    for (const seed of [1, 42]) {
+      const original = playScriptedMatch(seed);
+      const decoded = decodeMatch(seed, encodeMatch(original.record))!;
+      const replay = runRecorded(decoded);
+      expect(replay.aborted).toBeNull();
+      expect(replay.match).toEqual(original.state);
+      expect(replay.events).toHaveLength(original.record.actions.length);
+      replay.events.forEach((event, index) => {
+        const action = original.record.actions[index]!;
+        expect(event.round).toBe(action.round);
+        expect(event.player).toBe(action.player);
+        expect(event.action ?? 'play').toBe(action.type);
+      });
+    }
+  });
+
+  it('führt höchstens eine Aktion pro Pause aus und bleibt reproduzierbar', () => {
+    const { record } = playScriptedMatch(5);
+    const start = createRecordedReplay(record);
+    expect(stepReplay(start, PLAY_PAUSE_MS - 1).events).toHaveLength(0);
+    expect(stepReplay(start, PLAY_PAUSE_MS).events).toHaveLength(1);
+    expect(stepReplay(start, PLAY_PAUSE_MS * 3).events).toHaveLength(3);
+    expect(runRecorded(record).match).toEqual(runRecorded(record).match);
+  });
+
+  it('bricht an einer regelwidrigen Aktion kontrolliert ab und bleibt dort stehen', () => {
+    const { record } = playScriptedMatch(5);
+    // Dieselbe Karte achtmal: spätestens dann fehlt die Karte auf der Hand oder die Energie.
+    const bad: RecordedAction = { type: 'play', round: 1, player: 1, cardId: 'summon-healer', line: 0 };
+    const replay = runRecorded({ ...record, actions: [...record.actions.slice(0, 2), ...Array(8).fill(bad)] });
+    expect(replay.aborted).not.toBeNull();
+    expect(replay.aborted!.index).toBeGreaterThanOrEqual(2);
+    expect(describeAbort(replay.aborted!)).toContain('Replay abgebrochen bei Zug');
+    expect(stepReplay(replay, 1000)).toBe(replay);
+  });
+
+  it('bricht ab, wenn die Aufzeichnung vor dem Spielende endet oder danach weitergeht', () => {
+    const { record } = playScriptedMatch(5);
+    expect(runRecorded({ ...record, actions: record.actions.slice(0, -1) }).aborted?.reason).toBe('truncated');
+    const trailing = runRecorded({ ...record, actions: [...record.actions, { type: 'ready', round: 8, player: 0 }] });
+    expect(trailing.aborted?.reason).toBe('trailing-actions');
+    expect(trailing.match.phase).toBe('over');
+  });
+
+  it('createInvalidReplay steht sofort mit invalid-data und läuft nicht', () => {
+    const replay = createInvalidReplay(7);
+    expect(replay.aborted).toEqual({ reason: 'invalid-data', index: 0 });
+    expect(stepReplay(replay, 5000)).toBe(replay);
+    expect(describeAbort(replay.aborted!)).toContain('ungültig');
+  });
+
+  it('lässt das Bot-Replay unverändert: kein Skript, kein Abbruch', () => {
+    const replay = runReplay(7).replay;
+    expect(replay.script).toBeNull();
+    expect(replay.aborted).toBeNull();
+    expect(replay.events.every((event) => event.action === undefined)).toBe(true);
+  });
+});
+
+describe('describeEvent für Aufzeichnungen', () => {
+  const base = { round: 3, player: 0 as const };
+
+  it('beschreibt Verschieben, Zurücknehmen und Bereit mit Spieler und Runde', () => {
+    const move = describeEvent({ ...base, action: 'move', cardId: 'summon-archer', line: 1, slot: 2 });
+    expect(move).toBe('Runde 3 · Blau verschiebt Bogenschütze auf Line 2, Platz 3');
+    const undo = describeEvent({ ...base, player: 1, action: 'undo', cardId: 'summon-minion', line: null });
+    expect(undo).toBe('Runde 3 · Orange nimmt Minion zurück');
+    expect(describeEvent({ ...base, action: 'ready', cardId: '', line: null })).toBe('Runde 3 · Blau ist bereit');
+  });
+
+  it('gibt für jeden Abbruchgrund einen Hinweis aus', () => {
+    const reasons: ReplayAbortReason[] = [
+      'invalid-data',
+      'truncated',
+      'trailing-actions',
+      'wrong-round',
+      'not-planning',
+      'already-ready',
+      'no-such-card',
+      'not-enough-energy',
+      'invalid-line',
+      'invalid-slot',
+      'slot-taken',
+      'no-such-minion',
+      'line-full',
+      'max-level',
+    ];
+    for (const reason of reasons) expect(describeAbort({ reason, index: 4 }).length).toBeGreaterThan(10);
   });
 });
 

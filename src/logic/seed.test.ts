@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseReplaySeed, parseSeed } from './seed';
+import { parseReplayMoves, parseReplaySeed, parseSeed } from './seed';
 
 describe('parseReplaySeed', () => {
   it('liest den Parameter replay', () => {
@@ -15,6 +15,19 @@ describe('parseReplaySeed', () => {
     expect(parseReplaySeed('?replay=-3')).toBeNull();
     expect(parseReplaySeed('?replay=1234567890123456')).toBeNull();
     expect(parseReplaySeed('?seed=42')).toBeNull();
+  });
+});
+
+describe('parseReplayMoves', () => {
+  it('liefert den rohen Wert des Parameters moves', () => {
+    expect(parseReplayMoves('?replay=42&moves=v1.p10-3-1.r10')).toBe('v1.p10-3-1.r10');
+    expect(parseReplayMoves('?moves=abc&replay=1')).toBe('abc');
+  });
+
+  it('gibt null zurück, wenn der Parameter fehlt, und einen leeren Text bei leerem Wert', () => {
+    expect(parseReplayMoves('')).toBeNull();
+    expect(parseReplayMoves('?replay=42')).toBeNull();
+    expect(parseReplayMoves('?replay=42&moves=')).toBe('');
   });
 });
 
