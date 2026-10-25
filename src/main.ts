@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { parseReplaySeed } from './logic/seed';
 import { MainScene, VIEW } from './scenes/main-scene';
 import { ReplayScene } from './scenes/replay-scene';
+import { PAGE_BACKGROUND } from './scenes/theme';
 
 function startGame(scenes: Phaser.Types.Scenes.SceneType[]): Phaser.Game {
   return new Phaser.Game({
@@ -9,7 +10,7 @@ function startGame(scenes: Phaser.Types.Scenes.SceneType[]): Phaser.Game {
     parent: 'game',
     width: VIEW.width,
     height: VIEW.height,
-    backgroundColor: '#10141f',
+    backgroundColor: PAGE_BACKGROUND,
     scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
     scene: scenes,
   });

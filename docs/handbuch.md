@@ -1,7 +1,7 @@
 # TowerField – Technisches Handbuch
 
-Stand: Auftrag „Heiler-Karte mit Heilung für Minions derselben Line“ (Version 0.1.0). Der Stand baut auf den
-Aufträgen „Kartenfilter für die Hand im Match“, „Replay-Szene“, „Minion-Statistik-Overlay nach Match-Ende“, „Fernkämpfer Bogenschütze“, „Start- und Zieh-Konstanten“, „E2E-Tests“, „Dev-Szene mit Balancing-Statistik“,
+Stand: Auftrag „Grafische Überarbeitung im Fantasy-Kartenspiel-Stil“ (Version 0.1.0). Der Stand baut auf den
+Aufträgen „Heiler-Karte“, „Kartenfilter für die Hand im Match“, „Replay-Szene“, „Minion-Statistik-Overlay nach Match-Ende“, „Fernkämpfer Bogenschütze“, „Start- und Zieh-Konstanten“, „E2E-Tests“, „Dev-Szene mit Balancing-Statistik“,
 „Minion-Tempo“, „Tower-Reichweite 20“, „Energie-Maximum 8“, „Bot-Strategie“, „Handlimit“, „Drag-and-Drop“,
 „Designkonzept“ und „Kern-Logik“ auf.
 
@@ -14,11 +14,30 @@ Aufträgen „Kartenfilter für die Hand im Match“, „Replay-Szene“, „Min
 >   Rundenablauf, Platzierung, `main-scene.ts`, Tests.
 > - Heiler: gegen `cards.ts`, `combat.ts` (Felder `maxHp`, `heals`, Heilformel) und `match.ts` (Beschwören) geprüft sowie
 >   gegen `docs/anwendung-heiler.md`.
-> - Ich habe keine Tests und keinen Build ausgeführt. Laut Tester: Typecheck grün, Vitest zu Bot, Karten, Kampf und Match
->   (132 Tests) grün, Smoke 14 bestanden. Der Review war freigegeben.
+> - Grafik: gegen `docs/grafik-stil.md`, `docs/anwendung-grafik-ueberarbeitung.md`, die Dateiliste der Szenen und die
+>   Exporte von `field-view.ts`, `labels.ts`, `effects.ts`, `card-view.ts`, `textures.ts` geprüft. Das Innenleben der
+>   Zeichenfunktionen habe ich nicht neu gelesen.
+> - Ich habe keine Tests und keinen Build ausgeführt. Laut Tester: Typecheck grün, Unit-Tests zu `card-style` und
+>   `fx-events` (11) grün, Smoke 17 bestanden; Screenshots wurden nicht geprüft. Der Review war freigegeben.
 > - Nichts committet. Zeilenangaben für `main-scene.ts` sind ungefähr.
 
 ## Änderungen in diesem Stand
+
+| Thema | Vorher | Jetzt | Datei |
+|---|---|---|---|
+| Stil | Farben verstreut (`COLORS` in `main-scene.ts`) | zentral: Palette, Schriften, Rahmen, Panel/Balken/Knopf | `theme.ts` |
+| Hintergrund, Boden, Partikel | einfarbige Flächen | Texturen zur Laufzeit (Verlauf, Vignette, Wege, Holztisch) | `textures.ts` |
+| Handkarten | einfache Rechtecke | Rahmen, Name, Kosten-Kristall, Bild, Text, Banner; Typ durch Farbe und Symbol | `card-view.ts`, `card-style.ts` |
+| Hover/Auswahl | – | Anheben (bis 110 %), Schatten, Leuchten; Ausspielen animiert | `card-view.ts`, `main-scene.ts` |
+| Feld | flach | Tower, Minions, Bauplätze mit Schatten, Leuchten, Teamfarben | `field-view.ts` |
+| Effekte | keine | Partikel, Ringe, Schadenszahlen, Kamerawackeln; Ereignisse aus `diffFx` | `effects.ts`, `fx-events.ts` |
+| Hilfsmodule | `LabelPool`, `drawBoard`, `drawMinions` in `main-scene.ts` | `labels.ts` und `field-view.ts` | `src/scenes/` |
+| E2E | – | `e2e/grafik.spec.ts` liest das Feld `lifts` der Szene | `e2e/grafik.spec.ts` |
+
+Nicht geändert (Grafik): Regeln, Kartenwerte, Bot, Seed, alle bestehenden Unit-Tests. Keine Fremdassets,
+`public/assets/` bleibt leer. Details: `docs/grafik-stil.md`, `docs/anwendung-grafik-ueberarbeitung.md`.
+
+Frühere Änderung (Heiler):
 
 | Thema | Vorher | Jetzt | Datei |
 |---|---|---|---|
@@ -68,19 +87,20 @@ Nicht geändert: Balance, Regeln, Kampfablauf, `MatchState`, Balance-Szene. Deta
 Mobiles 1-gegen-1-Tower-Defense-Spiel mit Karten im Browser (Phaser 3, TypeScript, Vite).
 
 - Hochformat 360 × 640, Touch und Maus, `Phaser.Scale.FIT`.
-- Lokal gegen einen deterministischen Bot. Kein Online-Spiel, keine Accounts, keine finale Grafik oder Töne.
+- Lokal gegen einen deterministischen Bot. Kein Online-Spiel, keine Accounts, keine Töne. Die Grafik entsteht komplett im Code (Abschnitt „Grafik“).
 - Kampf ohne Zufall. Der Seed legt nur die Kartenreihenfolge fest; beide Spieler erhalten dieselben Karten.
 - Phaser bleibt auf Version 3 (API-Doku: https://newdocs.phaser.io/docs/3.90.0).
 
 Weiterführend unter `docs/`: `designkonzept.md` (Soll-Regeln) und die `anwendung-*.md` je Auftrag (Bogenschütze,
 Start-/Zieh-Konstanten, Handlimit, Iso-Platzierung, Drag-and-Drop, Bot-Tests, Energie-Maximum, Tower-Reichweite,
-Minion-Tempo, Balance-Szene, E2E, Minion-Statistik, Replay, Kartenfilter, Heiler).
+Minion-Tempo, Balance-Szene, E2E, Minion-Statistik, Replay, Kartenfilter, Heiler, Grafik-Überarbeitung; Stil und Lizenzen: `grafik-stil.md`).
 
 ### Umsetzungsstand
 
 | Bereich | Stand |
 |---|---|
 | Kernlogik (Karten, Runden, Kampf, Bot) | fertig, getestet |
+| **Grafik im Fantasy-Kartenspiel-Stil** | **umgesetzt, getestet (ohne Screenshot-Prüfung)** |
 | Reichweite je Minion, Bogenschütze | umgesetzt |
 | **Heiler (`summon-healer`)** | **umgesetzt, getestet** |
 | Start 5 / Ziehen 3, Handlimit 10, Energie-Max. 8, Tower-Reichweite 20, Minion-Tempo | umgesetzt |
@@ -174,11 +194,14 @@ src/
     hand-filter.ts Kartenfilter der Hand (Sichtbarkeit je Kartentyp)
     replay.ts      Bot-gegen-Bot-Replay zu einem Seed, Zeitlupe, Kommentartexte
     seed.ts        parseSeed, parseReplaySeed
+    card-style.ts  Kartentyp → Farbe, Symbol, Banner; describeCard (Darstellung, rein)
+    fx-events.ts   diffFx: Effekt-Ereignisse aus zwei Spielzuständen (rein)
     placement.ts, iso.ts, bot.ts, balance-sim.ts
-  scenes/  main-scene.ts (Spiel, gemeinsame Zeichenhelfer), replay-scene.ts (Replay), balance-scene.ts (Dev)
+  scenes/  main-scene.ts (Spiel), replay-scene.ts (Replay), balance-scene.ts (Dev)
+           theme.ts, textures.ts, card-view.ts, field-view.ts, effects.ts, labels.ts (Phaser-Code, nicht in logic/)
   main.ts  wählt die Start-Szene
-e2e/       smoke.spec.ts, gameplay.spec.ts (Playwright)
-docs/      designkonzept.md, anwendung-*.md, handbuch.md
+e2e/       smoke.spec.ts, gameplay.spec.ts, grafik.spec.ts (Playwright)
+docs/      designkonzept.md, grafik-stil.md, anwendung-*.md, handbuch.md
 ```
 
 Grundsätze (aus `AGENTS.md`):
@@ -229,7 +252,7 @@ gleicher Seed ergibt denselben Endzustand und dieselbe Ereignisliste. Aufzeichnu
   `botPlan` ruft `botStep` in einer Schleife auf und verhält sich wie zuvor.
 
 **Szene (`src/scenes/replay-scene.ts`, Key `replay`):** `update` ruft nur `stepReplay`, dann zeichnet `render()` mit
-`drawBoard`, `drawMinions` und `LabelPool` aus `main-scene.ts`. Das Kommentarband zeigt die letzten 6 Ereignisse
+`drawBoard`, `drawMinions` (`field-view.ts`) und `LabelPool` (`labels.ts`). Das Kommentarband zeigt die letzten 6 Ereignisse
 (Blau blau, Orange orange). Bei `over` erscheinen Ergebnis und Teilen-URL (`origin` + `pathname` + `?replay=<seed>`).
 Taste oder Klick starten das Replay nur nach `over` neu (`scene.restart`); sonst gibt es keine Eingabe. Für Tests
 liefern die Getter `current` und `comments` den Zustand.
@@ -241,11 +264,53 @@ liefern die Getter `current` und `comments` den Zustand.
 **Auf einen Blick:**
 - Ein Replay über alle Runden kann in echter Zeit bis etwa 450 s dauern. Pause, Spulen und Geschwindigkeitswahl gibt es
   bewusst nicht.
-- `LabelPool`, `drawBoard`, `drawMinions` und `drawTower` nutzen `MainScene` und `ReplayScene` gemeinsam. Bei
+- `LabelPool` (`labels.ts`) sowie `drawBoard`, `drawMinions` und `drawTower` (`field-view.ts`) nutzen `MainScene` und `ReplayScene` gemeinsam. Bei
   Änderungen beide Szenen prüfen (Smoke-Tests Gameplay, Drag, Replay).
 - `ReplayScene.create` fällt bei ungültigem Wert auf Seed 1 zurück; das ist nur eine Absicherung, `main.ts` startet die
   Szene nur bei gültigem Wert.
 - Eine neue Szene, die ohne Eingabe erreichbar ist, gehört in `e2e/smoke.spec.ts`.
+
+### Grafik
+
+Reine Darstellung; Regeln, Werte und Seed bleiben unverändert. Ausführlich: `docs/grafik-stil.md`.
+
+```mermaid
+flowchart LR
+  Logic["src/logic"] --> Scene["main-scene.ts"]
+  Logic --> FxE["fx-events.ts diffFx"] --> Effects["effects.ts"]
+  Logic --> CS["card-style.ts"] --> Cards["card-view.ts"]
+  Theme["theme.ts"] --> Scene
+  Theme --> Cards
+  Theme --> Other["balance-scene / replay-scene"]
+  Tex["textures.ts"] --> Scene
+  Scene --> Field["field-view.ts"]
+  Scene --> Effects
+```
+
+| Modul | Aufgabe |
+|---|---|
+| `theme.ts` | `PALETTE`, `TEXT`, `FONTS`, `FRAME`; `fillGradient`, `drawPanel`, `drawBar`, `drawButton`. Einzige Quelle für Farben und Schriften. |
+| `textures.ts` | `ensureTextures`, `addBackdrop`: Hintergrund, Vignette, Boden, Wege, Partikeltexturen (`backdrop`, `spark`, `glow`) per Canvas-Textur; eigener fester Zeichen-Zufall, nicht der Spiel-Seed. |
+| `card-view.ts` | `drawCard`: Rahmen, Kopfzeile, Kosten-Kristall, Bildfläche mit Symbol, Textfeld, Typ-Banner. |
+| `field-view.ts` | `drawBoard`, `drawMinions`, `drawTower`, `drawMinionBody`; Blau = du, Orange = Gegner. Minion-Form nach Rolle: Kreis, Raute (Fernkämpfer), Kreuz (Heiler). |
+| `effects.ts` | Klasse `Effects`: Partikel, Leuchtringe, Schadenszahlen, Kamerawackeln beim Tower-Fall, Animation beim Ausspielen. |
+| `card-style.ts` | `cardTypeStyle` (Typ → Rahmenfarbe, Symbol, Banner) und `describeCard` (Kurztext); mit Test. |
+| `fx-events.ts` | `diffFx` leitet Treffer, Tod, Beschwörung und Turmschaden aus zwei Zuständen ab; mit Test. |
+
+Kartentypen: `summon` Rot/Schwert, `tower-upgrade` Blau/Turm, `line-upgrade` Grün/Pfeil, `minion-upgrade` Violett/Edelstein.
+
+**Regeln für Änderungen:**
+- Farben und Schriften nur aus `theme.ts`. Neue Szenen nutzen `ensureTextures`/`addBackdrop`.
+- Bewegung, Anheben und Effekte über `delta` bzw. Phaser-Tweens, nie über Frames. Bei Zeitsprüngen über 500 ms
+  (Tab im Hintergrund) entfallen Effekte.
+- Obergrenzen: höchstens 20 Schadenszahlen und 150 lebende Partikel je Emitter gleichzeitig.
+- Neue Effekt-Auslöser gehören als reine Regel nach `fx-events.ts` mit Test, nicht in `update()`.
+- Schriften sind Systemschriften mit Fallback (Georgia/Palatino für Überschriften, Trebuchet/Segoe UI/Verdana für Text),
+  kein Webfont; Labels werden mit doppelter Auflösung gerendert.
+- Assets: keine Fremddateien, `public/assets/` bleibt leer. Kommen Dateien hinzu, im `preload()` ohne `public/` laden und
+  in `grafik-stil.md` mit Quelle und Lizenz eintragen. Keine Originalgrafiken oder Logos von MTG, Hearthstone oder HotS.
+- `e2e/grafik.spec.ts` liest das Szenenfeld `lifts`; bei Umbenennung den Test anpassen. Die Felder `state`,
+  `handFilter` und `selected` bleiben für die E2E-Tests stabil.
 
 ### Kartenfilter (`src/logic/hand-filter.ts`)
 
@@ -363,6 +428,8 @@ Vor jeder Übergabe müssen `npm run build`, `npm test` und `npm run test:smoke`
 - Replay: `replay.test.ts` (gleicher Seed gleiches Ergebnis, verschiedene Seeds verschiedene Ereignisse, ein Ereignis
   je Karte, `describeEvent` nicht leer, Kampf verbraucht weniger Spielzeit, Ende in `over` mit gültigem `Outcome`),
   `seed.test.ts` (`parseReplaySeed`), `bot.test.ts` (`botPlan` nach dem `botStep`-Umbau unverändert).
+- Grafik: `card-style.test.ts` (vier Typen unterscheidbar), `fx-events.test.ts` (6 Fälle für `diffFx`),
+  `e2e/grafik.spec.ts` (Hover/Auswahl über `lifts`). Smoke gesamt: 17 Fälle.
 - `e2e/smoke.spec.ts`: Canvas zeichnet, keine Konsolenfehler, Dev-Szene `balance`, Drag eines Minions, `?replay=`
   (Canvas, Kommentar, Ende mit Ergebnis und Teilen-URL, Neustart per Taste) und ungültiges `?replay=` fällt auf
   `MainScene` zurück.
@@ -380,9 +447,13 @@ Vor jeder Übergabe müssen `npm run build`, `npm test` und `npm run test:smoke`
 - Replay: sehr lange Laufzeit (bis etwa 450 s) bei vollen Runden; falls gewünscht, später Geschwindigkeitswahl
   (laut Auftrag ausgeschlossen).
 - Smoke-Test „Drag eines beschworenen Minions“: überspringt sich per `test.skip`, wenn die Starthand keinen Minion
-  enthält (`smoke.spec.ts`, ca. Zeile 261). Im letzten Lauf liefen alle 14 Fälle.
+  enthält (`smoke.spec.ts`, ca. Zeile 261). Im letzten Lauf liefen alle 17 Smoke-Fälle.
 - Heiler: Balance (Werte sind Startwerte) und Stehenbleiben hinter Verbündeten sind nicht Teil des Auftrags. Der Panel-
   und Filtertext der Szene enthält keine Heiler-Sonderfälle; der Typ `summon` fällt unter „Beschwörung“.
+- Grafik: Karten sind klein (66×62 px), der Text hat etwa 6,5 px und ist auf zwei kurze Zeilen gekürzt. Lesbarkeit auf
+  echten Geräten, Rahmen und Effekte sind nicht per Screenshot geprüft.
+- Grafik (Review): einzelne Farben und Maße in `card-view.ts` (z. B. `0x3a3068`) nach `theme.ts`; der Energie-Kristall in
+  `main-scene.ts` ist mit Pixelkoordinaten verdrahtet.
 - Hand-UI, Undo-Knopf, Iso-Szene, Projektile, Tempo-Anzeige auf Karten.
 - Reviewer-Hinweise: lange `hits.push(...)`-Zeilen in `combat.ts` ggf. mit Hilfstyp lesbarer machen; fehlendes
   Leerzeichen in `this.graphics =this.add.graphics();` in `main-scene.ts`.
