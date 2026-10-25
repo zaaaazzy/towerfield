@@ -90,6 +90,7 @@ Spielt ein Spieler in derselben Runde ein bestimmtes Kartenpaar, erhalten seine 
 - Der Bonus steht nicht in `LineState.bonus` oder in den Minion-Werten, sondern als `rangeBonus`; `startRound` löscht ihn
   samt der gespielten Karten. Zurücknehmen oder Verschieben des Bogenschützen aktualisiert die Synergie. Die Szene zeigt sie
   in grüner Schrift an der Lane.
+- Anwendung mit Beispielen: [anwendung-synergien.md](anwendung-synergien.md).
 
 ### Soll-Änderungen an Konstanten
 
