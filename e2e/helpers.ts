@@ -1,6 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 import { getCardDef } from '../src/logic/cards';
 import { cardAt, fanLayout, HAND_FAN, poseContains, sortHand } from '../src/logic/hand-layout';
+import { type Minion, TICK_MS } from '../src/logic/combat';
 import type { MatchState } from '../src/logic/match';
 import { laneStagger } from '../src/logic/minion-look';
 import { type LineGeometry, positionToX, slotPosition } from '../src/logic/placement';
@@ -161,6 +162,28 @@ export function fastForwardCombat(page: Page): Promise<void> {
     const scene = window.game!.scene.getScene('main') as unknown as MainSceneView;
     for (let guard = 0; guard < 1000 && scene.current.phase === 'combat'; guard += 1) scene.update(0, 1000);
   });
+}
+
+/**
+ * Setzt `enemies` als Minions des Gegners und lässt die laufende Kampfphase genau `ticks` Ticks (je `TICK_MS`) laufen,
+ * alles in einem einzigen Browser-Aufruf. So stört weder der Echtzeit-Loop noch der Bot die Messung. Liefert den
+ * Zustand unmittelbar davor und danach.
+ */
+export function sampleCombat(
+  page: Page,
+  enemies: Minion[],
+  ticks: number,
+): Promise<{ before: MatchState; after: MatchState }> {
+  return page.evaluate(
+    ({ enemies: placed, ticks: count, tickMs }) => {
+      const scene = window.game!.scene.getScene('main') as unknown as MainSceneView & { state: MatchState };
+      scene.state.players[1].minions = placed;
+      const before = structuredClone(scene.current);
+      for (let tick = 0; tick < count; tick += 1) scene.update(0, tickMs);
+      return { before, after: structuredClone(scene.current) };
+    },
+    { enemies, ticks, tickMs: TICK_MS },
+  );
 }
 
 /** Ob ein sichtbarer Text mit genau diesem Inhalt in der Szene steht. */

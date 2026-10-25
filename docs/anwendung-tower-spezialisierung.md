@@ -40,3 +40,10 @@ Kartentyp `tower-specialize`, Ziel `line`. Die Pfadwahl steckt in der Karte; die
 - Die Karten haben kein eigenes Bild (Rückfall auf das Typ-Symbol).
 - Die Kartenliste ändert sich, daher steigt `RECORD_VERSION` auf 5; ältere Links sind ungültig. Die Spezialisierung ist
   Teil des Tower-Zustands und übersteht `structuredClone` und das Nachspielen.
+
+## E2E-Absicherung
+
+`e2e/gameplay.spec.ts` spielt beide Karten per Tippen auf Karte und Lane aus (Energie sinkt um die Kartenkosten) und
+misst die Kampfwirkung über `sampleCombat` (`e2e/helpers.ts`): Blitz trifft zwei Minions in `TOWER_RANGE` mit je
+`damage × LIGHTNING_FACTOR`, Schild wirft `SHIELD_REFLECT` des Angreifer-Schadens zurück. Als Vergleich läuft dieselbe
+Lage in Node ohne Spezialisierung. Fehlt die Zeile `specialization = def.path` in `match.ts`, werden beide Tests rot.
