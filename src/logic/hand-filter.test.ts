@@ -3,14 +3,22 @@ import type { CardType } from './cards';
 import { HAND_FILTERS, type HandFilter, isCardVisible, nextHandFilter } from './hand-filter';
 
 const EXPECTED: Record<HandFilter, CardType[]> = {
-  all: ['summon', 'line-upgrade', 'minion-upgrade', 'minion-buff', 'tower-upgrade', 'tower-specialize'],
+  all: ['summon', 'line-upgrade', 'minion-upgrade', 'minion-buff', 'lane-card', 'tower-upgrade', 'tower-specialize'],
   summon: ['summon'],
-  upgrade: ['line-upgrade', 'minion-upgrade', 'minion-buff'],
+  upgrade: ['line-upgrade', 'minion-upgrade', 'minion-buff', 'lane-card'],
   tower: ['tower-upgrade', 'tower-specialize'],
 };
 
 describe('isCardVisible', () => {
-  const types: CardType[] = ['summon', 'line-upgrade', 'minion-upgrade', 'minion-buff', 'tower-upgrade', 'tower-specialize'];
+  const types: CardType[] = [
+    'summon',
+    'line-upgrade',
+    'minion-upgrade',
+    'minion-buff',
+    'lane-card',
+    'tower-upgrade',
+    'tower-specialize',
+  ];
   for (const filter of HAND_FILTERS) {
     for (const type of types) {
       const expected = EXPECTED[filter].includes(type);

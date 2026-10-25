@@ -1,28 +1,40 @@
 import { describe, expect, it } from 'vitest';
 import { getCardDef } from './cards';
-import { type Minion } from './combat';
-import { laneTowerOffsets, MAX_FIELD_LEVEL } from './lanes';
+import { type Minion, type Tower } from './combat';
 import {
   createMatch,
   laneSlotCounts,
-  lineCapacity,
   type MatchState,
+  MOVE_COST,
   moveMinion,
   playCard,
   setReady,
   undoSummon,
 } from './match';
 import {
-  dropTargetAt,
+  describeSlot,
   firstFreeSlot,
+  freeLaneSlotPoints,
+  freeSlotPoints,
+  freeSlots,
+  GLOW_RADIUS,
   isSlotFree,
   isValidSlot,
+  LANE_SLOT_GAP,
+  laneSlotPoint,
   type LineGeometry,
-  PLACEMENT_ZONE_END,
+  makeSlot,
+  nearestPoint,
   positionToX,
-  SLOT_SPACING,
-  slotAtPosition,
+  SLOT_DY,
+  SNAP_RADIUS,
+  slotPoint,
   slotPosition,
+  slotProximity,
+  slotSide,
+  slotTower,
+  snapTarget,
+  validSlots,
   xToPosition,
 } from './placement';
 
@@ -35,61 +47,92 @@ function setup(level = 1): MatchState {
   return state;
 }
 
-function minion(line: number, position: number): Minion {
-  return { id: 1, line, position, hp: 1, damage: 1, range: 4, speed: 10 };
+function minion(line: number, slot: number, id = 1): Minion {
+  return { id, line, slot, position: 0, hp: 1, damage: 1, range: 4, speed: 10 };
 }
 
+const tower = (offset: number, hp = 100): Tower => ({ offset, hp, maxHp: 100, damage: 8 });
+
 describe('Slots', () => {
-  it('liegen in der eigenen Hälfte, auch bei höchster Ausbaustufe', () => {
-    for (let slot = 0; slot < lineCapacity(MAX_FIELD_LEVEL); slot += 1) {
-      expect(isValidSlot(slot, lineCapacity(MAX_FIELD_LEVEL))).toBe(true);
-      expect(slotPosition(slot)).toBeLessThanOrEqual(PLACEMENT_ZONE_END);
-    }
+  it('bietet je lebendem Tower genau zwei Slots, oben und unten', () => {
+    const towers = [tower(0), tower(8), tower(16)];
+    expect(validSlots(towers)).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(validSlots([tower(0)])).toEqual([0, 1]);
+    expect(slotSide(0)).toBe(0);
+    expect(slotSide(1)).toBe(1);
+    expect(slotTower(3)).toBe(1);
+    expect(makeSlot(2, 1)).toBe(5);
   });
 
-  it('umschließen die Tower der Start-Lane: Plätze vor, zwischen und hinter den Towern', () => {
-    const towers = laneTowerOffsets(0);
-    const positions = Array.from({ length: lineCapacity(MAX_FIELD_LEVEL) }, (_, slot) => slotPosition(slot));
-    expect(towers).toEqual([0, 8, 16]);
-    expect(positions.some((p) => p > towers[0]! && p < towers[1]!)).toBe(true);
-    expect(positions.some((p) => p > towers[1]! && p < towers[2]!)).toBe(true);
-    expect(positions.some((p) => p > towers[2]!)).toBe(true);
-    // Kein Slot liegt genau auf einem Tower.
-    for (const p of positions) expect(towers).not.toContain(p);
+  it('gibt der Start-Lane sechs Slots, den anderen Lanes zwei, gesperrten keine', () => {
+    const player = createMatch(1).players[0];
+    expect(laneSlotCounts(player)).toEqual([6, 0, 0, 0, 0]);
+    const start = setup();
+    start.players[0].hand = ['line-upgrade', 'line-upgrade'];
+    const level2 = playCard(start, 0, 0).state;
+    expect(laneSlotCounts(level2.players[0])).toEqual([6, 2, 2, 0, 0]);
+    expect(laneSlotCounts(playCard(level2, 0, 0).state.players[0])).toEqual([6, 2, 2, 2, 2]);
+  });
+
+  it('bietet für einen zerstörten Tower keine Slots mehr', () => {
+    const towers = [tower(0), tower(8, 0), tower(16)];
+    expect(validSlots(towers)).toEqual([0, 1, 4, 5]);
+    expect(isValidSlot(towers, 2)).toBe(false);
+    expect(isValidSlot(towers, 3)).toBe(false);
+    expect(isValidSlot(towers, 4)).toBe(true);
   });
 
   it('lehnt ungültige Slots ab', () => {
-    expect(isValidSlot(-1, 3)).toBe(false);
-    expect(isValidSlot(3, 3)).toBe(false);
-    expect(isValidSlot(0.5, 3)).toBe(false);
-    expect(isValidSlot(1000, 2000)).toBe(false);
+    const towers = [tower(0)];
+    expect(isValidSlot(towers, -1)).toBe(false);
+    expect(isValidSlot(towers, 2)).toBe(false);
+    expect(isValidSlot(towers, 0.5)).toBe(false);
+    expect(isValidSlot(towers, 1000)).toBe(false);
+    expect(isValidSlot([], 0)).toBe(false);
   });
 
-  it('erkennt belegte Slots nur auf derselben Line', () => {
-    const minions = [minion(0, slotPosition(1))];
+  it('startet ein Minion auf dem Standort seines Towers, beide Seiten gleich', () => {
+    const towers = [tower(0), tower(8), tower(16)];
+    expect(slotPosition(towers, 0)).toBe(0);
+    expect(slotPosition(towers, 1)).toBe(0);
+    expect(slotPosition(towers, 2)).toBe(8);
+    expect(slotPosition(towers, 5)).toBe(16);
+    expect(slotPosition([tower(0)], 7)).toBe(0);
+  });
+
+  it('erkennt belegte Slots nur auf derselben Lane und fasst höchstens eine Einheit je Slot', () => {
+    const towers = [tower(0), tower(8)];
+    const minions = [minion(0, 1)];
     expect(isSlotFree(minions, 0, 1)).toBe(false);
     expect(isSlotFree(minions, 1, 1)).toBe(true);
-    expect(isSlotFree(minions, 0, 2)).toBe(true);
-    expect(firstFreeSlot(minions, 0, 3)).toBe(0);
-    expect(firstFreeSlot([minion(0, slotPosition(0)), { ...minion(0, slotPosition(1)), id: 2 }], 0, 3)).toBe(2);
+    expect(isSlotFree(minions, 0, 0)).toBe(true);
+    expect(freeSlots(minions, 0, towers)).toEqual([0, 2, 3]);
+    expect(firstFreeSlot(minions, 0, towers)).toBe(0);
+    expect(firstFreeSlot([minion(0, 0), minion(0, 1, 2)], 0, towers)).toBe(2);
+    expect(firstFreeSlot([0, 1, 2, 3].map((slot) => minion(0, slot, slot + 1)), 0, towers)).toBeUndefined();
+  });
+
+  it('benennt Turm und Seite', () => {
+    expect(describeSlot(0)).toBe('Turm 1 oben');
+    expect(describeSlot(3)).toBe('Turm 2 unten');
   });
 });
 
 describe('Beschwören auf Slots', () => {
-  it('stellt den Minion auf die Position des gewählten Slots', () => {
-    const result = playCard(setup(2), 0, 0, 1, 2);
+  it('stellt den Minion auf den gewählten Slot an der Position seines Towers', () => {
+    const result = playCard(setup(), 0, 0, 0, 3);
     expect(result.ok).toBe(true);
-    expect(result.state.players[0].minions[0]).toMatchObject({ line: 1, position: slotPosition(2) });
+    expect(result.state.players[0].minions[0]).toMatchObject({ line: 0, slot: 3, position: 8 });
   });
 
   it('nimmt ohne Slot den ersten freien', () => {
     let state = setup();
-    for (let i = 0; i < 2; i += 1) {
+    for (let i = 0; i < 3; i += 1) {
       const result = playCard(state, 0, 0, 0);
       expect(result.ok).toBe(true);
       state = result.state;
     }
-    expect(state.players[0].minions.map((m) => m.position)).toEqual([slotPosition(0), slotPosition(1)]);
+    expect(state.players[0].minions.map((m) => m.slot)).toEqual([0, 1, 2]);
   });
 
   it('meldet einen belegten Slot und lässt den Zustand unverändert', () => {
@@ -99,20 +142,25 @@ describe('Beschwören auf Slots', () => {
     expect(second.state).toBe(first.state);
   });
 
-  it('meldet einen Slot außerhalb der Lane-Kapazität', () => {
-    const result = playCard(setup(), 0, 0, 0, lineCapacity(1));
-    expect(result).toMatchObject({ ok: false, reason: 'invalid-slot' });
+  it('meldet einen Slot ohne Tower', () => {
+    expect(playCard(setup(), 0, 0, 0, 6)).toMatchObject({ ok: false, reason: 'invalid-slot' });
+    expect(playCard(setup(), 0, 0, 0, -1)).toMatchObject({ ok: false, reason: 'invalid-slot' });
   });
 
-  it('meldet bei voller Line „line-full“, auch mit freiem Slot-Wunsch', () => {
+  it('meldet bei voller Lane „line-full“ ohne Slot-Wunsch und „slot-taken“ mit Wunsch', () => {
     let state = setup();
-    for (let slot = 0; slot < lineCapacity(1); slot += 1) state = playCard(state, 0, 0, 0, slot).state;
-    expect(playCard(state, 0, 0, 0, 0)).toMatchObject({ ok: false, reason: 'line-full' });
+    state.players[0].hand = Array.from({ length: 8 }, () => 'summon-scout');
+    state.players[0].energy = 20;
+    for (let slot = 0; slot < 6; slot += 1) state = playCard(state, 0, 0, 0, slot).state;
+    expect(playCard(state, 0, 0, 0, 0)).toMatchObject({ ok: false, reason: 'slot-taken' });
     expect(playCard(state, 0, 0, 0)).toMatchObject({ ok: false, reason: 'line-full' });
   });
 
   it('erlaubt gleiche Slots auf verschiedenen Lanes', () => {
-    const first = playCard(setup(2), 0, 0, 0, 0);
+    const state = setup(2);
+    state.players[0].lines[1].towers = [tower(0)];
+    state.players[0].lines[2].towers = [tower(0)];
+    const first = playCard(state, 0, 0, 0, 0);
     expect(playCard(first.state, 0, 0, 1, 0).ok).toBe(true);
     expect(playCard(first.state, 0, 0, 2, 0).ok).toBe(true);
   });
@@ -126,10 +174,12 @@ describe('Beschwören auf Slots', () => {
     }
   });
 
-  it('lehnt bei Lvl 2 die Lanes von Lvl 3 ab, bei Lvl 3 nimmt es alle fünf an', () => {
-    expect(playCard(setup(2), 0, 0, 3, 0)).toMatchObject({ ok: false, reason: 'invalid-line' });
-    expect(playCard(setup(2), 0, 0, 4, 0)).toMatchObject({ ok: false, reason: 'invalid-line' });
-    for (const lane of [0, 1, 2, 3, 4]) expect(playCard(setup(3), 0, 0, lane, 0).ok).toBe(true);
+  it('lässt auf der Lane eines zerstörten Towers dessen Slots nicht zu', () => {
+    const state = setup();
+    state.players[0].lines[0].towers[1]!.hp = 0;
+    expect(playCard(state, 0, 0, 0, 2)).toMatchObject({ ok: false, reason: 'invalid-slot' });
+    expect(playCard(state, 0, 0, 0, 3)).toMatchObject({ ok: false, reason: 'invalid-slot' });
+    expect(playCard(state, 0, 0, 0, 4).ok).toBe(true);
   });
 
   it('ignoriert den Slot bei Karten ohne Beschwörung', () => {
@@ -137,45 +187,66 @@ describe('Beschwören auf Slots', () => {
     state.players[0].hand = ['tower-hp'];
     expect(playCard(state, 0, 0, 0, 99).ok).toBe(true);
   });
-
-  it('hält den Slotabstand größer als die halbe Minion-Reichweite-Überlappung', () => {
-    expect(SLOT_SPACING).toBeGreaterThan(0);
-  });
 });
 
-describe('Verschieben vor „Bereit“', () => {
-  it('versetzt einen Minion kostenlos auf einen freien Slot einer anderen Lane', () => {
-    const placed = playCard(setup(2), 0, 0, 0, 0).state;
+describe('Verschieben auf einen anderen Turm-Slot', () => {
+  it('kostet genau 1 Energie und setzt das Minion auf den neuen Slot', () => {
+    const placed = playCard(setup(), 0, 0, 0, 0).state;
     const id = placed.players[0].minions[0]!.id;
-    const moved = moveMinion(placed, 0, id, 2, 2);
+    const moved = moveMinion(placed, 0, id, 0, 5);
     expect(moved.ok).toBe(true);
-    expect(moved.state.players[0].minions[0]).toMatchObject({ line: 2, position: slotPosition(2) });
-    expect(moved.state.players[0].energy).toBe(placed.players[0].energy);
+    expect(moved.state.players[0].minions[0]).toMatchObject({ line: 0, slot: 5, position: 16 });
+    expect(moved.state.players[0].energy).toBe(placed.players[0].energy - MOVE_COST);
+    expect(MOVE_COST).toBe(1);
   });
 
-  it('darf auf den eigenen Slot zurück und lehnt fremd belegte ab', () => {
+  it('versetzt auch auf einen Tower einer anderen Lane', () => {
+    const state = setup(2);
+    state.players[0].lines[1].towers = [tower(0)];
+    const placed = playCard(state, 0, 0, 0, 0).state;
+    const moved = moveMinion(placed, 0, placed.players[0].minions[0]!.id, 1, 1);
+    expect(moved.state.players[0].minions[0]).toMatchObject({ line: 1, slot: 1, position: 0 });
+  });
+
+  it('lehnt bei zu wenig Energie ab, die Einheit bleibt, wo sie ist', () => {
+    const placed = playCard(setup(), 0, 0, 0, 0).state;
+    placed.players[0].energy = 0;
+    const result = moveMinion(placed, 0, placed.players[0].minions[0]!.id, 0, 1);
+    expect(result).toMatchObject({ ok: false, reason: 'not-enough-energy' });
+    expect(result.state).toBe(placed);
+    expect(result.state.players[0].minions[0]).toMatchObject({ slot: 0 });
+  });
+
+  it('verschiebt auch Überlebende früherer Runden', () => {
+    const state = setup();
+    state.players[0].minions.push({ id: 50, line: 0, slot: 4, position: 16, hp: 5, damage: 1, range: 4, speed: 10 });
+    const moved = moveMinion(state, 0, 50, 0, 0);
+    expect(moved.ok).toBe(true);
+    expect(moved.state.players[0].minions.find((m) => m.id === 50)).toMatchObject({ slot: 0, position: 0 });
+  });
+
+  it('lehnt den eigenen und fremd belegte Slots, Slots ohne Tower und unfreie Lanes ab', () => {
     let state = playCard(setup(), 0, 0, 0, 0).state;
     state = playCard(state, 0, 0, 0, 1).state;
     const [a, b] = state.players[0].minions;
-    expect(moveMinion(state, 0, a!.id, 0, 0).ok).toBe(true);
+    expect(moveMinion(state, 0, a!.id, 0, 0)).toMatchObject({ ok: false, reason: 'slot-taken' });
     expect(moveMinion(state, 0, a!.id, 0, 1)).toMatchObject({ ok: false, reason: 'slot-taken' });
     expect(moveMinion(state, 0, b!.id, 0, 9)).toMatchObject({ ok: false, reason: 'invalid-slot' });
     expect(moveMinion(state, 0, b!.id, 7, 0)).toMatchObject({ ok: false, reason: 'invalid-line' });
+    expect(moveMinion(state, 0, b!.id, 1, 0)).toMatchObject({ ok: false, reason: 'invalid-line' });
   });
 
-  it('lehnt das Verschieben auf eine volle Lane ab, der eigene alte Platz zählt dabei nicht mit', () => {
-    let state = setup(2);
-    for (let slot = 0; slot < lineCapacity(2); slot += 1) state = playCard(state, 0, 0, 1, slot).state;
-    state = playCard(state, 0, 0, 0, 0).state;
-    const outsider = state.players[0].minions.find((m) => m.line === 0)!;
-    expect(moveMinion(state, 0, outsider.id, 1, 0)).toMatchObject({ ok: false, reason: 'line-full' });
-    // Auf der eigenen, vollen Lane bleibt der Wechsel auf einen freien Platz möglich, wenn er einen frei macht.
-    const onFull = state.players[0].minions.filter((m) => m.line === 1);
-    expect(moveMinion(state, 0, onFull[0]!.id, 1, 0).ok).toBe(true);
+  it('lehnt den Slot eines zerstörten Towers ab', () => {
+    const placed = playCard(setup(), 0, 0, 0, 0).state;
+    placed.players[0].lines[0].towers[2]!.hp = 0;
+    expect(moveMinion(placed, 0, placed.players[0].minions[0]!.id, 0, 4)).toMatchObject({
+      ok: false,
+      reason: 'invalid-slot',
+    });
   });
 
   it('verschiebt und nimmt auch für Spieler 1 zurück, ohne die Statistik des eigenen Spielers zu berühren', () => {
-    const state = setup(2);
+    const state = setup();
     state.players[1].hand = ['summon-minion', 'summon-minion'];
     state.players[1].energy = 8;
     const placed = playCard(state, 1, 0, 0, 0);
@@ -183,7 +254,7 @@ describe('Verschieben vor „Bereit“', () => {
     const id = placed.state.players[1].minions[0]!.id;
     const moved = moveMinion(placed.state, 1, id, 0, 2);
     expect(moved.ok).toBe(true);
-    expect(moved.state.players[1].minions[0]).toMatchObject({ line: 0, position: slotPosition(2) });
+    expect(moved.state.players[1].minions[0]).toMatchObject({ line: 0, slot: 2, position: 8 });
     const undone = undoSummon(moved.state, 1, id);
     expect(undone.ok).toBe(true);
     expect(undone.state.players[1].minions).toHaveLength(0);
@@ -198,18 +269,15 @@ describe('Verschieben vor „Bereit“', () => {
     expect(undoSummon(combat, 0, id)).toMatchObject({ ok: false, reason: 'not-planning' });
   });
 
-  it('lehnt das Verschieben auf eine gesperrte Lane ab', () => {
-    const placed = playCard(setup(), 0, 0, 0, 0).state;
-    const id = placed.players[0].minions[0]!.id;
-    const result = moveMinion(placed, 0, id, 1, 0);
-    expect(result).toMatchObject({ ok: false, reason: 'invalid-line' });
-    expect(result.state).toBe(placed);
-  });
-
-  it('kennt keine fremden oder alten Minions', () => {
+  it('kennt keine fremden oder toten Minions', () => {
     const state = playCard(setup(), 0, 0, 0, 0).state;
     expect(moveMinion(state, 0, 999, 0, 1)).toMatchObject({ ok: false, reason: 'no-such-minion' });
     expect(moveMinion(state, 1, state.players[0].minions[0]!.id, 0, 1)).toMatchObject({
+      ok: false,
+      reason: 'no-such-minion',
+    });
+    state.players[0].minions[0]!.hp = 0;
+    expect(moveMinion(state, 0, state.players[0].minions[0]!.id, 0, 1)).toMatchObject({
       ok: false,
       reason: 'no-such-minion',
     });
@@ -221,6 +289,14 @@ describe('Verschieben vor „Bereit“', () => {
     const id = ready.players[0].minions[0]!.id;
     expect(moveMinion(ready, 0, id, 0, 1)).toMatchObject({ ok: false, reason: 'already-ready' });
     expect(undoSummon(ready, 0, id)).toMatchObject({ ok: false, reason: 'already-ready' });
+  });
+
+  it('aktualisiert die Lane der Beschwörung dieser Runde in der Synergie-Liste', () => {
+    const state = setup(2);
+    state.players[0].lines[1].towers = [tower(0)];
+    const placed = playCard(state, 0, 0, 0, 0).state;
+    const moved = moveMinion(placed, 0, placed.players[0].minions[0]!.id, 1, 0).state;
+    expect(moved.players[0].played[0]).toMatchObject({ line: 1 });
   });
 });
 
@@ -246,16 +322,14 @@ describe('Rückgängig machen vor „Bereit“', () => {
 
   it('gilt nicht für Minions aus früheren Runden', () => {
     const state = setup();
-    state.players[0].minions.push({ id: 50, line: 0, position: 60, hp: 5, damage: 1, range: 4, speed: 10 });
+    state.players[0].minions.push({ id: 50, line: 0, slot: 0, position: 60, hp: 5, damage: 1, range: 4, speed: 10 });
     expect(undoSummon(state, 0, 50)).toMatchObject({ ok: false, reason: 'no-such-minion' });
-    expect(moveMinion(state, 0, 50, 0, 0)).toMatchObject({ ok: false, reason: 'no-such-minion' });
   });
 });
 
-describe('Zeiger → Lane und Slot', () => {
+describe('Zeiger, Slot-Punkte und Einrasten', () => {
   // Lane-Index 0 = Start-Lane (Mitte), 1/2 = Lvl 2 oben/unten, 3/4 = Lvl 3 oben/unten.
   const geometry: LineGeometry = { laneCenters: [232, 162, 302, 92, 372], laneHalfHeight: 33, ownTowerX: 30, enemyTowerX: 330 };
-  const counts = [3, 3, 3, 0, 0];
 
   it('rechnet Position und x ineinander um', () => {
     for (const position of [0, 2, 14, 100]) {
@@ -265,49 +339,72 @@ describe('Zeiger → Lane und Slot', () => {
     expect(positionToX(100, geometry)).toBe(330);
   });
 
-  it('trifft einen Slot genau und mit Toleranz', () => {
-    const x = positionToX(slotPosition(1), geometry);
-    expect(dropTargetAt(x, 162, geometry, counts)).toEqual({ line: 1, slot: 1 });
-    expect(dropTargetAt(x + 2, 170, geometry, counts)).toEqual({ line: 1, slot: 1 });
-    expect(dropTargetAt(x, 232, geometry, counts)).toEqual({ line: 0, slot: 1 });
-    expect(dropTargetAt(x, 302, geometry, counts)).toEqual({ line: 2, slot: 1 });
+  it('legt den oberen Slot über, den unteren unter die Lane-Mitte, beide am Tower', () => {
+    const towers = [tower(0), tower(8)];
+    expect(slotPoint(0, towers, 0, geometry)).toEqual({ line: 0, slot: 0, x: 30, y: 232 - SLOT_DY });
+    expect(slotPoint(0, towers, 1, geometry)).toEqual({ line: 0, slot: 1, x: 30, y: 232 + SLOT_DY });
+    expect(slotPoint(0, towers, 3, geometry)).toEqual({ line: 0, slot: 3, x: 54, y: 232 + SLOT_DY });
   });
 
-  it('trifft eine Lane ohne Slot (hinter den vorhandenen Slots oder zwischen Zonen)', () => {
-    expect(dropTargetAt(positionToX(slotPosition(3), geometry), 232, geometry, counts)).toEqual({ line: 0, slot: null });
-    expect(dropTargetAt(positionToX(60, geometry), 302, geometry, counts)).toEqual({ line: 2, slot: null });
+  it('zeigt Punkte nur an freien Slots lebender Tower', () => {
+    const player = createMatch(1).players[0];
+    player.lines[0].towers[1]!.hp = 0;
+    const occupied = [minion(0, 0)];
+    const points = freeSlotPoints(player.lines, occupied, geometry);
+    // Tower 1 ist zerstört (Slots 2, 3 fehlen), Slot 0 ist belegt; bleiben 1, 4, 5. Gesperrte Lanes haben keine Punkte.
+    expect(points.map((p) => [p.line, p.slot])).toEqual([
+      [0, 1],
+      [0, 4],
+      [0, 5],
+    ]);
   });
 
-  it('liefert null zwischen den Lanes, links und rechts neben dem Feld und über und unter allen Lanes', () => {
-    const x = positionToX(slotPosition(0), geometry);
-    expect(dropTargetAt(x, 197, geometry, counts)).toBeNull();
-    expect(dropTargetAt(x, 267, geometry, counts)).toBeNull();
-    expect(dropTargetAt(-20, 232, geometry, counts)).toBeNull();
-    expect(dropTargetAt(10, 232, geometry, counts)).not.toBeNull();
-    expect(dropTargetAt(380, 232, geometry, counts)).toBeNull();
-    expect(dropTargetAt(x, 20, geometry, counts)).toBeNull();
-    expect(dropTargetAt(x, 600, geometry, counts)).toBeNull();
+  it('liefert Lane-Slots hinter dem Tower-Ende nur für freie Lanes ohne Lane-Karte', () => {
+    const player = setup(2).players[0];
+    player.lines[1].towers = [tower(0)];
+    expect(freeLaneSlotPoints(player.lines, geometry).map((p) => p.line)).toEqual([0, 1]);
+    player.lines[0].laneEffect = 'buff';
+    expect(freeLaneSlotPoints(player.lines, geometry).map((p) => p.line)).toEqual([1]);
+    player.lines[1].towers[0]!.hp = 0;
+    expect(freeLaneSlotPoints(player.lines, geometry)).toEqual([]);
+    expect(laneSlotPoint(0, geometry)).toEqual({ x: 30 - LANE_SLOT_GAP, y: 232 });
   });
 
-  it('behandelt Lanes ohne Eintrag in der Slot-Zahl-Liste wie gesperrte', () => {
-    const x = positionToX(slotPosition(0), geometry);
-    expect(dropTargetAt(x, 232, geometry, [3])).toEqual({ line: 0, slot: 0 });
-    expect(dropTargetAt(x, 162, geometry, [3])).toBeNull();
-    expect(dropTargetAt(x, 232, geometry, [])).toBeNull();
+  it('findet den nächsten Punkt und rastet nur in Reichweite ein', () => {
+    const points = [
+      { x: 30, y: 204, line: 0, slot: 0 },
+      { x: 30, y: 260, line: 0, slot: 1 },
+    ];
+    expect(nearestPoint([], 0, 0)).toBeNull();
+    expect(nearestPoint(points, 32, 210)?.point.slot).toBe(0);
+    expect(nearestPoint(points, 32, 250)).toMatchObject({ point: { slot: 1 } });
+    expect(snapTarget(points, 32, 210)?.slot).toBe(0);
+    expect(snapTarget(points, 30, 204 - SNAP_RADIUS - 1)).toBeNull();
+    expect(snapTarget(points, 30, 204 - SNAP_RADIUS)?.slot).toBe(0);
+    expect(snapTarget(points, 300, 100)).toBeNull();
+    expect(snapTarget([], 30, 204)).toBeNull();
   });
 
-  it('trifft keine gesperrte Lane (Slot-Zahl 0), auch wenn der Zeiger genau darauf steht', () => {
-    const x = positionToX(slotPosition(0), geometry);
-    expect(dropTargetAt(x, 92, geometry, counts)).toBeNull();
-    expect(dropTargetAt(x, 372, geometry, counts)).toBeNull();
-    expect(dropTargetAt(x, 92, geometry, laneSlotCounts(3))).toEqual({ line: 3, slot: 0 });
-    expect(dropTargetAt(x, 372, geometry, laneSlotCounts(3))).toEqual({ line: 4, slot: 0 });
-    expect(dropTargetAt(x, 372, geometry, laneSlotCounts(2))).toBeNull();
+  it('wählt bei gleichem Abstand den ersten Punkt', () => {
+    const points = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+    ];
+    expect(nearestPoint(points, 5, 0)?.point).toBe(points[0]);
   });
 
-  it('slotAtPosition kennt nur gültige Slots', () => {
-    expect(slotAtPosition(slotPosition(2), 3)).toBe(2);
-    expect(slotAtPosition(slotPosition(3), 3)).toBeNull();
-    expect(slotAtPosition(-10, 3)).toBeNull();
+  it('hebt einen Punkt stärker hervor, je näher der Zeiger ist', () => {
+    expect(slotProximity(0)).toBe(1);
+    expect(slotProximity(-5)).toBe(1);
+    expect(slotProximity(GLOW_RADIUS)).toBe(0);
+    expect(slotProximity(GLOW_RADIUS * 3)).toBe(0);
+    expect(slotProximity(Number.NaN)).toBe(0);
+    expect(slotProximity(20)).toBeGreaterThan(slotProximity(40));
+    expect(slotProximity(40)).toBeGreaterThan(slotProximity(70));
+    expect(slotProximity(40)).toBeGreaterThan(0);
+  });
+
+  it('rastet näher ein, als der Punkt zu glühen beginnt', () => {
+    expect(SNAP_RADIUS).toBeLessThan(GLOW_RADIUS);
   });
 });

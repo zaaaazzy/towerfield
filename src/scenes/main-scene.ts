@@ -3,36 +3,39 @@ import { CARD_ART_IDS, cardTypeStyle } from '../logic/card-style';
 import { getCardDef } from '../logic/cards';
 import { diffFx } from '../logic/fx-events';
 import { type CardPose, cardAt, fanLayout, HAND_FAN, liftedPose, sortHand } from '../logic/hand-layout';
-import {
-  advance,
-  createMatch,
-  type MatchState,
-  MAX_ROUNDS,
-  laneSlotCounts,
-  moveMinion,
-} from '../logic/match';
+import { advance, createMatch, DISCARD_ENERGY, type MatchState, MAX_ROUNDS, MOVE_COST } from '../logic/match';
 import { getRoundEventDef } from '../logic/round-events';
-import { LANE_COUNT, laneShortName } from '../logic/lanes';
+import { isLaneUnlocked, LANE_COUNT, laneShortName } from '../logic/lanes';
 import { botPlanRecorded, createRecord, performAction, type RecordedMatch } from '../logic/match-record';
 import { HAND_FILTER_NAMES, type HandFilter, isCardVisible, nextHandFilter } from '../logic/hand-filter';
 import { updateFlashes } from '../logic/minion-look';
 import { parseSeed } from '../logic/seed';
-import { type DropTarget, dropTargetAt, slotPosition } from '../logic/placement';
 import type { AudioEvent } from '../logic/audio-events';
 import { AudioLayer, audioControlAt, drawAudioControls, sliderValueAt } from './audio';
+import {
+  freeLaneSlotPoints,
+  freeSlotPoints,
+  nearestPoint,
+  type Point,
+  SNAP_RADIUS,
+  slotProximity,
+  snapTarget,
+} from '../logic/placement';
 import { CardView } from './card-view';
 import { Effects, type Locator } from './effects';
 import {
+  BOT,
   drawBoard,
   drawMinionBody,
   drawMinions,
+  drawSlotDots,
   FIELD,
   GEOMETRY,
   HUMAN,
-  BOT,
-  lineX,
   type MinionAnim,
   minionPoint,
+  playerMinionPoint,
+  type SlotDot,
   towerPoint,
 } from './field-view';
 import { type LabelFn, LabelPool } from './labels';
@@ -83,20 +86,50 @@ const LIFT_TIME_MS = 70;
 /** Bei größeren Zeitsprüngen (Tab im Hintergrund, Zeitraffer) gibt es keine Effekte. */
 const FX_MAX_DELTA_MS = 500;
 
-/** Zeigerzustand: gedrückt auf einem Minion (noch ein Tippen) oder schon am Ziehen. */
+/** Taste „Abwerfen“ oben links: sichtbar, solange eine Karte gewählt ist oder gezogen wird; Karte darauf ablegen wirft sie ab. */
+const DISCARD_BUTTON = { x: 6, y: 32, width: 96, height: 24 };
+/** Zeitkonstanten (ms) der weichen Animationen: Punkte-Nähe, Einblenden, Einrasten der gezogenen Karte, Rückflug. */
+const PROXIMITY_TIME_MS = 70;
+const FADE_TIME_MS = 110;
+const SNAP_TIME_MS = 45;
+const RETURN_TIME_MS = 60;
+
+/** Ziel eines Zugs auf dem Feld: ein Turm-Slot (mit `slot`) oder der Lane-Slot einer Lane (ohne `slot`). */
+interface Target extends Point {
+  line: number;
+  slot?: number;
+}
+
+/** Zeigerzustand: gedrückt auf einem Minion oder einer Handkarte (noch ein Tippen) oder schon am Ziehen. */
 interface DragState {
-  minionId: number;
+  /** Gezogener eigener Minion (verschieben) oder `null`. */
+  minionId: number | null;
+  /** Hand-Index der gezogenen Beschwörungs- oder Lane-Karte oder `null`. */
+  handIndex: number | null;
   startX: number;
   startY: number;
   x: number;
   y: number;
   dragging: boolean;
-  target: DropTarget | null;
-  valid: boolean;
+}
+
+/** Die Figur, die eine gezogene Karte darstellt: folgt dem Zeiger, rastet an Punkten ein und fliegt zurück in die Hand. */
+interface CardGhost {
+  cardId: string;
+  x: number;
+  y: number;
+  alpha: number;
+  /** Rückflugziel (Lage der Karte in der Hand); `null`, solange sie gezogen wird. */
+  returnTo: Point | null;
 }
 
 /** Karten, die beim aktiven Filter nicht passen, liegen hinter allen anderen. */
 const FADED_Z_OFFSET = -20;
+
+/** Schlüssel eines Ziels für die geglättete Nähe: Lane und Slot (der Lane-Slot hat keinen). */
+function targetKey(target: Target): string {
+  return `${target.line}:${target.slot ?? 'L'}`;
+}
 
 function inside(rect: { x: number; y: number; width: number; height: number }, x: number, y: number): boolean {
   return x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height;
@@ -130,6 +163,13 @@ export class MainScene extends Phaser.Scene {
   private lifts: number[] = [];
   private message = '';
   private drag: DragState | null = null;
+  /** Zeiger zuletzt (für die Nähe der Punkte bei gewählter Karte ohne Ziehen). */
+  private pointer: Point | null = null;
+  /** Nähe des Zeigers je Ziel (0 bis 1, Schlüssel `Linie:Slot`), gleitet über `delta`. */
+  private proximities = new Map<string, number>();
+  /** Sichtbarkeit der grünen Punkte (0 bis 1), gleitet über `delta`. */
+  private dotFade = 0;
+  private ghost: CardGhost | null = null;
   /** Statistik-Overlay nach Match-Ende wurde geschlossen. */
   private statsClosed = false;
   /** Kartenfilter der Hand; reiner Darstellungs- und Eingabezustand, wird nicht gespeichert. */
@@ -166,6 +206,18 @@ export class MainScene extends Phaser.Scene {
     return this.selected;
   }
 
+  /** Die grünen Punkte, die gerade angezeigt werden, samt Nähe des Zeigers (nur lesen, z. B. für E2E-Tests). */
+  get slotDots(): { line: number; slot: number | null; x: number; y: number; proximity: number }[] {
+    if (this.dotFade <= 0.01) return [];
+    return this.activeTargets().map((target) => ({
+      line: target.line,
+      slot: target.slot ?? null,
+      x: target.x,
+      y: target.y,
+      proximity: this.proximities.get(targetKey(target)) ?? 0,
+    }));
+  }
+
   create(): void {
     this.state = createMatch(parseSeed(window.location.search) ?? Date.now() >>> 0);
     this.record = createRecord(this.state.seed);
@@ -182,6 +234,10 @@ export class MainScene extends Phaser.Scene {
     this.lifts = [];
     this.message = '';
     this.drag = null;
+    this.pointer = null;
+    this.proximities = new Map();
+    this.dotFade = 0;
+    this.ghost = null;
     this.statsClosed = false;
     this.handFilter = 'all';
     this.cardViews = [];
@@ -190,8 +246,8 @@ export class MainScene extends Phaser.Scene {
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => this.onPointerMove(pointer.worldX, pointer.worldY));
     this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => this.onPointerUp(pointer.worldX, pointer.worldY));
     this.input.on('pointerupoutside', () => {
-      this.drag = null;
       this.slider = null;
+      this.cancelDrag();
     });
     this.input.on('gameout', () => {
       this.hovered = null;
@@ -210,8 +266,9 @@ export class MainScene extends Phaser.Scene {
       this.selected = null;
       this.hovered = null;
     }
-    if (this.state.phase !== 'planning' || this.state.ready[HUMAN]) this.drag = null;
+    if (this.state.phase !== 'planning' || this.state.ready[HUMAN]) this.cancelDrag();
     this.updateLifts(deltaMs);
+    this.updateDrag(deltaMs);
     this.updateEffects(deltaMs);
     this.render();
   }
@@ -249,10 +306,9 @@ export class MainScene extends Phaser.Scene {
     const player = this.state.players[HUMAN];
     let best: number | null = null;
     let bestDistance = GRAB_RADIUS;
-    for (const placement of player.placements) {
-      const minion = player.minions.find((m) => m.id === placement.minionId);
-      if (!minion) continue;
-      const point = minionPoint(HUMAN, minion);
+    for (const minion of player.minions) {
+      if (minion.hp <= 0 || minion.slot === undefined) continue;
+      const point = playerMinionPoint(HUMAN, player, minion);
       const distance = Math.hypot(point.x - x, point.y - y);
       if (distance <= bestDistance) {
         best = minion.id;
@@ -295,9 +351,10 @@ export class MainScene extends Phaser.Scene {
   private ownMinionAt(x: number, y: number): number | null {
     let best: number | null = null;
     let bestDistance = GRAB_RADIUS;
-    for (const minion of this.state.players[HUMAN].minions) {
+    const player = this.state.players[HUMAN];
+    for (const minion of player.minions) {
       if (minion.hp <= 0) continue;
-      const point = minionPoint(HUMAN, minion);
+      const point = playerMinionPoint(HUMAN, player, minion);
       const distance = Math.hypot(point.x - x, point.y - y);
       if (distance <= bestDistance) {
         best = minion.id;
@@ -328,12 +385,31 @@ export class MainScene extends Phaser.Scene {
       }
     }
     const minionId = this.grabbableMinionAt(x, y);
-    if (minionId === null) {
-      this.drag = null;
-      this.handleTap(x, y);
+    if (minionId !== null) {
+      this.drag = { minionId, handIndex: null, startX: x, startY: y, x, y, dragging: false };
       return;
     }
-    this.drag = { minionId, startX: x, startY: y, x, y, dragging: false, target: null, valid: false };
+    const handIndex = this.cardIndexAt(x, y);
+    if (handIndex !== null && this.isDraggable(handIndex)) {
+      this.drag = { minionId: null, handIndex, startX: x, startY: y, x, y, dragging: false };
+      return;
+    }
+    this.drag = null;
+    this.handleTap(x, y);
+  }
+
+  /** Lässt sich die Handkarte ziehen? Beschwörungs- und Lane-Karten, die der Spieler bezahlen kann und der Filter zeigt. */
+  private isDraggable(handIndex: number): boolean {
+    if (this.state.phase !== 'planning' || this.state.ready[HUMAN] || !this.isVisibleInHand(handIndex)) return false;
+    const def = getCardDef(this.state.players[HUMAN].hand[handIndex]!);
+    return (def.type === 'summon' || def.type === 'lane-card') && this.state.players[HUMAN].energy >= def.cost;
+  }
+
+  /** Bricht ein laufendes Ziehen ab; eine gezogene Karte fliegt zurück in die Hand, ohne Energie zu kosten. */
+  private cancelDrag(): void {
+    const drag = this.drag;
+    this.drag = null;
+    if (drag?.dragging && drag.handIndex !== null) this.returnGhost(drag.handIndex);
   }
 
   private setSlider(control: 'music' | 'effects', x: number): void {
@@ -347,18 +423,19 @@ export class MainScene extends Phaser.Scene {
       this.setSlider(this.slider, x);
       return;
     }
-    this.hovered = this.cardIndexAt(x, y);
+    this.pointer = { x, y };
+    this.hovered = this.drag?.dragging ? null : this.cardIndexAt(x, y);
     const drag = this.drag;
     if (!drag) return;
     drag.x = x;
     drag.y = y;
     if (!drag.dragging && Math.hypot(x - drag.startX, y - drag.startY) < DRAG_THRESHOLD) return;
+    if (!drag.dragging && drag.handIndex !== null) {
+      const cardId = this.state.players[HUMAN].hand[drag.handIndex];
+      if (cardId !== undefined) this.ghost = { cardId, x: drag.startX, y: drag.startY, alpha: 0, returnTo: null };
+      this.selected = null;
+    }
     drag.dragging = true;
-    drag.target = this.targetAt(x, y);
-    drag.valid =
-      drag.target !== null &&
-      drag.target.slot !== null &&
-      moveMinion(this.state, HUMAN, drag.minionId, drag.target.line, drag.target.slot).ok;
   }
 
   private onPointerUp(x: number, y: number): void {
@@ -371,24 +448,125 @@ export class MainScene extends Phaser.Scene {
       this.handleTap(drag.startX, drag.startY);
       return;
     }
-    const target = this.targetAt(x, y);
+    if (drag.handIndex !== null) {
+      this.dropCard(drag.handIndex, x, y);
+      return;
+    }
+    const target = snapTarget(this.targetsFor(drag), x, y);
     if (!target) {
       this.message = '';
       return;
     }
     const done = performAction(this.state, this.record, HUMAN, {
       type: 'move',
-      minionId: drag.minionId,
+      minionId: drag.minionId!,
       line: target.line,
-      slot: target.slot ?? -1,
+      slot: target.slot!,
     });
     this.state = done.result.state;
     this.record = done.record;
     this.message = done.result.ok ? '' : this.explain(done.result.reason);
   }
 
-  private targetAt(x: number, y: number): DropTarget | null {
-    return dropTargetAt(x, y, GEOMETRY, laneSlotCounts(this.state.players[HUMAN].level));
+  /** Karte loslassen: auf der Abwerfen-Taste abwerfen, an einem Ziel in Reichweite einrasten, sonst zurück in die Hand. */
+  private dropCard(handIndex: number, x: number, y: number): void {
+    if (inside(DISCARD_BUTTON, x, y)) {
+      this.ghost = null;
+      this.discard(handIndex);
+      return;
+    }
+    const target = snapTarget(this.targetsFor({ minionId: null, handIndex }), x, y);
+    if (!target) {
+      this.message = '';
+      this.returnGhost(handIndex);
+      return;
+    }
+    if (this.play(handIndex, target.line, undefined, target.slot)) this.ghost = null;
+    else this.returnGhost(handIndex);
+  }
+
+  /** Lässt die Kartenfigur zur Handkarte zurückfliegen. */
+  private returnGhost(handIndex: number): void {
+    if (!this.ghost) return;
+    const { order, poses } = this.handLayout(false);
+    const pose = poses[order.indexOf(handIndex)];
+    this.ghost.returnTo = pose ? { x: pose.x, y: pose.y } : { x: this.ghost.x, y: LAYOUT.handTop + 40 };
+  }
+
+  /** Alle Ziele (Turm-Slots oder Lane-Slots), die zu dem gezogenen Minion bzw. der Karte passen. */
+  private targetsFor(source: { minionId: number | null; handIndex: number | null }): Target[] {
+    const human = this.state.players[HUMAN];
+    if (source.handIndex !== null) {
+      const id = human.hand[source.handIndex];
+      if (id === undefined) return [];
+      return this.targetsOfCard(id);
+    }
+    return freeSlotPoints(human.lines, human.minions, GEOMETRY);
+  }
+
+  /** Ziele einer Karte: Turm-Slots für Beschwörungen, Lane-Slots für Lane-Karten, sonst keine. */
+  private targetsOfCard(cardId: string): Target[] {
+    const human = this.state.players[HUMAN];
+    const type = getCardDef(cardId).type;
+    if (type === 'summon') return freeSlotPoints(human.lines, human.minions, GEOMETRY);
+    if (type === 'lane-card') return freeLaneSlotPoints(human.lines, GEOMETRY);
+    return [];
+  }
+
+  /** Lane unter dem Punkt, wenn sie der Spieler freigeschaltet hat (Antippen der Lane), sonst `null`. */
+  private laneAt(x: number, y: number): number | null {
+    if (x < FIELD.ownTowerX - 30 || x > FIELD.enemyTowerX + 30) return null;
+    const lane = FIELD.laneCenters.findIndex(
+      (center, line) => isLaneUnlocked(this.state.players[HUMAN].level, line) && Math.abs(y - center) <= FIELD.laneHalfHeight,
+    );
+    return lane < 0 ? null : lane;
+  }
+
+  /** Die Ziele, die gerade angezeigt werden: beim Ziehen die der gezogenen Quelle, sonst die der gewählten Karte. */
+  private activeTargets(): Target[] {
+    if (this.state.phase !== 'planning' || this.state.ready[HUMAN]) return [];
+    if (this.drag?.dragging) return this.targetsFor(this.drag);
+    const id = this.selected === null ? undefined : this.state.players[HUMAN].hand[this.selected];
+    return id === undefined ? [] : this.targetsOfCard(id);
+  }
+
+  /** Gleitet Sichtbarkeit und Nähe der Punkte sowie die Kartenfigur (Einrasten, Rückflug) über `delta`. */
+  private updateDrag(deltaMs: number): void {
+    const targets = this.activeTargets();
+    const fadeFactor = 1 - Math.exp(-deltaMs / FADE_TIME_MS);
+    this.dotFade += ((targets.length > 0 ? 1 : 0) - this.dotFade) * fadeFactor;
+    const dragging = this.drag?.dragging ? this.drag : null;
+    const pointer = dragging ? { x: dragging.x, y: dragging.y } : this.pointer;
+    const near = pointer ? nearestPoint(targets, pointer.x, pointer.y) : null;
+    const proxFactor = 1 - Math.exp(-deltaMs / PROXIMITY_TIME_MS);
+    const next = new Map<string, number>();
+    for (const target of targets) {
+      const key = targetKey(target);
+      const distance = pointer ? Math.hypot(target.x - pointer.x, target.y - pointer.y) : Infinity;
+      // Der nächste Punkt in Reichweite ist voll hervorgehoben: dort rastet die Karte beim Loslassen ein.
+      const wanted = near?.point === target && near.distance <= SNAP_RADIUS ? 1 : slotProximity(distance) * 0.8;
+      const current = this.proximities.get(key) ?? 0;
+      next.set(key, current + (wanted - current) * proxFactor);
+    }
+    this.proximities = next;
+
+    const ghost = this.ghost;
+    if (!ghost) return;
+    if (ghost.returnTo) {
+      const back = 1 - Math.exp(-deltaMs / RETURN_TIME_MS);
+      ghost.x += (ghost.returnTo.x - ghost.x) * back;
+      ghost.y += (ghost.returnTo.y - ghost.y) * back;
+      ghost.alpha -= deltaMs / 220;
+      if (ghost.alpha <= 0.02) this.ghost = null;
+      return;
+    }
+    if (!dragging) return;
+    const snap = near && near.distance <= SNAP_RADIUS ? near.point : null;
+    const goal = snap ?? dragging;
+    const follow = 1 - Math.exp(-deltaMs / SNAP_TIME_MS);
+    ghost.x += (goal.x - ghost.x) * follow;
+    ghost.y += (goal.y - ghost.y) * follow;
+    ghost.alpha = Math.min(1, ghost.alpha + deltaMs / 90);
   }
 
   private handleTap(x: number, y: number): void {
@@ -413,6 +591,10 @@ export class MainScene extends Phaser.Scene {
       this.record = done.record;
       return;
     }
+    if (this.selected !== null && inside(DISCARD_BUTTON, x, y)) {
+      this.discard(this.selected);
+      return;
+    }
     if (inside(LAYOUT.filterButton, x, y)) {
       this.handFilter = nextHandFilter(this.handFilter);
       const selected = this.selected;
@@ -430,9 +612,15 @@ export class MainScene extends Phaser.Scene {
       }
       return;
     }
-    if (this.selected === null || this.selectedNeedsMinion()) return;
-    const target = this.targetAt(x, y);
-    if (target && y <= LAYOUT.handTop - 4) this.play(this.selected, target.line);
+    if (this.selected === null || this.selectedNeedsMinion() || y > LAYOUT.handTop - 4) return;
+    // Ein Antippen nahe einem grünen Punkt wählt diesen Slot, sonst die angetippte Lane (erster freier Slot bzw. Lane-Slot).
+    const snap = snapTarget(this.activeTargets(), x, y);
+    if (snap) {
+      this.play(this.selected, snap.line, undefined, snap.slot);
+      return;
+    }
+    const line = this.laneAt(x, y);
+    if (line !== null) this.play(this.selected, line);
   }
 
   /** Ist die Handkarte mit diesem Hand-Index beim aktiven Filter sichtbar und antippbar? */
@@ -441,9 +629,22 @@ export class MainScene extends Phaser.Scene {
     return id !== undefined && isCardVisible(getCardDef(id).type, this.handFilter);
   }
 
-  private play(handIndex: number, line?: number, minionId?: number): void {
+  /** Wirft die Handkarte ab (bringt `DISCARD_ENERGY` Energie, siehe `discardCard`). */
+  private discard(handIndex: number): void {
     const cardId = this.state.players[HUMAN].hand[handIndex];
     if (cardId === undefined) return;
+    const done = performAction(this.state, this.record, HUMAN, { type: 'discard', cardId });
+    this.state = done.result.state;
+    this.record = done.record;
+    this.selected = null;
+    this.message = done.result.ok ? '' : this.explain(done.result.reason);
+    if (done.result.ok) this.lifts.splice(handIndex, 1);
+  }
+
+  /** Spielt die Handkarte; `true`, wenn sie gespielt wurde. */
+  private play(handIndex: number, line?: number, minionId?: number, slot?: number): boolean {
+    const cardId = this.state.players[HUMAN].hand[handIndex];
+    if (cardId === undefined) return false;
     // Lage vor dem Spielen merken: danach ist die Karte aus der Hand und die Hand ordnet sich neu.
     const { order, poses } = this.handLayout(false);
     const pose = poses[order.indexOf(handIndex)];
@@ -452,6 +653,7 @@ export class MainScene extends Phaser.Scene {
       cardId,
       line: line ?? null,
       ...(minionId === undefined ? {} : { minionId }),
+      ...(slot === undefined ? {} : { slot }),
     });
     const result = done.result;
     this.state = result.state;
@@ -467,6 +669,7 @@ export class MainScene extends Phaser.Scene {
       }
       this.lifts.splice(handIndex, 1);
     }
+    return result.ok;
   }
 
   private explain(reason: string): string {
@@ -474,7 +677,9 @@ export class MainScene extends Phaser.Scene {
       case 'not-enough-energy':
         return 'Nicht genug Energie';
       case 'line-full':
-        return 'Lane ist voll';
+        return 'Kein Turm-Slot frei';
+      case 'lane-slot-taken':
+        return 'Lane hat schon eine Lane-Karte';
       case 'max-level':
         return 'Feld ist auf Höchststufe';
       case 'level-too-low':
@@ -482,7 +687,7 @@ export class MainScene extends Phaser.Scene {
       case 'already-specialized':
         return 'Tower schon spezialisiert';
       case 'slot-taken':
-        return 'Platz ist belegt';
+        return 'Turm-Slot ist belegt';
       case 'invalid-target':
         return 'Wähle einen eigenen Minion';
       case 'invalid-slot':
@@ -493,7 +698,38 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
-  private label: LabelFn = (text, x, y, options) => this.pool.label(text, x, y, options);
+  /** Die gezogene Karte als kleine Figur: Beschwörung als Einheit, Lane-Karte als Kartenplakette in ihrer Farbe. */
+  private drawGhost(ghost: CardGhost): void {
+    const g = this.graphics;
+    const def = getCardDef(ghost.cardId);
+    if (def.type === 'summon') {
+      drawMinionBody(g, ghost.x, ghost.y, HUMAN, undefined, 0.9 * ghost.alpha);
+    } else {
+      const accent = cardTypeStyle(def.type).accent;
+      g.fillStyle(accent, 0.9 * ghost.alpha).fillRoundedRect(ghost.x - 11, ghost.y - 11, 22, 22, 5);
+      g.lineStyle(2, PALETTE.white, 0.85 * ghost.alpha).strokeRoundedRect(ghost.x - 11, ghost.y - 11, 22, 22, 5);
+    }
+    if (ghost.alpha > 0.5) this.label(def.name, ghost.x, ghost.y - 22, { size: 9, stroke: 2 });
+  }
+
+  /** „Abwerfen“-Taste: erscheint bei gewählter oder gezogener Karte; hell, wenn die gezogene Karte darüber schwebt. */
+  private drawDiscardButton(state: MatchState, draggingCard: boolean): void {
+    if (state.phase !== 'planning' || state.ready[HUMAN] || (this.selected === null && !draggingCard)) return;
+    const hover = draggingCard && this.drag !== null && inside(DISCARD_BUTTON, this.drag.x, this.drag.y);
+    drawButton(
+      this.graphics,
+      DISCARD_BUTTON,
+      hover ? { top: 0xd9a441, bottom: 0x8a5a14 } : { top: 0x6a4a8a, bottom: 0x35234f },
+    );
+    this.label(
+      `Abwerfen +${DISCARD_ENERGY}`,
+      DISCARD_BUTTON.x + DISCARD_BUTTON.width / 2,
+      DISCARD_BUTTON.y + DISCARD_BUTTON.height / 2,
+      { size: 11, font: 'heading', bold: true },
+    );
+  }
+
+  private label: LabelFn =(text, x, y, options) => this.pool.label(text, x, y, options);
 
   private render(): void {
     const g = this.graphics;
@@ -522,30 +758,26 @@ export class MainScene extends Phaser.Scene {
     }
 
     const drag = this.drag?.dragging ? this.drag : null;
-    if (drag?.target) {
-      const color = drag.valid ? PALETTE.good : PALETTE.bad;
-      const center = FIELD.laneCenters[drag.target.line]!;
-      const left = FIELD.ownTowerX - 14;
-      g.lineStyle(2, color, 0.8).strokeRoundedRect(
-        left,
-        center - FIELD.laneHalfHeight,
-        FIELD.enemyTowerX - FIELD.ownTowerX + 28,
-        FIELD.laneHalfHeight * 2,
-        8,
-      );
-      if (drag.target.slot !== null) {
-        const slotX = lineX(HUMAN, slotPosition(drag.target.slot));
-        g.fillStyle(color, 0.5).fillCircle(slotX, center, GRAB_RADIUS * 0.6);
-      }
+    drawMinions(g, state, drag?.minionId ?? undefined, this.minionAnim);
+    if (this.dotFade > 0.01) {
+      const dots: SlotDot[] = this.activeTargets().map((target) => ({
+        x: target.x,
+        y: target.y,
+        proximity: this.proximities.get(targetKey(target)) ?? 0,
+      }));
+      drawSlotDots(g, dots, this.minionAnim.timeMs, this.dotFade);
     }
-
-    drawMinions(g, state, drag?.minionId, this.minionAnim);
-    if (drag) drawMinionBody(g, drag.x, drag.y, HUMAN, undefined, 0.85);
+    if (drag?.minionId != null) {
+      drawMinionBody(g, drag.x, drag.y, HUMAN, undefined, 0.85);
+      this.label(`-${MOVE_COST} Energie`, drag.x, drag.y - 20, { size: 9, color: TEXT.gold, stroke: 2 });
+    }
+    if (this.ghost) this.drawGhost(this.ghost);
+    this.drawDiscardButton(state, drag?.handIndex != null);
     if (needsMinion) {
       // Mögliche Ziele der gewählten Karte: alle eigenen lebenden Minions mit grünem Ring.
       for (const minion of human.minions) {
         if (minion.hp <= 0) continue;
-        const point = minionPoint(HUMAN, minion);
+        const point = playerMinionPoint(HUMAN, human, minion);
         g.lineStyle(2, PALETTE.good, 0.9).strokeCircle(point.x, point.y, GRAB_RADIUS * 0.7);
       }
     }

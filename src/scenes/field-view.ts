@@ -6,7 +6,9 @@
 import Phaser from 'phaser';
 import { type Explosion, LINE_LENGTH } from '../logic/combat';
 import { isLaneUnlocked, LANE_COUNT, laneName, laneRow, laneTowerOffsets, laneUnlockLevel } from '../logic/lanes';
-import { lineCapacity, type MatchState } from '../logic/match';
+import { getCardDef } from '../logic/cards';
+import { cardTypeStyle } from '../logic/card-style';
+import type { MatchState, PlayerState } from '../logic/match';
 import {
   bobOffset,
   facing,
@@ -17,7 +19,16 @@ import {
   type MinionShape,
   minionShape,
 } from '../logic/minion-look';
-import { isSlotFree, isValidSlot, type LineGeometry, positionToX, slotPosition } from '../logic/placement';
+import {
+  LANE_SLOT_GAP,
+  type LineGeometry,
+  positionToX,
+  SLOT_DY,
+  slotPoint,
+  slotSide,
+  slotTower,
+  validSlots,
+} from '../logic/placement';
 import { describeSynergy } from '../logic/synergies';
 import type { Point } from './effects';
 import type { LabelFn } from './labels';
@@ -68,12 +79,33 @@ export function lineX(owner: number, position: number): number {
   return FIELD.enemyTowerX - (position / LINE_LENGTH) * (FIELD.enemyTowerX - FIELD.ownTowerX);
 }
 
-/** Mittelpunkt, an dem ein Minion gezeichnet wird (auf seiner Lane, quer versetzt nach ID). */
-export function minionPoint(owner: number, minion: { id: number; line: number; position: number }): Point {
+/** Strecke (Positionen) nach dem Start am Tower, auf der ein Minion vom Slot-Platz auf die Lane-Mitte zurückgleitet. */
+const SLOT_BLEND = 14;
+
+/**
+ * Mittelpunkt, an dem ein Minion gezeichnet wird. Mit `spawn` (Standort seines Towers) steht es in der Planung auf
+ * seinem Turm-Slot oben oder unten und gleitet beim Loslaufen auf die Lane (quer versetzt nach ID); ohne `spawn` läuft
+ * es auf der Lane.
+ */
+export function minionPoint(
+  owner: number,
+  minion: { id: number; line: number; position: number; slot?: number },
+  spawn?: number,
+): Point {
+  const center = FIELD.laneCenters[minion.line]!;
+  const t = spawn === undefined || minion.slot === undefined ? 0 : Math.min(1, Math.max(0, 1 - (minion.position - spawn) / SLOT_BLEND));
+  const hold = t * t * (3 - 2 * t);
+  const slotY = slotSide(minion.slot ?? 0) === 0 ? -SLOT_DY : SLOT_DY;
   return {
     x: lineX(owner, minion.position),
-    y: FIELD.laneCenters[minion.line]! + laneStagger(minion.id),
+    y: center + laneStagger(minion.id) * (1 - hold) + slotY * hold,
   };
+}
+
+/** Wie `minionPoint`, nimmt den Standort des Towers aus dem Zustand des Spielers. */
+export function playerMinionPoint(owner: number, player: PlayerState, minion: PlayerState['minions'][number]): Point {
+  const tower = minion.slot === undefined ? undefined : player.lines[minion.line]?.towers[slotTower(minion.slot)];
+  return minionPoint(owner, minion, tower === undefined ? undefined : (tower.offset ?? 0));
 }
 
 /** Standort des Towers `tower` der Lane `line`; die Positionen der Tower stehen in `lanes.ts`. */
@@ -112,16 +144,11 @@ export function drawTower(
   g.fillStyle(PALETTE.panelDark, 0.9).fillRoundedRect(x - 5, y - 5, 10, 11, 2);
 
   if (alive && tower.specialization) {
-    // Markierung: gelbe Raute für den Blitz-Turm, blaue für den Schild-Turm, über den Zinnen.
+    // Markierung im Schild des Towers (die Fläche über dem Tower gehört den Turm-Slots): gelb für den Blitz-Turm,
+    // blau für den Schild-Turm.
     const mark = tower.specialization === 'lightning' ? 0xffd23a : 0x5ab4ff;
-    g.fillStyle(PALETTE.black, 0.8).fillPoints(
-      [new Phaser.Geom.Point(x, y - 31), new Phaser.Geom.Point(x + 5, y - 26), new Phaser.Geom.Point(x, y - 21), new Phaser.Geom.Point(x - 5, y - 26)],
-      true,
-    );
-    g.fillStyle(mark, 1).fillPoints(
-      [new Phaser.Geom.Point(x, y - 30), new Phaser.Geom.Point(x + 4, y - 26), new Phaser.Geom.Point(x, y - 22), new Phaser.Geom.Point(x - 4, y - 26)],
-      true,
-    );
+    g.fillStyle(mark, 0.35).fillRoundedRect(x - 5, y - 5, 10, 11, 2);
+    g.lineStyle(1, mark, 1).strokeRoundedRect(x - 5.5, y - 5.5, 11, 12, 2);
   }
   drawBar(g, x - 10, y - 21, 20, 4, maxHp > 0 ? hp / maxHp : 0, healthFill(maxHp > 0 ? hp / maxHp : 0), 'gold');
   label(`${Math.ceil(hp)}`, x, y + 1, { size: 8, bold: true, font: 'heading', color: alive ? TEXT.main : TEXT.dim });
@@ -242,6 +269,82 @@ export function drawMinionBody(
   }
 }
 
+/** Kurzname für die Zuordnung am Slot, z. B. „T2o“ (Turm 2, oben) – steht neben jeder Einheit auf einem Turm-Slot. */
+function slotTag(slot: number): string {
+  return `T${slotTower(slot) + 1}${slotSide(slot) === 0 ? 'o' : 'u'}`;
+}
+
+/**
+ * Turm-Slots der Lane: zwei je lebendem Tower, oben und unten. Ein freier Slot ist ein schwacher Ring; ein besetzter
+ * trägt die Farbe der Karte (Kartentyp), eine Linie zum Tower und das Kürzel von Turm und Seite.
+ */
+function drawSlotMarkers(
+  g: Phaser.GameObjects.Graphics,
+  label: LabelFn,
+  state: MatchState,
+  line: number,
+  planning: boolean,
+): void {
+  const human = state.players[HUMAN];
+  const towers = human.lines[line]!.towers;
+  const center = FIELD.laneCenters[line]!;
+  for (const slot of validSlots(towers)) {
+    const point = slotPoint(line, towers, slot, GEOMETRY);
+    const occupant = human.minions.find((m) => m.line === line && m.slot === slot);
+    const top = slotSide(slot) === 0;
+    if (!occupant) {
+      g.lineStyle(1, PALETTE.bronze, 0.55).strokeCircle(point.x, point.y, 5);
+      continue;
+    }
+    const cardId = state.stats.cardByMinion[occupant.id];
+    const color = cardId === undefined ? PALETTE.human : cardTypeStyle(getCardDef(cardId).type).accent;
+    g.lineStyle(1.5, PALETTE.human, 0.6).lineBetween(point.x, top ? point.y + 8 : point.y - 8, point.x, center + (top ? -13 : 12));
+    g.fillStyle(color, 0.28).fillCircle(point.x, point.y, 10);
+    g.lineStyle(2, color, 0.95).strokeCircle(point.x, point.y, 10);
+    if (planning) label(slotTag(slot), point.x + 15, point.y, { size: 7, color: TEXT.dim });
+  }
+}
+
+/** Lane-Slot hinter dem Tower-Ende: leer ein Quadrat-Rahmen, mit Lane-Karte gefüllt in der Kartenfarbe samt Kürzel. */
+function drawLaneSlot(
+  g: Phaser.GameObjects.Graphics,
+  label: LabelFn,
+  line: { laneCard?: string; laneEffect?: string },
+  x: number,
+  y: number,
+): void {
+  if (line.laneCard === undefined) {
+    g.lineStyle(1, PALETTE.bronze, 0.55).strokeRoundedRect(x - 5, y - 5, 10, 10, 2);
+    return;
+  }
+  const style = cardTypeStyle(getCardDef(line.laneCard).type);
+  g.fillStyle(style.accent, 0.85).fillRoundedRect(x - 6, y - 6, 12, 12, 3);
+  g.lineStyle(1.5, PALETTE.white, 0.8).strokeRoundedRect(x - 6, y - 6, 12, 12, 3);
+  label(line.laneEffect === 'buff' ? 'B' : 'S', x, y, { size: 8, bold: true, font: 'heading' });
+}
+
+/** Ein Punkt, den die Szene beim Ziehen einer Karte oder Einheit zeichnet; `proximity` kommt von `slotProximity`. */
+export interface SlotDot {
+  x: number;
+  y: number;
+  /** 0 bis 1: wie nah der Zeiger ist (geglättet über `delta`). */
+  proximity: number;
+}
+
+/**
+ * Grüne Punkte an den Zielen eines Zugs. Je näher der Zeiger, desto größer und heller der Punkt (Skalierung und Glow);
+ * `fade` (0 bis 1) blendet alle Punkte weich ein, `timeMs` lässt sie leicht pulsieren.
+ */
+export function drawSlotDots(g: Phaser.GameObjects.Graphics, dots: readonly SlotDot[], timeMs: number, fade: number): void {
+  dots.forEach((dot, index) => {
+    const pulse = 0.5 + 0.5 * Math.sin(timeMs / 240 + index);
+    const r = (4.5 + 3.5 * dot.proximity + 0.6 * pulse) * fade;
+    g.fillStyle(PALETTE.good, (0.1 + 0.3 * dot.proximity) * fade).fillCircle(dot.x, dot.y, r + 5 + 9 * dot.proximity);
+    g.fillStyle(PALETTE.good, fade).fillCircle(dot.x, dot.y, r);
+    g.lineStyle(1.5, PALETTE.white, (0.35 + 0.55 * dot.proximity) * fade).strokeCircle(dot.x, dot.y, r + 1);
+  });
+}
+
 /**
  * Lanes, Bauplätze, beide Tower-Gruppen und die Ausbaustufe. Lanes, die der Mensch noch nicht freigeschaltet hat,
  * liegen abgedunkelt mit ihrer Freischalt-Stufe da. `highlight` rahmt die freien Lanes golden.
@@ -249,7 +352,6 @@ export function drawMinionBody(
 export function drawBoard(g: Phaser.GameObjects.Graphics, label: LabelFn, state: MatchState, highlight = false): void {
   const human = state.players[HUMAN];
   const bot = state.players[BOT];
-  const slots = lineCapacity(human.level);
   const left = FIELD.ownTowerX - 14;
   const width = FIELD.enemyTowerX - FIELD.ownTowerX + 28;
   for (let line = 0; line < LANE_COUNT; line += 1) {
@@ -267,14 +369,9 @@ export function drawBoard(g: Phaser.GameObjects.Graphics, label: LabelFn, state:
       g.lineStyle(3, PALETTE.gold, 0.18).strokeRoundedRect(left - 1, top - 4, width + 2, height + 8, 9);
       g.lineStyle(2, PALETTE.gold, 0.65).strokeRoundedRect(left, top - 3, width, height + 6, 8);
     }
-    for (let slot = 0; slot < slots; slot += 1) {
-      if (!isValidSlot(slot, slots)) continue;
-      const x = lineX(HUMAN, slotPosition(slot));
-      const free = isSlotFree(human.minions, line, slot);
-      g.fillStyle(PALETTE.black, 0.3).fillEllipse(x, center + 1.5, 11, 7);
-      g.fillStyle(free ? PALETTE.stoneDark : PALETTE.humanDark, free ? 0.7 : 0.55).fillEllipse(x, center, 10, 6);
-      g.lineStyle(1, free ? PALETTE.bronze : PALETTE.human, free ? 0.7 : 0.8).strokeEllipse(x, center, 10, 6);
-    }
+    drawSlotMarkers(g, label, state, line, state.phase === 'planning');
+    drawLaneSlot(g, label, human.lines[line]!, lineX(HUMAN, 0) - LANE_SLOT_GAP, center);
+    drawLaneSlot(g, label, bot.lines[line]!, lineX(BOT, 0) + LANE_SLOT_GAP, center);
     for (const tower of bot.lines[line]!.towers) drawTower(g, label, lineX(BOT, tower.offset ?? 0), center, tower, BOT);
     for (const tower of human.lines[line]!.towers) drawTower(g, label, lineX(HUMAN, tower.offset ?? 0), center, tower, HUMAN);
     label(laneName(line), 180, center - 30, { size: 9, color: TEXT.gold });
@@ -293,9 +390,10 @@ export function drawBoard(g: Phaser.GameObjects.Graphics, label: LabelFn, state:
 export function drawMinions(g: Phaser.GameObjects.Graphics, state: MatchState, skipHumanId?: number, anim?: MinionAnim): void {
   const moving = state.phase === 'combat';
   for (const owner of [BOT, HUMAN]) {
-    for (const minion of state.players[owner]!.minions) {
+    const player = state.players[owner]!;
+    for (const minion of player.minions) {
       if (owner === HUMAN && skipHumanId === minion.id) continue;
-      const point = minionPoint(owner, minion);
+      const point = playerMinionPoint(owner, player, minion);
       const look = anim
         ? {
             id: minion.id,

@@ -2,7 +2,7 @@
  * Kartendefinitionen und Deck-Reihenfolge. Ohne Phaser: reine Daten und Funktionen.
  * Alle Spieler nutzen dasselbe Deck, das einmal per Seed gemischt wird.
  */
-import { type Explosion, MINION_SPEED, type Specialization } from './combat';
+import { type Explosion, type LaneEffect, MINION_SPEED, type Specialization } from './combat';
 import { nextRandom } from './game-state';
 
 export type CardType =
@@ -11,7 +11,8 @@ export type CardType =
   | 'tower-specialize'
   | 'summon'
   | 'minion-upgrade'
-  | 'minion-buff';
+  | 'minion-buff'
+  | 'lane-card';
 
 interface CardBase {
   id: string;
@@ -27,7 +28,9 @@ export type CardDef =
   | (CardBase & { type: 'tower-specialize'; path: Specialization })
   | (CardBase & { type: 'summon'; hp: number; damage: number; range?: number; speed?: number; role?: 'healer' | 'destroyer'; explodes?: Explosion })
   | (CardBase & { type: 'minion-upgrade'; hp: number; damage: number; scope: 'line' | 'all' })
-  | (CardBase & { type: 'minion-buff' });
+  | (CardBase & { type: 'minion-buff' })
+  /** Lane-Karte: wirkt in der Runde auf alle Minions der Lane; liegt im Lane-Slot hinter den Towern (höchstens eine je Lane). */
+  | (CardBase & { type: 'lane-card'; effect: LaneEffect });
 
 export const CARD_DEFS: readonly CardDef[] = [
   { id: 'summon-minion', name: 'Minion', type: 'summon', cost: 1, target: 'line', hp: 30, damage: 6, speed: MINION_SPEED },
@@ -73,6 +76,23 @@ export const CARD_DEFS: readonly CardDef[] = [
   },
   // Muss am Ende der Liste stehen: `match-record.ts` kodiert Karten über ihre Position.
   { id: 'buff-minion', name: 'Minion stärken', type: 'minion-buff', cost: 2, target: 'minion' },
+  // Neu mit Version 6 (Turm-Slots): Beschwörungen, Lane-Karten und Upgrades, ebenfalls nur am Ende anfügen.
+  { id: 'summon-scout', name: 'Späher', type: 'summon', cost: 1, target: 'line', hp: 20, damage: 4, speed: 14 },
+  { id: 'summon-guard', name: 'Wächter', type: 'summon', cost: 3, target: 'line', hp: 120, damage: 12, speed: 6 },
+  { id: 'summon-mage', name: 'Magier', type: 'summon', cost: 3, target: 'line', hp: 25, damage: 12, range: 12, speed: 9 },
+  { id: 'lane-buff', name: 'Lane-Buff', type: 'lane-card', cost: 2, target: 'line', effect: 'buff' },
+  { id: 'lane-shield', name: 'Lane-Schild', type: 'lane-card', cost: 2, target: 'line', effect: 'shield' },
+  { id: 'tower-armor', name: 'Tower Panzer', type: 'tower-upgrade', cost: 2, target: 'line', hp: 60, damage: 0 },
+  {
+    id: 'minion-upgrade-elite',
+    name: 'Elite-Drill',
+    type: 'minion-upgrade',
+    cost: 2,
+    target: 'line',
+    hp: 20,
+    damage: 4,
+    scope: 'line',
+  },
 ];
 
 /** Wie oft jede Karte in einem Durchgang des Decks vorkommt. */
@@ -90,7 +110,17 @@ const COPIES: Readonly<Record<string, number>> = {
   'minion-upgrade-line': 2,
   'minion-upgrade-all': 1,
   'buff-minion': 1,
+  'summon-scout': 2,
+  'summon-guard': 1,
+  'summon-mage': 1,
+  'lane-buff': 1,
+  'lane-shield': 1,
+  'tower-armor': 1,
+  'minion-upgrade-elite': 1,
 };
+
+/** Karten je Durchgang des Decks (Summe von `COPIES`). */
+export const DECK_CYCLE = Object.values(COPIES).reduce((sum, count) => sum + count, 0);
 
 export function getCardDef(id: string): CardDef {
   const def = CARD_DEFS.find((card) => card.id === id);
@@ -100,13 +130,19 @@ export function getCardDef(id: string): CardDef {
 
 /**
  * Deck der Länge `length`: die Karten laut `COPIES` (so oft wiederholt wie nötig), einmal per Seed gemischt
- * (Fisher-Yates). Gleicher Seed ergibt dieselbe Reihenfolge.
+ * (Fisher-Yates). Gleicher Seed ergibt dieselbe Reihenfolge. `defs` und `copies` sind nur für Tests austauschbar;
+ * Karten ohne Eintrag in `copies` kommen nicht vor (mindestens eine Karte braucht einen Eintrag > 0).
  */
-export function buildDeck(seed: number, length: number): string[] {
+export function buildDeck(
+  seed: number,
+  length: number,
+  defs: readonly CardDef[] = CARD_DEFS,
+  copies: Readonly<Record<string, number>> = COPIES,
+): string[] {
   const pool: string[] = [];
   while (pool.length < length) {
-    for (const def of CARD_DEFS) {
-      for (let copy = 0; copy < (COPIES[def.id] ?? 0); copy += 1) pool.push(def.id);
+    for (const def of defs) {
+      for (let copy = 0; copy < (copies[def.id] ?? 0); copy += 1) pool.push(def.id);
     }
   }
   pool.length = length;

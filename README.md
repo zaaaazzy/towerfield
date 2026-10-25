@@ -73,7 +73,7 @@ braucht kein höheres Timeout). Die Konsolentabelle blendet Dateien mit durchgeh
 | `balance-sim.ts` | 98,61 % | 96,42 % | 100 % | 98,27 % |
 | `bot.ts` | 100 % | 100 % | 100 % | 100 % |
 | `card-style.ts` | 92,85 % | 91,66 % | 100 % | 100 % |
-| `cards.ts` | 100 % | 75 % | 100 % | 100 % |
+| `cards.ts` | 100 % | 100 % | 100 % | 100 % |
 | `combat.ts` | 100 % | 97,95 % | 100 % | 100 % |
 | `fx-events.ts` | 96,66 % | 87,5 % | 100 % | 100 % |
 | `game-state.ts` | 100 % | 100 % | 100 % | 100 % |
@@ -88,8 +88,7 @@ braucht kein höheres Timeout). Die Konsolentabelle blendet Dateien mit durchgeh
 | `replay.ts` | 100 % | 94,23 % | 100 % | 100 % |
 | `seed.ts` | 100 % | 100 % | 100 % | 100 % |
 
-Alle Dateien liegen über dem Schwellenwert-Vorschlag; die niedrigsten Branch-Werte haben `cards.ts` (75 %, Zeile 81)
-und `fx-events.ts` (87,5 %, Zeilen 46–53).
+Alle Dateien liegen über dem Schwellenwert-Vorschlag; der niedrigste Branch-Wert ist `fx-events.ts` (87,5 %, Zeilen 46–53).
 
 ### Dev-Szene Balancing
 

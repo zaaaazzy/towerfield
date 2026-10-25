@@ -11,6 +11,7 @@ import {
   combatTick,
   type CombatPlayer,
   LINE_LENGTH,
+  type LaneEffect,
   type Minion,
   MINION_RANGE,
   MINION_SPEED,
@@ -30,7 +31,7 @@ import {
   TOWER_SHIELD,
 } from './round-events';
 import { isLaneUnlocked, LANE_COUNT, laneTowerOffsets, laneUnlockLevel, MAX_FIELD_LEVEL } from './lanes';
-import { firstFreeSlot, isSlotFree, isValidSlot, slotPosition } from './placement';
+import { firstFreeSlot, isSlotFree, isValidSlot, slotPosition, validSlots } from './placement';
 import { type ActiveSynergy, activeSynergies, type PlayedCard, synergyBonus } from './synergies';
 
 /** Zahl der Lanes des voll ausgebauten Feldes (Lvl 3); `PlayerState.lines` hat immer so viele Einträge. */
@@ -43,7 +44,10 @@ export const MAX_ROUNDS = 8;
 export const BASE_ENERGY = 3;
 export const ENERGY_PER_ROUND = 1;
 export const MAX_ENERGY = 8;
-export const BASE_CAPACITY = 2;
+/** Energie, die das Verschieben eines Minions auf einen anderen Turm-Slot kostet. */
+export const MOVE_COST = 1;
+/** Energie, die das Abwerfen einer Handkarte bringt; über `MAX_ENERGY` verfällt sie. */
+export const DISCARD_ENERGY = 1;
 export const TOWER_HP = 100;
 export const TOWER_DAMAGE = 8;
 /** Mindest-Level einer Lane (Ausbaustufe, ab der sie frei ist, siehe `laneUnlockLevel`) für eine Tower-Spezialisierung. */
@@ -63,10 +67,14 @@ export interface LineState {
   towers: Tower[];
   /** Dauerhafter Bonus für künftig beschworene Minions dieser Lane. */
   bonus: { hp: number; damage: number };
+  /** Lane-Karte im Lane-Slot hinter den Towern (höchstens eine); gilt nur für die laufende Runde. */
+  laneCard?: string;
+  /** Wirkung dieser Lane-Karte auf alle Minions der Lane; gesetzt genau dann, wenn `laneCard` gesetzt ist. */
+  laneEffect?: LaneEffect;
 }
 
 export interface PlayerState extends CombatPlayer {
-  /** Ausbaustufe des Feldes (1 bis `MAX_FIELD_LEVEL`); bestimmt, welche Lanes frei sind, und die Kapazität je Lane. */
+  /** Ausbaustufe des Feldes (1 bis `MAX_FIELD_LEVEL`); bestimmt, welche Lanes frei sind. Gilt je Spieler. */
   level: number;
   energy: number;
   /** Karten-IDs in der Reihenfolge, in der sie auf die Hand kamen. */
@@ -115,18 +123,14 @@ export type PlayError =
   | 'max-level'
   | 'level-too-low'
   | 'already-specialized'
-  | 'invalid-target';
+  | 'invalid-target'
+  | 'lane-slot-taken';
 
 export type PlayResult = { ok: true; state: MatchState } | { ok: false; state: MatchState; reason: PlayError };
 
-/** Maximale Zahl lebender Minions je freier Lane bei Ausbaustufe `level`. */
-export function lineCapacity(level: number): number {
-  return BASE_CAPACITY + level;
-}
-
-/** Slot-Zahl je Lane-Index bei Ausbaustufe `level`: `lineCapacity` für freie Lanes, 0 für noch gesperrte. */
-export function laneSlotCounts(level: number): number[] {
-  return Array.from({ length: LANE_COUNT }, (_, lane) => (isLaneUnlocked(level, lane) ? lineCapacity(level) : 0));
+/** Slot-Zahl je Lane-Index: zwei je lebendem Tower, 0 für gesperrte Lanes und Lanes ohne lebenden Tower. */
+export function laneSlotCounts(player: PlayerState): number[] {
+  return player.lines.map((line) => validSlots(line.towers).length);
 }
 
 /** Frische Tower einer Lane (Start-Lane: drei nebeneinander, sonst einer). */
@@ -178,27 +182,27 @@ function createPlayer(): PlayerState {
 }
 
 /**
- * Setzt die überlebenden Minions eines Spielers auf Slots ihrer Line zurück (verändert `player`): nach `id`
- * aufsteigend auf die niedrigsten freien Slots, Line und Werte bleiben. Tote Minions entfallen. Gibt es mehr
- * Überlebende als gültige Slots (in der Praxis unmöglich, Kapazität ≤ Zonen-Slots), stehen die übrigen auf dem
- * letzten gültigen Slot, damit keiner entfernt wird und keiner über `PLACEMENT_ZONE_END` hinausragt.
+ * Stellt die überlebenden Minions eines Spielers (in unveränderter Reihenfolge) zurück auf ihre Turm-Slots (verändert
+ * `player`): Sie kämpfen jede
+ * Runde von demselben Tower aus und müssen nicht neu gesetzt werden. Tote Minions und Minions, deren Tower zerstört ist,
+ * entfallen. Ein Minion ohne Slot (Altzustand) bekommt den ersten freien Slot seiner Lane oder entfällt, wenn keiner frei ist.
  */
 export function respawnSurvivors(player: PlayerState): void {
-  const alive = player.minions.filter((m) => m.hp > 0);
   const placed: Minion[] = [];
-  const positions = new Map<number, number>();
-  for (const minion of [...alive].sort((a, b) => a.id - b.id)) {
-    const slotCount = Math.max(lineCapacity(player.level), alive.length);
-    let slot = firstFreeSlot(placed, minion.line, slotCount);
-    if (slot === undefined) {
-      slot = slotCount - 1;
-      while (slot > 0 && !isValidSlot(slot, slotCount)) slot -= 1;
-    }
-    const position = slotPosition(slot);
-    positions.set(minion.id, position);
-    placed.push({ ...minion, position });
+  const keep = (minion: Minion, slot: number): void => {
+    const towers = player.lines[minion.line]!.towers;
+    placed.push({ ...minion, slot, position: slotPosition(towers, slot) });
+  };
+  const alive = player.minions.filter((m) => m.hp > 0);
+  for (const minion of alive.filter((m) => m.slot !== undefined)) {
+    if (isValidSlot(player.lines[minion.line]!.towers, minion.slot!)) keep(minion, minion.slot!);
   }
-  player.minions = alive.map((m) => ({ ...m, position: positions.get(m.id)! }));
+  for (const minion of alive.filter((m) => m.slot === undefined)) {
+    const slot = firstFreeSlot(placed, minion.line, player.lines[minion.line]!.towers);
+    if (slot !== undefined) keep(minion, slot);
+  }
+  const byId = new Map(placed.map((m) => [m.id, m]));
+  player.minions = alive.filter((m) => byId.has(m.id)).map((m) => byId.get(m.id)!);
 }
 
 /**
@@ -256,6 +260,10 @@ function startRound(state: MatchState, round: number): void {
     player.energy = roundEnergy(round, state.event);
     player.placements = [];
     player.played = [];
+    for (const line of player.lines) {
+      delete line.laneCard;
+      delete line.laneEffect;
+    }
     respawnSurvivors(player);
     refreshSynergies(player);
     player.hand.push(...drawn);
@@ -311,18 +319,21 @@ export function playCard(
   let summonSlot = 0;
   if (def.target === 'line') {
     if (lineIndex === undefined || !isLaneUnlocked(current.level, lineIndex)) return reject(state, 'invalid-line');
+    const towers = current.lines[lineIndex]!.towers;
     if (def.type === 'summon') {
-      const slotCount = lineCapacity(current.level);
-      if (current.minions.filter((m) => m.line === lineIndex).length >= slotCount) return reject(state, 'line-full');
       if (slot === undefined) {
-        const free = firstFreeSlot(current.minions, lineIndex, slotCount);
-        if (free === undefined) return reject(state, 'slot-taken');
+        const free = firstFreeSlot(current.minions, lineIndex, towers);
+        if (free === undefined) return reject(state, 'line-full');
         summonSlot = free;
       } else {
-        if (!isValidSlot(slot, slotCount)) return reject(state, 'invalid-slot');
+        if (!isValidSlot(towers, slot)) return reject(state, 'invalid-slot');
         if (!isSlotFree(current.minions, lineIndex, slot)) return reject(state, 'slot-taken');
         summonSlot = slot;
       }
+    }
+    if (def.type === 'lane-card') {
+      if (!towers.some((tower) => tower.hp > 0)) return reject(state, 'invalid-line');
+      if (current.lines[lineIndex]!.laneEffect !== undefined) return reject(state, 'lane-slot-taken');
     }
   }
   if (def.target === 'minion') {
@@ -366,7 +377,8 @@ export function playCard(
       const minion: Minion = {
         id: player.nextMinionId,
         line: lineIndex!,
-        position: slotPosition(summonSlot),
+        position: slotPosition(line!.towers, summonSlot),
+        slot: summonSlot,
         hp: def.hp + line!.bonus.hp,
         damage: def.damage + line!.bonus.damage,
         range: def.range ?? MINION_RANGE,
@@ -391,6 +403,10 @@ export function playCard(
     case 'minion-buff':
       applyMinionBuff(player.minions.find((m) => m.id === targetMinionId)!);
       break;
+    case 'lane-card':
+      line!.laneCard = cardId;
+      line!.laneEffect = def.effect;
+      break;
   }
   player.played.push(played);
   refreshSynergies(player);
@@ -398,8 +414,9 @@ export function playCard(
 }
 
 /**
- * Verschiebt einen in dieser Planungsphase beschworenen Minion auf Line `lineIndex`, Slot `slot` (kostenlos, beliebig
- * oft bis „Bereit“). Der eigene alte Platz zählt dabei als frei. Bei einem Fehler kommt der alte Zustand zurück.
+ * Verschiebt einen eigenen lebenden Minion auf Lane `lineIndex`, Slot `slot` für die nächste Runde. Das kostet
+ * `MOVE_COST` Energie; bei zu wenig Energie bleibt das Minion, wo es ist. Das Ziel muss ein freier Slot eines lebenden
+ * Towers sein (der eigene Slot zählt als belegt). Bei einem Fehler kommt der alte Zustand zurück.
  */
 export function moveMinion(
   state: MatchState,
@@ -411,24 +428,39 @@ export function moveMinion(
   if (state.phase !== 'planning') return reject(state, 'not-planning');
   if (state.ready[playerIndex]) return reject(state, 'already-ready');
   const current = state.players[playerIndex];
-  if (!current.placements.some((p) => p.minionId === minionId) || !current.minions.some((m) => m.id === minionId)) {
-    return reject(state, 'no-such-minion');
-  }
+  if (!current.minions.some((m) => m.id === minionId && m.hp > 0)) return reject(state, 'no-such-minion');
   if (!isLaneUnlocked(current.level, lineIndex)) return reject(state, 'invalid-line');
-  const others = current.minions.filter((m) => m.id !== minionId);
-  const slotCount = lineCapacity(current.level);
-  if (others.filter((m) => m.line === lineIndex).length >= slotCount) return reject(state, 'line-full');
-  if (!isValidSlot(slot, slotCount)) return reject(state, 'invalid-slot');
-  if (!isSlotFree(others, lineIndex, slot)) return reject(state, 'slot-taken');
+  const towers = current.lines[lineIndex]!.towers;
+  if (!isValidSlot(towers, slot)) return reject(state, 'invalid-slot');
+  if (!isSlotFree(current.minions, lineIndex, slot)) return reject(state, 'slot-taken');
+  if (current.energy < MOVE_COST) return reject(state, 'not-enough-energy');
   const next = structuredClone(state);
-  const moved = next.players[playerIndex].minions.find((m) => m.id === minionId)!;
-  if (playerIndex === STATS_PLAYER) recordMove(next.stats, minionId, moved.line, lineIndex);
-  moved.line = lineIndex;
-  moved.position = slotPosition(slot);
   const owner = next.players[playerIndex];
-  // Jede Platzierung dieser Runde hat einen Eintrag in `played` (beide entstehen in `playCard`).
-  owner.played.find((p) => p.minionId === minionId)!.line = lineIndex;
+  const moved = owner.minions.find((m) => m.id === minionId)!;
+  if (playerIndex === STATS_PLAYER) recordMove(next.stats, minionId, moved.line, lineIndex);
+  owner.energy -= MOVE_COST;
+  moved.line = lineIndex;
+  moved.slot = slot;
+  moved.position = slotPosition(towers, slot);
+  // Eine Beschwörung dieser Runde hat einen Eintrag in `played`; Überlebende früherer Runden nicht.
+  const entry = owner.played.find((p) => p.minionId === minionId);
+  if (entry) entry.line = lineIndex;
   refreshSynergies(owner);
+  return { ok: true, state: next };
+}
+
+/**
+ * Wirft die Handkarte `handIndex` ab: Sie verschwindet aus dem Spiel, der Spieler erhält `DISCARD_ENERGY` Energie
+ * (höchstens bis `MAX_ENERGY`, der Rest verfällt).
+ */
+export function discardCard(state: MatchState, playerIndex: PlayerIndex, handIndex: number): PlayResult {
+  if (state.phase !== 'planning') return reject(state, 'not-planning');
+  if (state.ready[playerIndex]) return reject(state, 'already-ready');
+  if (state.players[playerIndex].hand[handIndex] === undefined) return reject(state, 'no-such-card');
+  const next = structuredClone(state);
+  const player = next.players[playerIndex];
+  player.hand.splice(handIndex, 1);
+  player.energy = Math.min(MAX_ENERGY, player.energy + DISCARD_ENERGY);
   return { ok: true, state: next };
 }
 

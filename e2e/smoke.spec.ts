@@ -62,10 +62,10 @@ test('das Spiel startet, zeichnet in den Canvas und meldet keine Fehler', async 
     });
   const start = await view();
   expect(start.phase).toBe('planning');
-  expect(start.towers).toEqual([
-    [3, 0, 0, 0, 0],
-    [3, 0, 0, 0, 0],
-  ]);
+  // Der Gegner baut Lanes nur mit seinen eigenen Ausbaukarten aus; der Bot kann sie schon im ersten Zug spielen.
+  expect(start.towers[0]).toEqual([3, 0, 0, 0, 0]);
+  expect(start.towers[1]![0]).toBe(3);
+  expect(start.towers[1]!.slice(3)).toEqual([0, 0]);
   expect(start.hands[0]).toBe(START_HAND);
 
   // Tippen auf „Bereit“ (unten rechts; Spielkoordinaten 360x640) startet die Kampfphase.
@@ -293,8 +293,8 @@ test('?replay=<seed>&moves=<ungültig>: kein Konsolenfehler, das Replay bleibt m
   await page.locator('#game canvas').click();
   await page.waitForFunction(() => window.game?.scene.isActive('main') && !window.game.scene.isActive('replay'));
 
-  // Lesbar, aber regelwidrig (sechsmal dieselbe Karte): das Replay bricht an der ersten ungültigen Aktion ab.
-  await page.goto('/?replay=7&moves=v5.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0');
+  // Lesbar, aber regelwidrig (achtmal dieselbe Karte, zuletzt ohne Energie): das Replay bricht an der ersten ungültigen Aktion ab.
+  await page.goto('/?replay=7&moves=v6.p10-0-0.p10-0-0.p10-0-0.p10-0-0.p10-0-0.p10-0-0.p10-0-0.p10-0-0');
   await page.waitForFunction(() => window.game?.scene.isActive('replay') && window.game.loop.frame > 10);
   await page.waitForFunction(
     () => (window.game!.scene.getScene('replay') as unknown as RecordedReplayView).current.aborted !== null,
@@ -305,7 +305,7 @@ test('?replay=<seed>&moves=<ungültig>: kein Konsolenfehler, das Replay bleibt m
   expect((await visibleTexts(page)).some((text) => text.startsWith('Replay abgebrochen bei Zug'))).toBe(true);
 
   // Leerer Wert und Quatsch ohne Punkte und Ziffern.
-  for (const moves of ['', '%00%FF', 'v5.p10-', 'v4.p10-0', 'v3.p10-0', 'v2.p10-0', 'v1.p10-0']) {
+  for (const moves of ['', '%00%FF', 'v6.p10-', 'v5.p10-0', 'v4.p10-0', 'v3.p10-0', 'v2.p10-0', 'v1.p10-0']) {
     await page.goto(`/?replay=7&moves=${moves}`);
     await page.waitForFunction(() => window.game?.scene.isActive('replay') && window.game.loop.frame > 5);
     await expect.poll(async () => (await visibleTexts(page)).includes('Replay gestoppt')).toBe(true);

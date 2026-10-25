@@ -3,12 +3,14 @@
  * zurücknehmen, bereit) samt Runde, dazu ein kompaktes URL-Format und das Nachspielen mit Prüfung.
  * Ohne Phaser, DOM und Canvas. Die Regeln kommen unverändert aus `match.ts`; hier wird nur mitgeschrieben.
  *
- * Format (Version 5, nur Zeichen `0-9 a-z . -`, damit nichts maskiert werden muss):
- *   `v5` gefolgt von Aktionen, je mit `.` davor. Eine Aktion beginnt mit Typbuchstabe, Runde (1 Ziffer) und Spieler
+ * Format (Version 6, nur Zeichen `0-9 a-z . -`, damit nichts maskiert werden muss):
+ *   `v6` gefolgt von Aktionen, je mit `.` davor. Eine Aktion beginnt mit Typbuchstabe, Runde (1 Ziffer) und Spieler
  *   (0/1), danach Felder mit `-`:
- *   `p<R><P>-<Kartenindex>[-<Lane>]` Karte spielen (bei Karten mit Ziel-Minion steht an der Stelle der Lane die
- *   Minion-Id) · `m<R><P>-<Minion>-<Lane>-<Slot>` verschieben ·
- *   `u<R><P>-<Minion>` zurücknehmen · `r<R><P>` bereit.
+ *   `p<R><P>-<Kartenindex>[-<Lane>[-<Slot>]]` Karte spielen (bei Karten mit Ziel-Minion steht an der Stelle der Lane
+ *   die Minion-Id; der Turm-Slot einer Beschwörung steht nur, wenn er gewählt wurde, sonst gilt der erste freie) ·
+ *   `m<R><P>-<Minion>-<Lane>-<Slot>` auf einen anderen Turm-Slot verschieben (kostet Energie) ·
+ *   `u<R><P>-<Minion>` zurücknehmen · `d<R><P>-<Kartenindex>` Handkarte abwerfen (bringt Energie) · `r<R><P>` bereit.
+ *   Der Slot ist `2 * Tower-Index + Seite` (0 oben, 1 unten), siehe `placement.ts`.
  * Der Kartenindex ist die Position in `CARD_DEFS`. Ändern sich Regeln oder Kartenliste, muss `RECORD_VERSION` steigen,
  * damit alte Links als ungültig erkannt werden (der Test in `match-record.test.ts` hält die Kartenliste fest).
  */
@@ -19,6 +21,7 @@ import {
   advance,
   COMBAT_TICKS,
   createMatch,
+  discardCard,
   LINE_COUNT,
   type MatchState,
   MAX_ROUNDS,
@@ -31,20 +34,22 @@ import {
 } from './match';
 
 /**
- * Version 5: Tower-Spezialisierungskarten (`tower-lightning`, `tower-shield`) ändern Kartenliste und Deck. Version 4
- * brachte `buff-minion` (der Zug trägt statt der Lane die Minion-Id), Version 3 `summon-destroyer`, Version 2 das
- * horizontale Lane-Layout. Links aus älteren Versionen gelten nicht mehr, weil sie sonst ein anderes Match abspielten.
+ * Version 6: Turm-Slots statt freier Positionen, Verschieben und Abwerfen kosten bzw. bringen Energie, Lane-Karten und
+ * sieben neue Karten (Kartenliste und Deck ändern sich). Version 5 brachte die Tower-Spezialisierungen, Version 4
+ * `buff-minion` (der Zug trägt statt der Lane die Minion-Id), Version 3 `summon-destroyer`, Version 2 das horizontale
+ * Lane-Layout. Links aus älteren Versionen gelten nicht mehr, weil sie sonst ein anderes Match abspielten.
  */
-export const RECORD_VERSION = 5;
+export const RECORD_VERSION = 6;
 /** Obergrenze für Länge und Aktionszahl beim Dekodieren; ein Match mit 8 Runden bleibt weit darunter. */
 export const MAX_MOVES_LENGTH = 4000;
 const MAX_ACTIONS = 800;
 
 /** Der Teil einer Aktion, den der Spieler bestimmt; Runde und Spieler ergänzt `performAction`. */
 export type ActionBody =
-  | { type: 'play'; cardId: string; line: number | null; minionId?: number }
+  | { type: 'play'; cardId: string; line: number | null; minionId?: number; slot?: number }
   | { type: 'move'; minionId: number; line: number; slot: number }
   | { type: 'undo'; minionId: number }
+  | { type: 'discard'; cardId: string }
   | { type: 'ready' };
 
 export type RecordedAction = ActionBody & { round: number; player: PlayerIndex };
@@ -82,7 +87,12 @@ export function applyAction(state: MatchState, action: RecordedAction): ActionRe
       const handIndex = state.players[player].hand.indexOf(action.cardId);
       if (handIndex < 0) return fail(state, 'no-such-card');
       if (getCardDef(action.cardId).target !== 'line' && action.line !== null) return fail(state, 'invalid-line');
-      return playCard(state, player, handIndex, action.line ?? undefined, undefined, action.minionId);
+      return playCard(state, player, handIndex, action.line ?? undefined, action.slot, action.minionId);
+    }
+    case 'discard': {
+      const handIndex = state.players[player].hand.indexOf(action.cardId);
+      if (handIndex < 0) return fail(state, 'no-such-card');
+      return discardCard(state, player, handIndex);
     }
     case 'move':
       return moveMinion(state, player, action.minionId, action.line, action.slot);
@@ -120,14 +130,16 @@ export function botPlanRecorded(
   let current = state;
   let recorded = record;
   for (let move = botStep(current, player, priority); move; move = botStep(current, player, priority)) {
-    const action: RecordedAction = {
-      type: 'play',
-      round: current.round,
-      player,
-      cardId: move.cardId,
-      line: move.line ?? null,
-      ...(move.minionId === undefined ? {} : { minionId: move.minionId }),
-    };
+    const action: RecordedAction = move.discard
+      ? { type: 'discard', round: current.round, player, cardId: move.cardId }
+      : {
+          type: 'play',
+          round: current.round,
+          player,
+          cardId: move.cardId,
+          line: move.line ?? null,
+          ...(move.minionId === undefined ? {} : { minionId: move.minionId }),
+        };
     recorded = appendAction(recorded, action);
     current = move.state;
   }
@@ -169,7 +181,7 @@ export function replayRecorded(record: RecordedMatch): ReplayResult {
 }
 
 const VERSION_PREFIX = `v${RECORD_VERSION}`;
-const TYPE_LETTER = { play: 'p', move: 'm', undo: 'u', ready: 'r' } as const;
+const TYPE_LETTER = { play: 'p', move: 'm', undo: 'u', discard: 'd', ready: 'r' } as const;
 
 function encodeAction(action: RecordedAction): string {
   const head = `${TYPE_LETTER[action.type]}${action.round}${action.player}`;
@@ -178,7 +190,13 @@ function encodeAction(action: RecordedAction): string {
       const index = CARD_DEFS.findIndex((def) => def.id === action.cardId);
       if (index < 0) throw new Error(`Unbekannte Karte: ${action.cardId}`);
       const target = action.minionId ?? action.line;
-      return `${head}-${index}${target === null ? '' : `-${target}`}`;
+      const slot = action.slot === undefined || action.line === null ? '' : `-${action.slot}`;
+      return `${head}-${index}${target === null ? '' : `-${target}`}${slot}`;
+    }
+    case 'discard': {
+      const index = CARD_DEFS.findIndex((def) => def.id === action.cardId);
+      if (index < 0) throw new Error(`Unbekannte Karte: ${action.cardId}`);
+      return `${head}-${index}`;
     }
     case 'move':
       return `${head}-${action.minionId}-${action.line}-${action.slot}`;
@@ -201,7 +219,7 @@ function parseNumber(text: string): number | null {
 
 function decodeAction(token: string): RecordedAction | null {
   const [head = '', ...fields] = token.split('-');
-  if (!/^[pmur][1-9][01]$/.test(head)) return null;
+  if (!/^[pmudr][1-9][01]$/.test(head)) return null;
   const round = Number(head[1]);
   const player = Number(head[2]) as PlayerIndex;
   if (round > MAX_ROUNDS) return null;
@@ -214,14 +232,26 @@ function decodeAction(token: string): RecordedAction | null {
   const [first = 0, second = 0, third = 0] = numbers;
   switch (head[0]) {
     case 'p': {
-      if (numbers.length < 1 || numbers.length > 2) return null;
+      if (numbers.length < 1 || numbers.length > 3) return null;
       const def = CARD_DEFS[first];
       if (!def) return null;
       if (def.target === 'minion') {
         return numbers.length === 2 ? { type: 'play', round, player, cardId: def.id, line: null, minionId: second } : null;
       }
-      if (numbers.length === 2 && second >= LINE_COUNT) return null;
-      return { type: 'play', round, player, cardId: def.id, line: numbers.length === 2 ? second : null };
+      if (numbers.length >= 2 && second >= LINE_COUNT) return null;
+      if (numbers.length === 3 && def.type !== 'summon') return null;
+      return {
+        type: 'play',
+        round,
+        player,
+        cardId: def.id,
+        line: numbers.length >= 2 ? second : null,
+        ...(numbers.length === 3 ? { slot: third } : {}),
+      };
+    }
+    case 'd': {
+      const def = CARD_DEFS[first];
+      return numbers.length === 1 && def ? { type: 'discard', round, player, cardId: def.id } : null;
     }
     case 'm':
       if (numbers.length !== 3 || second >= LINE_COUNT) return null;

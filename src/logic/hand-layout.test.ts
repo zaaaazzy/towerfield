@@ -39,6 +39,11 @@ describe('sortHand', () => {
     ]);
   });
 
+  it('legt Lane-Karten hinter „Minion stärken“ und vor die Tower-Upgrades', () => {
+    const types: CardType[] = ['tower-upgrade', 'lane-card', 'minion-buff', 'summon'];
+    expect(sortHand(types).map((index) => types[index])).toEqual(['summon', 'minion-buff', 'lane-card', 'tower-upgrade']);
+  });
+
   it('erhält die Reihenfolge innerhalb eines Typs', () => {
     const types: CardType[] = ['summon', 'tower-upgrade', 'summon', 'tower-upgrade', 'summon'];
     expect(sortHand(types)).toEqual([0, 2, 4, 1, 3]);
