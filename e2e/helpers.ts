@@ -4,7 +4,8 @@ import { cardAt, fanLayout, HAND_FAN, poseContains, sortHand } from '../src/logi
 import { type Minion, TICK_MS } from '../src/logic/combat';
 import type { MatchState } from '../src/logic/match';
 import { laneStagger } from '../src/logic/minion-look';
-import { type LineGeometry, positionToX, slotPosition } from '../src/logic/placement';
+import { laneTowerOffsets } from '../src/logic/lanes';
+import { laneSlotPoint, type LineGeometry, positionToX, slotPoint as logicSlotPoint } from '../src/logic/placement';
 
 /** Spielfläche in Spielkoordinaten (wie `VIEW` in der Szene). */
 const VIEW = { width: 360, height: 640 };
@@ -96,19 +97,91 @@ export interface Point {
   y: number;
 }
 
-/** Spielkoordinaten des Slots `slot` auf der Lane `line` (Mitte der Lane). */
+/** Die Tower einer frisch ausgebauten Lane (nur ihre Standorte zählen für die Slot-Punkte). */
+const laneTowers = (line: number) =>
+  laneTowerOffsets(line).map((offset) => ({ offset, hp: 100, maxHp: 100, damage: 8 }));
+
+/** Spielkoordinaten des Turm-Slots `slot` (2 · Tower + Seite, 0 oben / 1 unten) auf der Lane `line`. */
 export function slotPoint(line: number, slot: number): Point {
-  return { x: positionToX(slotPosition(slot), GEOMETRY), y: LANE_Y[line]! };
+  const { x, y } = logicSlotPoint(line, laneTowers(line), slot, GEOMETRY);
+  return { x, y };
 }
 
-/** Spielkoordinaten, an denen die Szene einen eigenen Minion zeichnet (greifbar, mit Querversatz je `id`). */
-export function minionPoint(minion: { id: number; line: number; position: number }): Point {
+/** Spielkoordinaten des Lane-Slots der Lane `line` (hinter den Türmen). */
+export function laneSlot(line: number): Point {
+  return laneSlotPoint(line, GEOMETRY);
+}
+
+/** Taste „Abwerfen“ (Mitte), Spiegel von `DISCARD_BUTTON` in `main-scene.ts`. */
+export const DISCARD_BUTTON = { x: 54, y: 44 };
+
+/**
+ * Spielkoordinaten, an denen die Szene einen eigenen Minion zeichnet (greifbar): auf seinem Turm-Slot, solange er
+ * dort steht (Planung), sonst auf der Lane mit Querversatz je `id`.
+ */
+export function minionPoint(minion: { id: number; line: number; position: number; slot?: number }): Point {
+  const offsets = laneTowerOffsets(minion.line);
+  const onSlot = minion.slot !== undefined && offsets[Math.floor(minion.slot / 2)] === minion.position;
+  if (onSlot) return slotPoint(minion.line, minion.slot!);
   return { x: positionToX(minion.position, GEOMETRY), y: LANE_Y[minion.line]! + laneStagger(minion.id) };
 }
 
-/** Punkt zwischen der Start-Lane und der Lane darüber, der zu keiner Lane gehört. */
+/** Punkt zwischen der Start-Lane und der Lane darüber, weit von allen Turm-Slots, der zu keiner Lane gehört. */
 export function pointBetweenLines(): Point {
-  return { x: slotPoint(0, 1).x, y: (LANE_Y[0]! + LANE_Y[1]!) / 2 };
+  return { x: 200, y: (LANE_Y[0]! + LANE_Y[1]!) / 2 };
+}
+
+/** Ziele, die die Szene gerade als grüne Punkte zeigt (Spiegel von `MainScene.slotDots`). */
+export interface SlotDotView {
+  line: number;
+  slot: number | null;
+  x: number;
+  y: number;
+  proximity: number;
+}
+
+export function readDots(page: Page): Promise<SlotDotView[]> {
+  return page.evaluate(() => (window.game!.scene.getScene('main') as unknown as { slotDots: SlotDotView[] }).slotDots);
+}
+
+/** Maus in Spielkoordinaten bewegen / drücken / loslassen, für Ziehen in mehreren Schritten mit Zwischenprüfung. */
+async function toPage(page: Page, point: Point): Promise<Point> {
+  const box = (await page.locator('#game canvas').boundingBox())!;
+  return { x: box.x + (point.x / VIEW.width) * box.width, y: box.y + (point.y / VIEW.height) * box.height };
+}
+
+export async function pointerDown(page: Page, point: Point): Promise<void> {
+  const p = await toPage(page, point);
+  await page.mouse.move(p.x, p.y);
+  await page.mouse.down();
+}
+
+export async function pointerMove(page: Page, point: Point, steps = 6): Promise<void> {
+  const p = await toPage(page, point);
+  await page.mouse.move(p.x, p.y, { steps });
+}
+
+export async function pointerUp(page: Page): Promise<void> {
+  await page.mouse.up();
+}
+
+/** Zieht die Handkarte `index` (am Fächer gegriffen) auf den Punkt `to`. */
+export async function dragCard(page: Page, index: number, to: Point, steps = 8): Promise<void> {
+  await drag(page, await cardPointOf(page, index), to, steps);
+}
+
+/** Stellt eine Hand mit diesen Karten und Energie her (nur im Szenenzustand der Tests, die Regeln laufen unverändert). */
+export function setHand(page: Page, hand: string[], energy: number): Promise<void> {
+  return page.evaluate(
+    ([cards, points]) => {
+      const scene = window.game!.scene.getScene('main') as unknown as {
+        state: { players: { hand: string[]; energy: number }[] };
+      };
+      scene.state.players[0]!.hand = cards as string[];
+      scene.state.players[0]!.energy = points as number;
+    },
+    [hand, energy] as const,
+  );
 }
 
 /** Schaltet die Lanes der Ausbaustufe `level` für den Menschen frei (setzt nur `level` im Szenenzustand der Tests). */

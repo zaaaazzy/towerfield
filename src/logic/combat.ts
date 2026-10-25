@@ -22,6 +22,14 @@ export const LIGHTNING_FACTOR = 0.6;
 /** Schild-Turm: Anteil des Schadens, den ein Minion dem Tower zufügt und der als Rückwurf auf das Minion fällt. */
 export const SHIELD_REFLECT = 0.5;
 
+/** Lane-Buff: Faktor auf den Schaden der eigenen Minions der Lane. */
+export const LANE_BUFF_FACTOR = 1.25;
+/** Lane-Schild: Faktor auf den Schaden, den die eigenen Minions der Lane erleiden. */
+export const LANE_SHIELD_FACTOR = 0.7;
+
+/** Wirkung einer Lane-Karte auf alle Minions einer Lane (nur für die laufende Runde). */
+export type LaneEffect = 'buff' | 'shield';
+
 /** Spezialisierung eines Towers: Blitz trifft alle Minions der Lane, Schild wirft Schaden zurück. */
 export type Specialization = 'lightning' | 'shield';
 
@@ -59,6 +67,11 @@ export interface Minion {
   speed: number;
   /** Explodiert beim Tod: fügt gegnerischen Minions derselben Lane im Abstand `radius` einmalig `damage` zu. */
   explodes?: Explosion;
+  /**
+   * Turm-Slot der Lane: `2 * Tower-Index + Seite` (0 oben, 1 unten). Von dort startet das Minion jede Runde (siehe
+   * `placement.ts`); fehlt er, steht es auf keinem Slot (nur in Tests und Altzuständen).
+   */
+  slot?: number;
 }
 
 /** Flächenschaden eines Zerstörers beim Tod: Radius in Einheiten, fester Schaden je Opfer (unabhängig von `delta`). */
@@ -69,13 +82,23 @@ export interface Explosion {
 
 /** Was der Kampf von einem Spieler braucht; `lines[i].towers` sind die Tower der Lane i (leer: Lane nicht frei). */
 export interface CombatPlayer {
-  lines: { towers: Tower[] }[];
+  lines: { towers: Tower[]; laneEffect?: LaneEffect }[];
   minions: Minion[];
 }
 
 /** Reichweite im Kampf: Basiswert plus temporärer Bonus. */
 export function effectiveRange(minion: Minion): number {
   return minion.range + (minion.rangeBonus ?? 0);
+}
+
+/** Schadensfaktor der Minions einer Lane mit Lane-Buff (`LANE_BUFF_FACTOR`, sonst 1). */
+function dealtFactor(line: { laneEffect?: LaneEffect } | undefined): number {
+  return line?.laneEffect === 'buff' ? LANE_BUFF_FACTOR : 1;
+}
+
+/** Faktor auf den erlittenen Schaden der Minions einer Lane mit Lane-Schild (`LANE_SHIELD_FACTOR`, sonst 1). */
+function takenFactor(line: { laneEffect?: LaneEffect } | undefined): number {
+  return line?.laneEffect === 'shield' ? LANE_SHIELD_FACTOR : 1;
 }
 
 /** Abstand zweier gegnerischer Minions auf derselben Lane. */
@@ -234,20 +257,22 @@ export function combatTick(
           target = otherIndex;
         }
       });
+      const dealt = minion.damage * deltaSeconds * dealtFactor(me.lines[minion.line]);
       if (target >= 0) {
-        minionDamage[enemySide]![target]! += minion.damage * deltaSeconds;
-        hits.push({ side, minionId: minion.id, kind: 'minion', targetSide: enemySide, target, tower: -1, amount: minion.damage * deltaSeconds });
+        const taken = dealt * takenFactor(enemy.lines[enemy.minions[target]!.line]);
+        minionDamage[enemySide]![target]! += taken;
+        hits.push({ side, minionId: minion.id, kind: 'minion', targetSide: enemySide, target, tower: -1, amount: taken });
         return;
       }
       const towers = enemy.lines[minion.line]!.towers;
       const tower = nearestTower(towers, minion.position);
       if (tower >= 0 && towerDistance(towers[tower]!, minion.position) <= effectiveRange(minion)) {
-        towerDamage[enemySide]![minion.line]![tower]! += minion.damage * deltaSeconds;
+        towerDamage[enemySide]![minion.line]![tower]! += dealt;
         if (towers[tower]!.specialization === 'shield') {
           // Rückwurf aus dem Zustand vor dem Tick, gedeckelt auf die Rest-HP des Angreifers.
-          minionDamage[side]![index]! += Math.min(minion.hp, minion.damage * deltaSeconds * SHIELD_REFLECT);
+          minionDamage[side]![index]! += Math.min(minion.hp, dealt * SHIELD_REFLECT);
         }
-        hits.push({ side, minionId: minion.id, kind: 'tower', targetSide: enemySide, target: minion.line, tower, amount: minion.damage * deltaSeconds });
+        hits.push({ side, minionId: minion.id, kind: 'tower', targetSide: enemySide, target: minion.line, tower, amount: dealt });
         return;
       }
       nextPosition[side]![index] = Math.min(LINE_LENGTH, minion.position + minion.speed * deltaSeconds);
@@ -259,7 +284,8 @@ export function combatTick(
         if (tower.specialization === 'lightning') {
           enemy.minions.forEach((other, otherIndex) => {
             if (other.line !== lineIndex || towerDistance(tower, other.position) > TOWER_RANGE) return;
-            minionDamage[enemySide]![otherIndex]! += tower.damage * deltaSeconds * LIGHTNING_FACTOR;
+            minionDamage[enemySide]![otherIndex]! +=
+              tower.damage * deltaSeconds * LIGHTNING_FACTOR * takenFactor(enemy.lines[other.line]);
           });
           continue;
         }
@@ -272,7 +298,9 @@ export function combatTick(
             target = otherIndex;
           }
         });
-        if (target >= 0) minionDamage[enemySide]![target]! += tower.damage * deltaSeconds;
+        if (target >= 0) {
+          minionDamage[enemySide]![target]! += tower.damage * deltaSeconds * takenFactor(enemy.lines[lineIndex]);
+        }
       }
     });
   }

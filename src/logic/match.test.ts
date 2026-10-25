@@ -7,13 +7,14 @@ import {
   COMBAT_TICKS,
   createMatch,
   destroyedOutcome,
+  DISCARD_ENERGY,
+  discardCard,
   DRAW_PER_ROUND,
   energyForRound,
   HAND_LIMIT,
   hpOutcome,
   createLaneTowers,
   laneSlotCounts,
-  lineCapacity,
   LINE_COUNT,
   MAX_ENERGY,
   MAX_ROUNDS,
@@ -31,10 +32,19 @@ import {
   TOWER_HP,
   undoSummon,
 } from './match';
-import { effectiveRange, LINE_LENGTH, MINION_RANGE, TICK_MS, TICK_SECONDS, towersAlive } from './combat';
+import {
+  effectiveRange,
+  LANE_BUFF_FACTOR,
+  LANE_SHIELD_FACTOR,
+  LINE_LENGTH,
+  MINION_RANGE,
+  TICK_MS,
+  TICK_SECONDS,
+  towersAlive,
+} from './combat';
 import { deriveEventSeed, EARLY_RESPAWN_TICKS, pickRoundEvent, type RoundEventId, TOWER_SHIELD } from './round-events';
 import { isLaneUnlocked, MAX_FIELD_LEVEL, unlockedLanes } from './lanes';
-import { PLACEMENT_ZONE_END, slotPosition } from './placement';
+import { isSlotFree, validSlots } from './placement';
 
 describe('Runden-Ereignisse', () => {
   function seedWith(event: RoundEventId): number {
@@ -71,7 +81,8 @@ describe('Runden-Ereignisse', () => {
     withSurvivor.players[0].minions.push({
       id: 50,
       line: 0,
-      position: slotPosition(0),
+      slot: 0,
+      position: 0,
       hp: 30,
       damage: 6,
       range: MINION_RANGE,
@@ -82,19 +93,19 @@ describe('Runden-Ereignisse', () => {
     const early = setReady(setReady(withSurvivor, 0), 1);
     const normal = setReady(setReady(without, 0), 1);
     expect(early.phase).toBe('combat');
-    expect(early.players[0].minions[0]!.position).toBe(slotPosition(0) + 10 * EARLY_RESPAWN_TICKS * TICK_SECONDS);
-    expect(normal.players[0].minions[0]!.position).toBe(slotPosition(0));
+    expect(early.players[0].minions[0]!.position).toBe(10 * EARLY_RESPAWN_TICKS * TICK_SECONDS);
+    expect(normal.players[0].minions[0]!.position).toBe(0);
   });
 
   it('Früher Aufbruch: frisch beschworene Minions bekommen keinen Vorsprung und der Weg endet an der Lane', () => {
     const state = toRound(seedWith('early-respawn'), 3);
     state.players[0].minions.push(
-      { id: 1, line: 0, position: slotPosition(0), hp: 30, damage: 6, range: MINION_RANGE, speed: 10 },
+      { id: 1, line: 0, slot: 0, position: 0, hp: 30, damage: 6, range: MINION_RANGE, speed: 10 },
       { id: 2, line: 0, position: LINE_LENGTH - 1, hp: 30, damage: 6, range: MINION_RANGE, speed: 10 },
     );
     state.players[0].placements.push({ minionId: 1, cardId: 'x' });
     const combat = setReady(setReady(state, 0), 1);
-    expect(combat.players[0].minions[0]!.position).toBe(slotPosition(0));
+    expect(combat.players[0].minions[0]!.position).toBe(0);
     expect(combat.players[0].minions[1]!.position).toBe(LINE_LENGTH);
   });
 
@@ -479,7 +490,6 @@ describe('Karten ausspielen', () => {
   });
 
   it('schaltet mit der zweiten Ausbaustufe (Lvl 3) je eine weitere Lane oben und unten frei und stoppt dort', () => {
-    expect(lineCapacity(2)).toBe(lineCapacity(1) + 1);
     let state = withHand(createMatch(1), Array(MAX_FIELD_LEVEL + 1).fill('line-upgrade'), 100);
     for (let level = 1; level < MAX_FIELD_LEVEL; level += 1) {
       const result = playCard(state, 0, 0);
@@ -512,10 +522,14 @@ describe('Karten ausspielen', () => {
     expect(playCard(withLevel(state, 3), 0, 0, 4).ok).toBe(true);
   });
 
-  it('liefert die Slot-Zahlen je Lane: gesperrte Lanes haben keine', () => {
-    expect(laneSlotCounts(1)).toEqual([lineCapacity(1), 0, 0, 0, 0]);
-    expect(laneSlotCounts(2)).toEqual([lineCapacity(2), lineCapacity(2), lineCapacity(2), 0, 0]);
-    expect(laneSlotCounts(3)).toEqual(Array(5).fill(lineCapacity(3)));
+  it('liefert die Slot-Zahlen je Lane: zwei je lebendem Tower, gesperrte Lanes haben keine', () => {
+    expect(laneSlotCounts(withLevel(createMatch(1), 1).players[0])).toEqual([6, 0, 0, 0, 0]);
+    expect(laneSlotCounts(withLevel(createMatch(1), 2).players[0])).toEqual([6, 2, 2, 0, 0]);
+    expect(laneSlotCounts(withLevel(createMatch(1), 3).players[0])).toEqual([6, 2, 2, 2, 2]);
+    const hurt = withLevel(createMatch(1), 2);
+    hurt.players[0].lines[0]!.towers[2]!.hp = 0;
+    hurt.players[0].lines[1]!.towers[0]!.hp = 0;
+    expect(laneSlotCounts(hurt.players[0])).toEqual([4, 0, 2, 0, 0]);
   });
 
   it('baut mit „Tower ausbauen“ Leben oder Schaden eines Towers der gewählten Lane aus', () => {
@@ -546,14 +560,15 @@ describe('Karten ausspielen', () => {
     expect(revived.state.players[0].lines[0]!.towers.map((tower) => tower.hp)).toEqual([30, 0, 0]);
   });
 
-  it('beschwört ein Minion auf der gewählten Lane und lehnt es bei voller Lane ab', () => {
-    let state = withLevel(withHand(createMatch(1), Array(lineCapacity(2) + 1).fill('summon-minion'), 100), 2);
-    for (let index = 0; index < lineCapacity(2); index += 1) {
+  it('beschwört ein Minion auf der gewählten Lane und lehnt es bei vollen Turm-Slots ab', () => {
+    let state = withLevel(withHand(createMatch(1), Array(3).fill('summon-minion'), 100), 2);
+    for (let index = 0; index < 2; index += 1) {
       const result = playCard(state, 0, 0, 1);
       if (!result.ok) throw new Error(result.reason);
       state = result.state;
     }
-    expect(state.players[0].minions.filter((m) => m.line === 1)).toHaveLength(lineCapacity(2));
+    // Lane 1 hat einen Tower, also genau zwei Slots, beide jetzt belegt.
+    expect(state.players[0].minions.filter((m) => m.line === 1).map((m) => m.slot)).toEqual([0, 1]);
     expect(state.players[1].minions).toHaveLength(0);
     expect(playCard(state, 0, 0, 1)).toMatchObject({ ok: false, reason: 'line-full' });
     // Eine andere Lane ist frei.
@@ -1002,9 +1017,10 @@ describe('Determinismus', () => {
 });
 
 describe('Respawn der Überlebenden', () => {
-  const minion = (id: number, line: number, position: number, hp = 20) => ({
+  const minion = (id: number, line: number, position: number, hp = 20, slot?: number) => ({
     id,
     line,
+    ...(slot === undefined ? {} : { slot }),
     position,
     hp,
     maxHp: 30,
@@ -1024,8 +1040,11 @@ describe('Respawn der Überlebenden', () => {
     // Nur Spieler 0 hat das Feld ausgebaut; der Gegner hat auf diesen Lanes keine Tower, die Überlebenden bleiben heil.
     const state = createMatch(3);
     state.players[0].level = MAX_FIELD_LEVEL;
-    const survivors = [minion(4, 1, 50), minion(2, 2, 50), minion(7, 4, 50), minion(8, 3, 50)];
-    state.players[0].minions = [...survivors, minion(9, 1, 50, 0)];
+    state.players[0].lines.forEach((lane, index) => {
+      if (lane.towers.length === 0) lane.towers = createLaneTowers(index);
+    });
+    const survivors = [minion(4, 1, 50, 20, 0), minion(2, 2, 50, 20, 1), minion(7, 4, 50, 20, 0), minion(8, 3, 50, 20, 1)];
+    state.players[0].minions = [...survivors, minion(9, 1, 50, 0, 1)];
     const ready = setReady(setReady(state, 0), 1);
     const next = advance(ready, COMBAT_TICKS * TICK_MS);
     expect(next.phase).toBe('planning');
@@ -1033,50 +1052,64 @@ describe('Respawn der Überlebenden', () => {
     expect(next.players[0].minions.map((m) => m.id)).toEqual([4, 2, 7, 8]);
     for (const original of survivors) {
       const back = next.players[0].minions.find((m) => m.id === original.id)!;
-      expect(back).toEqual({ ...original, position: slotPosition(0) });
+      expect(back).toEqual({ ...original, position: 0 });
     }
     expect(next.players[0].minions.some((m) => m.id === 9)).toBe(false);
     expect(next.players[0].placements).toEqual([]);
   });
 
-  it('setzt Überlebende nach id aufsteigend auf die niedrigsten freien Slots ihrer Lane', () => {
-    const state = withMinions([minion(5, 1, 40), minion(2, 1, 33), minion(9, 0, 12), minion(3, 1, 50)]);
+  it('stellt Überlebende auf ihren Turm-Slot zurück: Position des Towers, Slot und Lane bleiben', () => {
+    const state = withMinions([minion(5, 0, 40, 20, 3), minion(2, 0, 33, 20, 4), minion(9, 1, 12, 20, 1)]);
     respawnSurvivors(state.players[0]);
     const byId = (id: number) => state.players[0].minions.find((m) => m.id === id)!;
-    expect(byId(2).position).toBe(slotPosition(0));
-    expect(byId(3).position).toBe(slotPosition(1));
-    expect(byId(5).position).toBe(slotPosition(2));
-    expect(byId(9).position).toBe(slotPosition(0));
+    expect(byId(5)).toMatchObject({ line: 0, slot: 3, position: 8 });
+    expect(byId(2)).toMatchObject({ line: 0, slot: 4, position: 16 });
+    expect(byId(9)).toMatchObject({ line: 1, slot: 1, position: 0 });
+    expect(state.players[0].minions.map((m) => m.id)).toEqual([5, 2, 9]);
   });
 
-  it('behält Lane und Werte, entfernt Tote und bleibt in der Zone', () => {
-    const state = withMinions([minion(1, 2, 45), minion(2, 2, 10, 0)]);
+  it('lässt Einheiten auf zerstörten Türmen wegfallen', () => {
+    const state = withMinions([minion(1, 0, 40, 20, 0), minion(2, 0, 40, 20, 3), minion(3, 0, 40, 20, 5)]);
+    state.players[0].lines[0]!.towers[1]!.hp = 0;
     respawnSurvivors(state.players[0]);
-    expect(state.players[0].minions).toEqual([{ ...minion(1, 2, 45), position: slotPosition(0) }]);
-    expect(state.players[0].minions[0]!.position).toBeLessThanOrEqual(PLACEMENT_ZONE_END);
+    expect(state.players[0].minions.map((m) => m.id)).toEqual([1, 3]);
+    // Auf dem zerstörten Tower lässt sich nichts mehr setzen.
+    state.players[0].hand = ['summon-minion'];
+    state.players[0].energy = 5;
+    expect(playCard(state, 0, 0, 0, 3)).toMatchObject({ ok: false, reason: 'invalid-slot' });
   });
 
-  it('leert in Runde 2 placements und setzt Überlebende beider Spieler zurück', () => {
-    let state = withMinions([minion(1, 0, 20)]);
-    state.players[1].minions = [minion(1, 0, 20)];
+  it('weist Minions ohne Slot den ersten freien Slot ihrer Lane zu und entfernt sie, wenn keiner frei ist', () => {
+    const state = withMinions([
+      minion(1, 0, 40, 20, 0),
+      minion(2, 0, 41),
+      minion(3, 1, 42),
+      ...Array.from({ length: 6 }, (_, i) => minion(10 + i, 2, 43)),
+    ]);
+    respawnSurvivors(state.players[0]);
+    const byId = (id: number) => state.players[0].minions.find((m) => m.id === id);
+    expect(byId(1)).toMatchObject({ slot: 0 });
+    expect(byId(2)).toMatchObject({ slot: 1, position: 0 });
+    expect(byId(3)).toMatchObject({ slot: 0 });
+    // Lane 2 hat nur zwei Slots (ein Tower): vier der sechs Einheiten fallen weg.
+    expect(state.players[0].minions.filter((m) => m.line === 2).map((m) => m.slot)).toEqual([0, 1]);
+  });
+
+  it('entfernt Tote', () => {
+    const state = withMinions([minion(1, 2, 45, 20, 0), minion(2, 2, 10, 0, 1)]);
+    respawnSurvivors(state.players[0]);
+    expect(state.players[0].minions).toEqual([{ ...minion(1, 2, 45, 20, 0), position: 0 }]);
+  });
+
+  it('leert in Runde 2 placements und setzt Überlebende beider Spieler auf ihren Slot zurück', () => {
+    let state = withMinions([minion(1, 0, 20, 20, 2)]);
+    state.players[1].minions = [minion(1, 0, 20, 20, 5)];
     state = advance(setReady(setReady(state, 0), 1), COMBAT_TICKS * TICK_MS);
     expect(state.round).toBe(2);
     expect(state.players[0].placements).toEqual([]);
     for (const player of state.players) {
-      for (const m of player.minions) {
-        expect(m.position).toBe(slotPosition(0));
-        expect(m.position).toBeLessThanOrEqual(PLACEMENT_ZONE_END);
-      }
+      for (const m of player.minions) expect(m.position).toBe(player.lines[m.line]!.towers[Math.floor(m.slot! / 2)]!.offset);
     }
-  });
-
-  it('entfernt bei übervoller Lane keinen Minion und bleibt in der Zone', () => {
-    const state = withMinions(Array.from({ length: 12 }, (_, i) => minion(i + 1, 0, 40 + i)));
-    respawnSurvivors(state.players[0]);
-    expect(state.players[0].minions).toHaveLength(12);
-    for (const m of state.players[0].minions) expect(m.position).toBeLessThanOrEqual(PLACEMENT_ZONE_END);
-    const first = state.players[0].minions.slice(0, 8).map((m) => m.position);
-    expect(new Set(first).size).toBe(8);
   });
 
   it('liefert bei gleichem Seed nach Runde 2 identische Positionen', () => {
@@ -1084,22 +1117,223 @@ describe('Respawn der Überlebenden', () => {
       let state = createMatch(7);
       state = botPlan(botPlan(state, 0), 1);
       state = advance(state, COMBAT_TICKS * TICK_MS);
-      return state.players.map((p) => p.minions.map((m) => [m.id, m.line, m.position]));
+      return state.players.map((p) => p.minions.map((m) => [m.id, m.line, m.slot, m.position]));
     };
     expect(run()).toEqual(run());
   });
 
-  it('belegt nach Runde 2 in echten Matches keinen Slot doppelt und bleibt in der Zone', () => {
+  it('belegt nach Runde 2 in echten Matches keinen Turm-Slot doppelt und nur Slots lebender Tower', () => {
     for (let seed = 1; seed <= 20; seed += 1) {
       let state = createMatch(seed);
       state = botPlan(botPlan(state, 0), 1);
       state = advance(state, COMBAT_TICKS * TICK_MS);
       for (const player of state.players) {
-        const keys = player.minions.map((m) => `${m.line}:${m.position}`);
+        const keys = player.minions.map((m) => `${m.line}:${m.slot}`);
         expect(new Set(keys).size).toBe(keys.length);
-        for (const m of player.minions) expect(m.position).toBeLessThanOrEqual(PLACEMENT_ZONE_END);
+        for (const m of player.minions) {
+          expect(validSlots(player.lines[m.line]!.towers)).toContain(m.slot);
+        }
       }
     }
+  });
+
+  it('lässt eine Einheit auf dem Turm-Slot jede Runde vom selben Tower aus kämpfen, ohne sie neu zu setzen', () => {
+    let state = withMinions([]);
+    state.players[0].hand = ['summon-guard'];
+    state.players[0].energy = 8;
+    state = playCard(state, 0, 0, 0, 4).state;
+    const id = state.players[0].minions[0]!.id;
+    state.players[1].lines.forEach((lane) => lane.towers.forEach((tower) => (tower.damage = 0)));
+    for (let round = 1; round <= 3; round += 1) {
+      if (round > 1) expect(state.players[0].minions[0]).toMatchObject({ id, line: 0, slot: 4, position: 16 });
+      state = advance(setReady(setReady(state, 0), 1), COMBAT_TICKS * TICK_MS);
+      expect(state.round).toBe(round + 1);
+    }
+    expect(state.players[0].minions[0]).toMatchObject({ id, line: 0, slot: 4, position: 16 });
+  });
+
+  it('gibt einen freigewordenen Slot nach dem Tod der Einheit wieder frei', () => {
+    let state = withMinions([minion(1, 0, 40, 20, 0)]);
+    state.players[0].minions[0]!.hp = 0;
+    respawnSurvivors(state.players[0]);
+    state = structuredClone(state);
+    expect(isSlotFree(state.players[0].minions, 0, 0)).toBe(true);
+  });
+});
+
+describe('Abwerfen gegen Energie', () => {
+  it('wirft eine Handkarte ab und gibt dafür DISCARD_ENERGY Energie', () => {
+    const state = withHand(createMatch(1), ['summon-brute', 'tower-hp'], 3);
+    const result = discardCard(state, 0, 0);
+    expect(result.ok).toBe(true);
+    expect(result.state.players[0].hand).toEqual(['tower-hp']);
+    expect(result.state.players[0].energy).toBe(3 + DISCARD_ENERGY);
+    expect(DISCARD_ENERGY).toBe(1);
+    // Die Karte ist weg (nicht im Stapel), der Gegner und der Ausgangszustand bleiben unberührt.
+    expect(result.state.players[1]).toEqual(state.players[1]);
+    expect(state.players[0].hand).toEqual(['summon-brute', 'tower-hp']);
+  });
+
+  it('lässt Energie über MAX_ENERGY verfallen', () => {
+    const state = withHand(createMatch(1), ['summon-brute'], MAX_ENERGY);
+    expect(discardCard(state, 0, 0).state.players[0].energy).toBe(MAX_ENERGY);
+    const nearly = withHand(createMatch(1), ['summon-brute'], MAX_ENERGY - 1);
+    expect(discardCard(nearly, 0, 0).state.players[0].energy).toBe(MAX_ENERGY);
+  });
+
+  it('gilt für jeden Spieler und lehnt unbekannte Karten, falsche Phase und „bereit“ ab', () => {
+    const state = withHand(createMatch(1), ['summon-brute'], 2);
+    expect(discardCard(state, 1, 0).state.players[1].energy).toBe(3);
+    expect(discardCard(state, 0, 4)).toMatchObject({ ok: false, reason: 'no-such-card' });
+    expect(discardCard(state, 0, -1)).toMatchObject({ ok: false, reason: 'no-such-card' });
+    const ready = setReady(state, 0);
+    expect(discardCard(ready, 0, 0)).toMatchObject({ ok: false, reason: 'already-ready' });
+    const combat = setReady(setReady(state, 0), 1);
+    const rejected = discardCard(combat, 1, 0);
+    expect(rejected).toMatchObject({ ok: false, reason: 'not-planning' });
+    expect(rejected.state).toBe(combat);
+  });
+
+  it('macht eine sonst zu teure Karte spielbar', () => {
+    const state = withHand(createMatch(1), ['tower-hp', 'summon-brute'], 1);
+    expect(playCard(state, 0, 1, 0)).toMatchObject({ ok: false, reason: 'not-enough-energy' });
+    const after = discardCard(state, 0, 0).state;
+    expect(playCard(after, 0, 0, 0).ok).toBe(true);
+  });
+});
+
+describe('Lane-Karten', () => {
+  const place = (state: MatchState, hand: string[]) => withHand(state, hand, MAX_ENERGY);
+
+  it('legt eine Lane-Karte in den Lane-Slot der Lane und zieht Energie ab', () => {
+    const state = place(createMatch(1), ['lane-buff']);
+    const result = playCard(state, 0, 0, 0);
+    expect(result.ok).toBe(true);
+    const lane = result.state.players[0].lines[0]!;
+    expect(lane).toMatchObject({ laneCard: 'lane-buff', laneEffect: 'buff' });
+    expect(result.state.players[0].energy).toBe(MAX_ENERGY - getCardDef('lane-buff').cost);
+    expect(result.state.players[0].hand).toEqual([]);
+    expect(result.state.players[0].played).toEqual([{ cardId: 'lane-buff', line: 0 }]);
+    // Nur die gewählte Lane und nur der eigene Spieler tragen die Karte.
+    expect(result.state.players[1].lines[0]!.laneEffect).toBeUndefined();
+  });
+
+  it('lässt je Lane höchstens eine Lane-Karte zu, aber eine zweite auf einer anderen Lane', () => {
+    const state = place(withLevel(createMatch(1), 2), ['lane-buff', 'lane-shield', 'lane-shield']);
+    const first = playCard(state, 0, 0, 0);
+    if (!first.ok) throw new Error(first.reason);
+    const taken = playCard(first.state, 0, 0, 0);
+    expect(taken).toMatchObject({ ok: false, reason: 'lane-slot-taken' });
+    expect(taken.state).toBe(first.state);
+    const other = playCard(first.state, 0, 0, 1);
+    expect(other.ok).toBe(true);
+    expect(other.state.players[0].lines[1]).toMatchObject({ laneCard: 'lane-shield', laneEffect: 'shield' });
+  });
+
+  it('braucht eine freie Lane mit lebendem Tower', () => {
+    const state = place(createMatch(1), ['lane-buff']);
+    expect(playCard(state, 0, 0, 1)).toMatchObject({ ok: false, reason: 'invalid-line' });
+    expect(playCard(state, 0, 0)).toMatchObject({ ok: false, reason: 'invalid-line' });
+    for (const tower of state.players[0].lines[0]!.towers) tower.hp = 0;
+    expect(playCard(state, 0, 0, 0)).toMatchObject({ ok: false, reason: 'invalid-line' });
+  });
+
+  it('gilt nur für die Runde: die nächste Planung beginnt mit freien Lane-Slots', () => {
+    const state = place(createMatch(1), ['lane-buff']);
+    const played = playCard(state, 0, 0, 0).state;
+    const next = advance(setReady(setReady(played, 0), 1), COMBAT_TICKS * TICK_MS);
+    expect(next.round).toBe(2);
+    for (const player of next.players) {
+      for (const lane of player.lines) expect(lane.laneCard).toBeUndefined();
+      for (const lane of player.lines) expect(lane.laneEffect).toBeUndefined();
+    }
+  });
+
+  it('wirkt im Kampf auf alle Einheiten der Lane (Buff: mehr Schaden, Schild: weniger erlittener Schaden)', () => {
+    const run = (effect: 'buff' | 'shield' | null) => {
+      let state = withHand(createMatch(1), effect ? [effect === 'buff' ? 'lane-buff' : 'lane-shield'] : [], MAX_ENERGY);
+      const attacker = { id: 1, line: 0, slot: 0, position: 50, hp: 1000, damage: 20, range: MINION_RANGE, speed: 0 };
+      const victim = { id: 1, line: 0, slot: 0, position: 50, hp: 1000, damage: 0, range: MINION_RANGE, speed: 0 };
+      state.players[0].minions.push(attacker);
+      state.players[1].minions.push(victim);
+      state.players[0].lines[0]!.towers.forEach((tower) => (tower.damage = 0));
+      state.players[1].lines[0]!.towers.forEach((tower) => (tower.damage = 0));
+      if (effect) {
+        // Der Buff liegt auf der Lane des Angreifers (Spieler 0), das Schild auf der des Opfers (Spieler 1).
+        const buffed = playCard(state, effect === 'buff' ? 0 : 1, 0, 0);
+        if (!buffed.ok) throw new Error(buffed.reason);
+        state = buffed.state;
+      }
+      state = advance(setReady(setReady(state, 0), 1), 1000);
+      return 1000 - state.players[1].minions[0]!.hp;
+    };
+    const base = run(null);
+    expect(base).toBeCloseTo(20, 5);
+    expect(run('buff')).toBeCloseTo(base * LANE_BUFF_FACTOR, 5);
+    expect(run('shield')).toBeCloseTo(base * LANE_SHIELD_FACTOR, 5);
+  });
+});
+
+describe('Lanes je Spieler', () => {
+  it('lässt dem Gegner seine Lanes, wenn der Spieler eine neue Lane kauft', () => {
+    const state = withHand(createMatch(1), ['line-upgrade'], MAX_ENERGY);
+    const bought = playCard(state, 0, 0);
+    if (!bought.ok) throw new Error(bought.reason);
+    expect(bought.state.players[0].level).toBe(2);
+    expect(bought.state.players[0].lines.map((line) => line.towers.length)).toEqual([3, 1, 1, 0, 0]);
+    expect(bought.state.players[1].level).toBe(1);
+    expect(bought.state.players[1].lines.map((line) => line.towers.length)).toEqual([3, 0, 0, 0, 0]);
+    expect(laneSlotCounts(bought.state.players[1])).toEqual([6, 0, 0, 0, 0]);
+    // Der Gegner kann dort weder beschwören noch eine Lane-Karte legen.
+    const enemy = withHand(bought.state, ['summon-minion', 'lane-buff'], MAX_ENERGY);
+    expect(playCard(enemy, 1, 0, 1)).toMatchObject({ ok: false, reason: 'invalid-line' });
+    expect(playCard(enemy, 1, 1, 1)).toMatchObject({ ok: false, reason: 'invalid-line' });
+  });
+
+  it('schaltet die Lanes des Gegners erst mit seiner eigenen Karte frei', () => {
+    let state = withHand(createMatch(1), ['line-upgrade'], MAX_ENERGY);
+    state = playCard(state, 0, 0).state;
+    state.players[1].hand = ['line-upgrade', 'summon-minion'];
+    state.players[1].energy = MAX_ENERGY;
+    const bought = playCard(state, 1, 0);
+    if (!bought.ok) throw new Error(bought.reason);
+    expect(bought.state.players[1].level).toBe(2);
+    expect(bought.state.players[1].lines.map((line) => line.towers.length)).toEqual([3, 1, 1, 0, 0]);
+    expect(bought.state.players[0].level).toBe(2);
+    expect(playCard(bought.state, 1, 0, 1).ok).toBe(true);
+  });
+
+  it('übersteht Runden: die Lane-Freischaltung beider Spieler bleibt getrennt', () => {
+    let state = withHand(createMatch(1), ['line-upgrade'], MAX_ENERGY);
+    state = playCard(state, 0, 0).state;
+    state = advance(setReady(setReady(state, 0), 1), COMBAT_TICKS * TICK_MS);
+    expect(state.players.map((p) => p.level)).toEqual([2, 1]);
+    expect(state.players[1].lines.map((line) => line.towers.length)).toEqual([3, 0, 0, 0, 0]);
+  });
+});
+
+describe('Spielende bei zerstörten Türmen', () => {
+  it('beendet das Spiel genau dann, wenn ein Spieler keinen lebenden Tower mehr hat (towersAlive === 0)', () => {
+    const state = createMatch(1);
+    expect(towersAlive(state.players[0])).toBe(3);
+    expect(destroyedOutcome(state)).toBeNull();
+    for (const tower of state.players[1].lines[0]!.towers) tower.hp = 0;
+    expect(towersAlive(state.players[1])).toBe(0);
+    expect(destroyedOutcome(state)).toBe('player0');
+    const ending = advance(setReady(setReady(state, 0), 1), TICK_MS);
+    expect(ending.phase).toBe('over');
+    expect(ending.outcome).toBe('player0');
+  });
+
+  it('bietet zerstörte Tower keine Slots mehr an und setzt dort keine Einheiten', () => {
+    const state = withHand(createMatch(1), ['summon-minion'], MAX_ENERGY);
+    state.players[0].lines[0]!.towers[0]!.hp = 0;
+    expect(laneSlotCounts(state.players[0])).toEqual([4, 0, 0, 0, 0]);
+    expect(playCard(state, 0, 0, 0, 0)).toMatchObject({ ok: false, reason: 'invalid-slot' });
+    expect(playCard(state, 0, 0, 0, 1)).toMatchObject({ ok: false, reason: 'invalid-slot' });
+    expect(playCard(state, 0, 0, 0, 2).ok).toBe(true);
+    // Ohne Slot nimmt die Karte den ersten freien Slot eines lebenden Towers.
+    expect(playCard(state, 0, 0, 0).state.players[0].minions[0]).toMatchObject({ slot: 2, position: 8 });
   });
 });
 

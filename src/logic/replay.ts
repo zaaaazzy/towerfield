@@ -9,6 +9,7 @@ import { type Strategies, strategiesForSeed } from './balance-sim';
 import { getCardDef } from './cards';
 import { laneName } from './lanes';
 import { advance, createMatch, type MatchState, type PlayerIndex, setReady } from './match';
+import { describeSlot } from './placement';
 import { type ActionError, applyAction, type RecordedAction, type RecordedMatch } from './match-record';
 
 /** Faktor, mit dem `delta` in der Kampfphase skaliert wird (kleiner als 1 = Zeitlupe). */
@@ -105,6 +106,8 @@ function eventFor(before: MatchState, action: RecordedAction): ReplayEvent {
       return { ...base, action: 'move', cardId: placed(action.minionId), line: action.line, slot: action.slot };
     case 'undo':
       return { ...base, action: 'undo', cardId: placed(action.minionId), line: null };
+    case 'discard':
+      return { ...base, action: 'discard', cardId: action.cardId, line: null };
     case 'ready':
       return { ...base, action: 'ready', cardId: '', line: null };
   }
@@ -132,7 +135,13 @@ function planStep(replay: ReplayState): ReplayState {
   const next: PlayerIndex = player === 0 ? 1 : 0;
   const move = botStep(match, player, replay.strategies[player]);
   if (!move) return { ...replay, match: setReady(match, player), turn: next };
-  const event: ReplayEvent = { round: match.round, player, cardId: move.cardId, line: move.line ?? null };
+  const event: ReplayEvent = {
+    round: match.round,
+    player,
+    cardId: move.cardId,
+    line: move.line ?? null,
+    ...(move.discard ? { action: 'discard' as const } : {}),
+  };
   return { ...replay, match: move.state, events: [...replay.events, event], turn: next };
 }
 
@@ -174,13 +183,16 @@ export function playerName(player: PlayerIndex): string {
 export function describeEvent(event: ReplayEvent): string {
   const prefix = `Runde ${event.round} · ${playerName(event.player)}`;
   if (event.action === 'ready') return `${prefix} ist bereit`;
-  const name = getCardDef(event.cardId).name;
+  // Ein Überlebender früherer Runden hat keine Karte mehr in `placements`: dann steht nur „Einheit“.
+  const name = event.cardId === '' ? 'Einheit' : getCardDef(event.cardId).name;
   const target = event.line === null ? '' : ` auf ${laneName(event.line)}`;
   switch (event.action) {
     case 'move':
-      return `${prefix} verschiebt ${name}${target}${event.slot === undefined ? '' : `, Platz ${event.slot + 1}`}`;
+      return `${prefix} verschiebt ${name}${target}${event.slot === undefined ? '' : `, ${describeSlot(event.slot)}`}`;
     case 'undo':
       return `${prefix} nimmt ${name} zurück`;
+    case 'discard':
+      return `${prefix} wirft ${name} ab`;
     default:
       return `${prefix} spielt ${name}${target}`;
   }
@@ -196,10 +208,11 @@ const ABORT_TEXT: Readonly<Record<ReplayAbortReason, string>> = {
   'no-such-card': 'Die Karte ist nicht auf der Hand.',
   'not-enough-energy': 'Zu wenig Energie.',
   'invalid-line': 'Ungültige oder noch nicht freie Lane.',
-  'invalid-slot': 'Ungültiger Platz.',
-  'slot-taken': 'Der Platz ist belegt.',
+  'invalid-slot': 'Ungültiger Turm-Slot.',
+  'slot-taken': 'Der Turm-Slot ist belegt.',
+  'lane-slot-taken': 'Die Lane trägt schon eine Lane-Karte.',
   'no-such-minion': 'Den Minion gibt es nicht.',
-  'line-full': 'Die Lane ist voll.',
+  'line-full': 'Auf der Lane ist kein Turm-Slot frei.',
   'max-level': 'Das Feld hat die Höchststufe.',
   'level-too-low': 'Das Lane-Level ist zu niedrig für eine Spezialisierung.',
   'already-specialized': 'Der Tower ist schon spezialisiert.',

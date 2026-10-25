@@ -9,6 +9,7 @@ const TYPES: CardType[] = [
   'summon',
   'minion-upgrade',
   'minion-buff',
+  'lane-card',
 ];
 
 describe('cardTypeStyle', () => {
@@ -30,13 +31,23 @@ describe('cardTypeStyle', () => {
 });
 
 describe('cardArtKey', () => {
-  it('gibt jeder Karte der Definition ein eigenes Bild, außer den Spezialisierungen (nur Typ-Symbol)', () => {
-    const withArt = CARD_DEFS.filter((def) => def.type !== 'tower-specialize');
+  it('gibt den Karten der ersten Version ein eigenes Bild, Spezialisierungen und neuen Karten nur das Typ-Symbol', () => {
+    const symbolOnly = new Set([
+      'tower-lightning',
+      'tower-shield',
+      'summon-scout',
+      'summon-guard',
+      'summon-mage',
+      'lane-buff',
+      'lane-shield',
+      'tower-armor',
+      'minion-upgrade-elite',
+    ]);
+    const withArt = CARD_DEFS.filter((def) => !symbolOnly.has(def.id));
     const keys = withArt.map((def) => cardArtKey(def));
     expect(keys.every((key) => key !== null)).toBe(true);
     expect(new Set(keys).size).toBe(withArt.length);
-    expect(cardArtKey(getCardDef('tower-lightning'))).toBeNull();
-    expect(cardArtKey(getCardDef('tower-shield'))).toBeNull();
+    for (const id of symbolOnly) expect(cardArtKey(getCardDef(id))).toBeNull();
   });
 
   it('kennt kein Bild für unbekannte Karten (Rückfall auf das Typ-Symbol)', () => {
@@ -85,6 +96,13 @@ describe('describeCard', () => {
     expect(describeCard(getCardDef('tower-lightning'))).toContain('Trifft alle Gegner');
     expect(describeCard(getCardDef('tower-shield'))).toContain('Wirft 50 % des Schadens');
     expect(describeCard(getCardDef('buff-minion'))).toBe('Ein Minion:\n+50 % Leben, Schaden');
+  });
+
+  it('beschreibt Lane-Karten mit ihrer Wirkung und ohne Wert-Plaketten', () => {
+    expect(describeCard(getCardDef('lane-buff'))).toBe('Hinter dem Turm:\nLane +25 % Schaden');
+    expect(describeCard(getCardDef('lane-shield'))).toBe('Hinter dem Turm:\nLane -30 %\nerlittener Schaden');
+    expect(cardStats(getCardDef('lane-buff'))).toBeNull();
+    expect(cardTypeStyle('lane-card').banner).toBe('LANE-KARTE');
   });
 
   it('gibt „Minion stärken“ ein eigenes Banner und keine Wert-Plaketten', () => {

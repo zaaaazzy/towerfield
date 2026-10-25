@@ -4,6 +4,8 @@ import {
   combatTick,
   type CombatPlayer,
   explosionVictims,
+  LANE_BUFF_FACTOR,
+  LANE_SHIELD_FACTOR,
   LIGHTNING_FACTOR,
   LINE_LENGTH,
   MINION_RANGE,
@@ -26,6 +28,68 @@ function player(towerHp = 100, towerDamage = 8): CombatPlayer {
 function minion(id: number, line: number, position: number, hp = 30, damage = 6, speed = MINION_SPEED, range = MINION_RANGE) {
   return { id, line, position, hp, damage, range, speed };
 }
+
+describe('Lane-Karten im Kampf', () => {
+  /** Zwei Minions treffen sich auf Lane 0: Spieler 0 greift mit 10 Schaden/s an, Spieler 1 steht ohne Schaden da. */
+  function duel(): [CombatPlayer, CombatPlayer] {
+    const players: [CombatPlayer, CombatPlayer] = [player(), player()];
+    players[0].minions.push(minion(1, 0, 50, 1000, 10, 0));
+    players[1].minions.push(minion(1, 0, 50, 1000, 0, 0));
+    for (const side of players) for (const line of side.lines) line.towers[0]!.damage = 0;
+    return players;
+  }
+  const lost = (players: [CombatPlayer, CombatPlayer]) => 1000 - players[1].minions[0]!.hp;
+
+  it('Lane-Buff erhöht den Schaden aller eigenen Minions der Lane, nicht den anderer Lanes', () => {
+    const players = duel();
+    players[0].lines[0]!.laneEffect = 'buff';
+    combatTick(players, 1);
+    expect(lost(players)).toBeCloseTo(10 * LANE_BUFF_FACTOR, 9);
+
+    const other = duel();
+    other[0].lines[1]!.laneEffect = 'buff';
+    combatTick(other, 1);
+    expect(lost(other)).toBeCloseTo(10, 9);
+  });
+
+  it('Lane-Buff gilt auch gegen Tower und zählt im Sammler', () => {
+    const players: [CombatPlayer, CombatPlayer] = [player(), player()];
+    players[0].minions.push(minion(1, 0, 96, 30, 10));
+    players[0].lines[0]!.laneEffect = 'buff';
+    const calls: number[] = [];
+    combatTick(players, 0.5, (_side, _id, kind, amount) => void (kind === 'tower' && calls.push(amount)));
+    expect(players[1].lines[0]!.towers[0]!.hp).toBeCloseTo(100 - 5 * LANE_BUFF_FACTOR, 9);
+    expect(calls[0]).toBeCloseTo(5 * LANE_BUFF_FACTOR, 9);
+  });
+
+  it('Lane-Schild senkt den erlittenen Schaden der Minions der Lane', () => {
+    const players = duel();
+    players[1].lines[0]!.laneEffect = 'shield';
+    const calls: number[] = [];
+    combatTick(players, 1, (_side, _id, kind, amount) => void (kind === 'minion' && calls.push(amount)));
+    expect(lost(players)).toBeCloseTo(10 * LANE_SHIELD_FACTOR, 9);
+    expect(calls[0]).toBeCloseTo(10 * LANE_SHIELD_FACTOR, 9);
+  });
+
+  it('Lane-Schild schützt auch vor Tower-Schüssen und Blitzen', () => {
+    for (const specialization of [undefined, 'lightning'] as const) {
+      const players: [CombatPlayer, CombatPlayer] = [player(), player()];
+      players[0].minions.push(minion(1, 0, 90, 1000, 0, 0));
+      players[1].lines[0]!.towers[0]!.damage = 10;
+      if (specialization) players[1].lines[0]!.towers[0]!.specialization = specialization;
+      players[0].lines[0]!.laneEffect = 'shield';
+      combatTick(players, 1);
+      const factor = specialization ? LIGHTNING_FACTOR : 1;
+      expect(1000 - players[0].minions[0]!.hp).toBeCloseTo(10 * factor * LANE_SHIELD_FACTOR, 9);
+    }
+  });
+
+  it('wirkt ohne Lane-Karte nicht', () => {
+    const players = duel();
+    combatTick(players, 1);
+    expect(lost(players)).toBeCloseTo(10, 9);
+  });
+});
 
 describe('Tower-Schild', () => {
   function shielded(shield: number): [CombatPlayer, CombatPlayer] {
