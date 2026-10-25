@@ -49,10 +49,33 @@ Statements, Branches, Functions und Lines pro Datei aus. Den HTML-Bericht öffne
 (macOS; sonst die Datei im Browser öffnen). `coverage/` ist von Git ignoriert. Es gibt keine erzwungenen Schwellenwerte;
 Vorschlag für später: 80 % bei Statements, Lines und Functions, 70 % bei Branches.
 
-Gemessene Werte pro Datei: **noch nicht erhoben.** `@vitest/coverage-v8` konnte in der Agent-Umgebung nicht installiert
-werden (`npm install` gesperrt). Nach `npm install -D @vitest/coverage-v8@^5.0.5` und `npm run test:coverage` hier die
-Tabelle eintragen. Für `balance-sim.test.ts` (1000 Matches) die Laufzeit unter Coverage prüfen und bei Bedarf das
-Test-Timeout erhöhen.
+Gemessene Werte (Stand 25.10.2026, 16 Testdateien, 291 Tests, Lauf ca. 14 s – `balance-sim.test.ts` mit 1000 Matches
+braucht kein höheres Timeout). Die Konsolentabelle blendet Dateien mit durchgehend 100 % aus; vollständig steht alles in
+`coverage/coverage-summary.json`.
+
+| Datei (`src/logic/`) | Statements | Branches | Functions | Lines |
+|---|---|---|---|---|
+| **Gesamt** | 98,79 % | 95,49 % | 100 % | 99,85 % |
+| `balance-sim.ts` | 98,61 % | 96,42 % | 100 % | 98,27 % |
+| `bot.ts` | 100 % | 100 % | 100 % | 100 % |
+| `card-style.ts` | 92,85 % | 91,66 % | 100 % | 100 % |
+| `cards.ts` | 100 % | 75 % | 100 % | 100 % |
+| `combat.ts` | 100 % | 97,95 % | 100 % | 100 % |
+| `fx-events.ts` | 96,66 % | 87,5 % | 100 % | 100 % |
+| `game-state.ts` | 100 % | 100 % | 100 % | 100 % |
+| `hand-filter.ts` | 100 % | 100 % | 100 % | 100 % |
+| `hand-layout.ts` | 100 % | 100 % | 100 % | 100 % |
+| `iso.ts` | 100 % | 100 % | 100 % | 100 % |
+| `match-record-fixture.ts` | 100 % | 100 % | 100 % | 100 % |
+| `match-record.ts` | 97,41 % | 96,66 % | 100 % | 100 % |
+| `match-stats.ts` | 100 % | 100 % | 100 % | 100 % |
+| `match.ts` | 98,02 % | 94,01 % | 100 % | 100 % |
+| `placement.ts` | 100 % | 90,9 % | 100 % | 100 % |
+| `replay.ts` | 100 % | 94,23 % | 100 % | 100 % |
+| `seed.ts` | 100 % | 100 % | 100 % | 100 % |
+
+Alle Dateien liegen über dem Schwellenwert-Vorschlag; die niedrigsten Branch-Werte haben `cards.ts` (75 %, Zeile 81)
+und `fx-events.ts` (87,5 %, Zeilen 46–53).
 
 ### Dev-Szene Balancing
 
