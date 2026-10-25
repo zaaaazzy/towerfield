@@ -1,5 +1,7 @@
-import { expect, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 import { type CardDef, getCardDef } from '../src/logic/cards';
+import type { Minion } from '../src/logic/combat';
+import { slotPosition } from '../src/logic/placement';
 import {
   DRAW_PER_ROUND,
   energyForRound,
@@ -10,11 +12,16 @@ import {
 } from '../src/logic/match';
 import {
   collectErrors,
+  DRAG_THRESHOLD,
+  drag,
   fastForwardCombat,
   hasVisibleText,
+  minionPoint,
   openGame,
+  pointBetweenLines,
   readSelected,
   readState,
+  slotPoint,
   tap,
   tapCard,
   tapLine,
@@ -197,6 +204,138 @@ test('das Spiel endet spätestens nach MAX_ROUNDS Runden mit Ergebnis und Overla
   expect(fresh.outcome).toBeNull();
   expect(fresh.players[0].hand).toHaveLength(START_HAND);
   await expect.poll(() => hasVisibleText(page, 'Tippen für ein neues Spiel')).toBe(false);
+
+  expect(errors).toEqual([]);
+});
+
+/** Beschwört mit der ersten bezahlbaren Summon-Karte einen Minion auf `line` und liefert ihn zurück. */
+async function summonOn(page: Page, line: number): Promise<Minion> {
+  const before = await readState(page);
+  const index = findCard(before, (def) => def.type === 'summon' && def.cost <= before.players[0].energy);
+  expect(index, `Keine bezahlbare Summon-Karte: ${JSON.stringify(before.players[0])}`).toBeGreaterThanOrEqual(0);
+  const known = before.players[0].minions;
+  await tapCard(page, index);
+  await tapLine(page, line);
+  await expect.poll(async () => (await readState(page)).players[0].minions.length).toBe(known.length + 1);
+  return (await readState(page)).players[0].minions.find((m) => !known.some((old) => old.id === m.id))!;
+}
+
+const minionById = (state: MatchState, id: number) => state.players[0].minions.find((m) => m.id === id);
+
+test('Drag: ein Minion auf einen freien Slot einer anderen Line gezogen setzt line und position, Energie bleibt', async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await openGame(page);
+  const placed = await summonOn(page, 0);
+  const before = await readState(page);
+
+  await drag(page, minionPoint(placed), slotPoint(1, 1));
+  await expect.poll(async () => minionById(await readState(page), placed.id)?.line).toBe(1);
+
+  const after = await readState(page);
+  expect(minionById(after, placed.id)).toEqual({ ...placed, line: 1, position: slotPosition(1) });
+  expect(after.players[0].energy).toBe(before.players[0].energy);
+  expect(after.players[0].hand).toEqual(before.players[0].hand);
+  expect(await hasVisibleText(page, 'Platz ist belegt')).toBe(false);
+
+  expect(errors).toEqual([]);
+});
+
+test('Drag: ein Minion auf einen anderen freien Slot derselben Line gezogen ändert nur die position', async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await openGame(page);
+  const placed = await summonOn(page, 0);
+  const before = await readState(page);
+
+  await drag(page, minionPoint(placed), slotPoint(0, 1));
+  await expect.poll(async () => minionById(await readState(page), placed.id)?.position).toBe(slotPosition(1));
+
+  const after = await readState(page);
+  expect(minionById(after, placed.id)).toEqual({ ...placed, line: 0, position: slotPosition(1) });
+  expect(after.players[0].energy).toBe(before.players[0].energy);
+
+  expect(errors).toEqual([]);
+});
+
+test('Drag: ein belegter Slot lässt den Zustand unverändert und zeigt „Platz ist belegt“', async ({ page }) => {
+  const errors = collectErrors(page);
+  await openGame(page);
+  const first = await summonOn(page, 0);
+  // Mit Seed 1 reicht die Energie nur für eine der beiden Summon-Karten der Starthand; für die zweite aufstocken.
+  await page.evaluate(() => {
+    const scene = window.game!.scene.getScene('main') as unknown as { state: { players: { energy: number }[] } };
+    scene.state.players[0]!.energy += 2;
+  });
+  await summonOn(page, 1);
+  const before = await readState(page);
+
+  // Der zweite Minion steht auf Slot 0 von Line 1; der erste wird darauf gezogen.
+  await drag(page, minionPoint(first), slotPoint(1, 0));
+  await expect.poll(() => hasVisibleText(page, 'Platz ist belegt')).toBe(true);
+  expect(await readState(page)).toEqual(before);
+
+  expect(errors).toEqual([]);
+});
+
+test('Drag: Loslassen außerhalb aller Lines lässt den Zustand unverändert und zeigt keine Meldung', async ({ page }) => {
+  const errors = collectErrors(page);
+  await openGame(page);
+  const placed = await summonOn(page, 0);
+  const before = await readState(page);
+
+  await drag(page, minionPoint(placed), pointBetweenLines());
+  expect(await readState(page)).toEqual(before);
+  expect(await hasVisibleText(page, 'Platz ist belegt')).toBe(false);
+  expect(await hasVisibleText(page, 'Hier ist kein Platz')).toBe(false);
+
+  expect(errors).toEqual([]);
+});
+
+test('Drag: eine Bewegung unter DRAG_THRESHOLD verschiebt den Minion nicht, die Kartenauswahl bleibt bedienbar', async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await openGame(page);
+  const placed = await summonOn(page, 0);
+  const before = await readState(page);
+
+  const from = minionPoint(placed);
+  await drag(page, from, { x: from.x + DRAG_THRESHOLD - 3, y: from.y }, 4);
+  expect(await readState(page)).toEqual(before);
+
+  const index = findCard(before, (def) => def.target === 'line');
+  expect(index).toBeGreaterThanOrEqual(0);
+  await tapCard(page, index);
+  await expect.poll(() => readSelected(page)).toBe(index);
+  await tapCard(page, index);
+  await expect.poll(() => readSelected(page)).toBeNull();
+  expect(await readState(page)).toEqual(before);
+
+  expect(errors).toEqual([]);
+});
+
+test('Drag: nach „Bereit“ und in der Kampfphase lässt sich kein Minion mehr ziehen', async ({ page }) => {
+  const errors = collectErrors(page);
+  await openGame(page);
+  const placed = await summonOn(page, 0);
+
+  await tapReady(page);
+  const ready = await readState(page);
+  await drag(page, minionPoint(placed), slotPoint(1, 1));
+  const afterReady = await readState(page);
+  expect(minionById(afterReady, placed.id)?.line).toBe(0);
+  expect(afterReady.players[0].energy).toBe(ready.players[0].energy);
+  expect(afterReady.players[0].minions).toHaveLength(1);
+
+  await expect.poll(async () => (await readState(page)).phase).toBe('combat');
+  const inCombat = (await readState(page)).players[0].minions.find((m) => m.id === placed.id)!;
+  await drag(page, minionPoint(inCombat), slotPoint(2, 1));
+  const afterCombatDrag = await readState(page);
+  expect(minionById(afterCombatDrag, placed.id)?.line).toBe(0);
+  expect(await hasVisibleText(page, 'Platz ist belegt')).toBe(false);
 
   expect(errors).toEqual([]);
 });

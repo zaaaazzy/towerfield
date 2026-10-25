@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="134" height="72" viewBox="0 0 134 72">
+  <defs><linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a5a9a"/><stop offset="1" stop-color="#0e1e3c"/></linearGradient></defs>
+  <rect width="134" height="72" fill="url(#bg)"/>
+  <rect y="60" width="134" height="12" fill="#0a1226" opacity="0.7"/>
+  <rect x="44" y="18" width="36" height="46" fill="#9aa2b4" stroke="#2a3040" stroke-width="2.5"/>
+  <path d="M40 18 V8 h8 v6 h8 V8 h8 v6 h8 V8 h8 v10 Z" fill="#aab2c4" stroke="#2a3040" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M44 30 H80 M44 42 H80 M44 54 H80 M58 18 V30 M70 30 V42 M58 42 V54" stroke="#6a7286" stroke-width="1.5"/>
+  <path d="M56 64 V50 Q62 42 68 50 V64 Z" fill="#1e2438" stroke="#2a3040" stroke-width="2"/>
+  <path d="M104 62 C84 46 90 28 104 34 C118 28 124 46 104 62 Z" fill="#e0384a" stroke="#6a1020" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M97 38 Q92 42 95 48" fill="none" stroke="#ffc0c8" stroke-width="3" stroke-linecap="round"/>
+  <text x="14" y="26" font-family="Georgia, serif" font-size="17" font-weight="bold" fill="#f0e6a8" stroke="#10284a" stroke-width="1">+</text>
+</svg>

@@ -56,7 +56,7 @@ Test-Timeout erhöhen.
 
 ### Dev-Szene Balancing
 
-Mit `npm run dev` zeigt http://localhost:5180/?scene=balance eine Tabelle aus 200 simulierten Bot-gegen-Bot-Matches
+Mit `npm run dev` zeigt http://localhost:5180/?scene=balance eine Tabelle aus 1.000 simulierten Bot-gegen-Bot-Matches
 (Siegquote, Unentschieden und Niederlage pro Karte, Abweichung von der Basisquote, Rundenzahl, Ende durch Tower oder
 Rundengrenze). „Neu simulieren“ nimmt den nächsten Seed-Bereich, „Sieg“ in der Kopfzeile kehrt die Sortierung um,
 „Zurück“ öffnet das Spiel. Die Szene ist nur im Dev-Server registriert, nicht im Produktions-Build.

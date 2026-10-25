@@ -22,7 +22,11 @@ export class LabelPool {
   private texts: Phaser.GameObjects.Text[] = [];
   private cursor = 0;
 
-  constructor(private readonly scene: Phaser.Scene) {}
+  /** Mit `container` liegen die Texte darin (Position, Drehung und Tiefe kommen vom Container). */
+  constructor(
+    private readonly scene: Phaser.Scene,
+    private readonly container?: Phaser.GameObjects.Container,
+  ) {}
 
   reset(): void {
     this.cursor = 0;
@@ -33,7 +37,8 @@ export class LabelPool {
     if (!object) {
       // Auflösung 2: schärfere Schrift bei Skalierung auf hochauflösende Bildschirme.
       object = this.scene.add.text(0, 0, '', { fontFamily: FONTS.body, align: 'center', resolution: 2 });
-      object.setDepth(LABEL_DEPTH);
+      if (this.container) this.container.add(object);
+      else object.setDepth(LABEL_DEPTH);
       this.texts.push(object);
     }
     this.cursor += 1;
