@@ -38,12 +38,48 @@ Spielabläufe (fester Seed per `?seed=`, Hilfen, Schnellvorlauf) beschreibt
 | `npm run dev` | Entwicklungsserver mit Hot Reload auf http://localhost:5180 (anderer Port: `GAME_DEV_PORT`) |
 | `npm run build` | Typprüfung und Produktions-Build nach `dist/` |
 | `npm test` | Unit-Tests der Spiellogik (Vitest, ohne Browser) |
+| `npm run test:coverage` | Unit-Tests mit Coverage-Messung für `src/logic/` (Konsolentabelle, HTML-Bericht in `coverage/`) |
 | `npm run test:smoke` | Baut und prüft im Browser (Playwright), dass der Canvas zeichnet und keine Konsolenfehler auftreten |
 | `npm run review` | Baut und liefert den Stand aus (Review-Container von AIdeation, Port aus `REVIEW_FRONTEND_PORT`) |
 
+### Testabdeckung
+
+`npm run test:coverage` misst mit `@vitest/coverage-v8` nur `src/logic/**/*.ts` (ohne `*.test.ts`) und gibt
+Statements, Branches, Functions und Lines pro Datei aus. Den HTML-Bericht öffnet man mit `open coverage/index.html`
+(macOS; sonst die Datei im Browser öffnen). `coverage/` ist von Git ignoriert. Es gibt keine erzwungenen Schwellenwerte;
+Vorschlag für später: 80 % bei Statements, Lines und Functions, 70 % bei Branches.
+
+Gemessene Werte (Stand 25.10.2026, 16 Testdateien, 291 Tests, Lauf ca. 14 s – `balance-sim.test.ts` mit 1000 Matches
+braucht kein höheres Timeout). Die Konsolentabelle blendet Dateien mit durchgehend 100 % aus; vollständig steht alles in
+`coverage/coverage-summary.json`.
+
+| Datei (`src/logic/`) | Statements | Branches | Functions | Lines |
+|---|---|---|---|---|
+| **Gesamt** | 98,79 % | 95,49 % | 100 % | 99,85 % |
+| `balance-sim.ts` | 98,61 % | 96,42 % | 100 % | 98,27 % |
+| `bot.ts` | 100 % | 100 % | 100 % | 100 % |
+| `card-style.ts` | 92,85 % | 91,66 % | 100 % | 100 % |
+| `cards.ts` | 100 % | 75 % | 100 % | 100 % |
+| `combat.ts` | 100 % | 97,95 % | 100 % | 100 % |
+| `fx-events.ts` | 96,66 % | 87,5 % | 100 % | 100 % |
+| `game-state.ts` | 100 % | 100 % | 100 % | 100 % |
+| `hand-filter.ts` | 100 % | 100 % | 100 % | 100 % |
+| `hand-layout.ts` | 100 % | 100 % | 100 % | 100 % |
+| `iso.ts` | 100 % | 100 % | 100 % | 100 % |
+| `match-record-fixture.ts` | 100 % | 100 % | 100 % | 100 % |
+| `match-record.ts` | 97,41 % | 96,66 % | 100 % | 100 % |
+| `match-stats.ts` | 100 % | 100 % | 100 % | 100 % |
+| `match.ts` | 98,02 % | 94,01 % | 100 % | 100 % |
+| `placement.ts` | 100 % | 90,9 % | 100 % | 100 % |
+| `replay.ts` | 100 % | 94,23 % | 100 % | 100 % |
+| `seed.ts` | 100 % | 100 % | 100 % | 100 % |
+
+Alle Dateien liegen über dem Schwellenwert-Vorschlag; die niedrigsten Branch-Werte haben `cards.ts` (75 %, Zeile 81)
+und `fx-events.ts` (87,5 %, Zeilen 46–53).
+
 ### Dev-Szene Balancing
 
-Mit `npm run dev` zeigt http://localhost:5180/?scene=balance eine Tabelle aus 200 simulierten Bot-gegen-Bot-Matches
+Mit `npm run dev` zeigt http://localhost:5180/?scene=balance eine Tabelle aus 1.000 simulierten Bot-gegen-Bot-Matches
 (Siegquote, Unentschieden und Niederlage pro Karte, Abweichung von der Basisquote, Rundenzahl, Ende durch Tower oder
 Rundengrenze). „Neu simulieren“ nimmt den nächsten Seed-Bereich, „Sieg“ in der Kopfzeile kehrt die Sortierung um,
 „Zurück“ öffnet das Spiel. Die Szene ist nur im Dev-Server registriert, nicht im Produktions-Build.

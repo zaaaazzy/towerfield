@@ -78,6 +78,17 @@ describe('runSimulation', () => {
     expect(report.totalMatches).toBe(200);
     expect(Date.now() - start).toBeLessThan(20_000);
   }, 30_000);
+
+  it('ist mit 1000 Matches deterministisch, zählt 1000 und die Quoten ergeben 1', () => {
+    const start = Date.now();
+    const report = runSimulation({ startSeed: 1, count: 1000 });
+    expect(runSimulation({ startSeed: 1, count: 1000 })).toEqual(report);
+    expect(report.totalMatches).toBe(1000);
+    expect(report.startSeed).toBe(1);
+    expect(report.winRatePlayer0 + report.winRatePlayer1 + report.drawRate).toBeCloseTo(1, 10);
+    expect(report.towerKillShare + report.roundLimitShare).toBeCloseTo(1, 10);
+    expect(Date.now() - start).toBeLessThan(60_000);
+  }, 90_000);
 });
 
 describe('buildReport', () => {
