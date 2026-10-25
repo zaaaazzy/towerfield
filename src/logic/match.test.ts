@@ -371,6 +371,16 @@ describe('Karten ausspielen', () => {
     expect(later.state.players[0].minions.at(-1)!.speed).toBe(8);
   });
 
+  it('übernimmt die Reichweite der Karte: Bogenschütze 14, Minion und Brocken 4', () => {
+    let state = withHand(createMatch(1), ['summon-archer', 'summon-minion', 'summon-brute'], 20);
+    for (const id of ['summon-archer', 'summon-minion', 'summon-brute']) {
+      const result = playCard(state, 0, find(state, 0, id), 0);
+      if (!result.ok) throw new Error(result.reason);
+      state = result.state;
+    }
+    expect(state.players[0].minions.map((m) => m.range)).toEqual([14, 4, 4]);
+  });
+
   it('wirkt „Minion verbessern“ je nach Umfang auf eine oder alle Lines', () => {
     const base = withHand(createMatch(1), ['minion-upgrade-line', 'minion-upgrade-all'], 10);
     const one = playCard(base, 0, 0, 2);
@@ -425,8 +435,8 @@ describe('Sieg', () => {
         line.tower.hp = lineIndex === index ? 0.1 : 0;
       });
     }
-    state.players[0].minions.push({ id: 1, line: 1, position: LINE_LENGTH - MINION_RANGE, hp: 50, damage: 20, speed: 10 });
-    state.players[1].minions.push({ id: 1, line: 0, position: LINE_LENGTH - MINION_RANGE, hp: 50, damage: 20, speed: 10 });
+    state.players[0].minions.push({ id: 1, line: 1, position: LINE_LENGTH - MINION_RANGE, hp: 50, damage: 20, range: MINION_RANGE, speed: 10 });
+    state.players[1].minions.push({ id: 1, line: 0, position: LINE_LENGTH - MINION_RANGE, hp: 50, damage: 20, range: MINION_RANGE, speed: 10 });
     state = advance(state, TICK_MS);
     expect(state.phase).toBe('over');
     expect(state.outcome).toBe('draw');
@@ -436,7 +446,7 @@ describe('Sieg', () => {
     let state = setReady(setReady(createMatch(1), 0), 1);
     state = structuredClone(state);
     state.players[1].lines.forEach((line, index) => (line.tower.hp = index === 1 ? 0.1 : 0));
-    state.players[0].minions.push({ id: 1, line: 1, position: LINE_LENGTH - MINION_RANGE, hp: 50, damage: 20, speed: 10 });
+    state.players[0].minions.push({ id: 1, line: 1, position: LINE_LENGTH - MINION_RANGE, hp: 50, damage: 20, range: MINION_RANGE, speed: 10 });
     state = advance(state, TICK_MS);
     expect(state.phase).toBe('over');
     expect(state.outcome).toBe('player0');

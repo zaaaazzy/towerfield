@@ -8,6 +8,7 @@ import { lineCapacity, LINE_COUNT, MAX_LINE_LEVEL, type MatchState, type PlayerI
 /** Reihenfolge, in der der Bot Karten bevorzugt. */
 const PRIORITY = [
   'summon-minion',
+  'summon-archer',
   'tower-hp',
   'line-upgrade',
   'minion-upgrade-line',
