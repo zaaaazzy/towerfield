@@ -41,7 +41,22 @@ flowchart TD
 ## Geänderte Dateien
 
 `src/logic/cards.ts`, `combat.ts`, `match.ts`, `bot.ts`, `src/scenes/main-scene.ts`, Tests in `combat.test.ts`,
-`cards.test.ts`, `bot.test.ts`, dazu diese Seite und `docs/designkonzept.md`.
+`cards.test.ts`, `bot.test.ts`, `match.test.ts`, dazu diese Seite und `docs/designkonzept.md`.
+
+## Worauf zu achten ist
+
+- Das Deck ist um eine Karte länger; die Kartenreihenfolge nach Seed ändert sich (`buildDeck` bleibt deterministisch).
+  Tests oder Replays, die eine feste Reihenfolge erwarten, müssen darauf geprüft werden.
+- Der Heiler heilt pro Tick genau ein Ziel; mehrere Heiler wirken gleichzeitig aus demselben Vorzustand und können
+  dasselbe Ziel gemeinsam heilen (begrenzt durch `maxHp`).
+- Neue `Minion`-Literale brauchen weder `maxHp` noch `heals`; ohne `maxHp` gilt `hp` als Maximum.
+- Eine Statistik, die Heilung zählt, wäre eine eigene Änderung.
+
+## Tests
+
+`npm run typecheck`, die Vitest-Dateien zu Bot, Karten, Kampf und Match sowie `npm run test:smoke` laufen grün.
+Geprüft sind Heilung pro Tick, Reichweite, Line, Gegner, `maxHp`-Grenze, keine Selbstheilung, Zielwahl, kein
+Tower-/Minion-Schaden, Deck, Bot, Line-Bonus in `maxHp` und vertauschte Spielerreihenfolge.
 
 ## Nicht enthalten
 
