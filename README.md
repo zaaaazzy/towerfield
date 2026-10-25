@@ -19,7 +19,8 @@ Basiswerte (in `src/logic/match.ts` und `combat.ts`, nur Startwerte, kein Balanc
 Energie 3 + 1 pro Runde (max. 10), Line-Höchststufe 5, Kapazität 2 + Stufe, Tower 100 HP / 8 Schaden.
 
 Das verbindliche Designkonzept (Karten, Minions, Slot-Platzierung, Iso-Karte, Mobile-Layout, Folgeaufträge) steht in
-[`docs/designkonzept.md`](docs/designkonzept.md).
+[`docs/designkonzept.md`](docs/designkonzept.md). Die Anwendung der Iso-Umrechnung, der Kamera-Begrenzung und der
+Slot-Platzierung beschreibt [`docs/anwendung-iso-platzierung.md`](docs/anwendung-iso-platzierung.md).
 
 ## Befehle
 
