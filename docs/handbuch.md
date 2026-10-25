@@ -1,7 +1,7 @@
 # TowerField – Technisches Handbuch
 
-Stand: Auftrag „Replay gespielter Matches per URL-Parameter“ (Version 0.1.0). Der Stand baut auf den
-Aufträgen „Grafische Überarbeitung im Fantasy-Kartenspiel-Stil“, „Heiler-Karte“, „Kartenfilter für die Hand im Match“, „Replay-Szene“, „Minion-Statistik-Overlay nach Match-Ende“, „Fernkämpfer Bogenschütze“, „Start- und Zieh-Konstanten“, „E2E-Tests“, „Dev-Szene mit Balancing-Statistik“,
+Stand: Auftrag „Handbuch: Spielregeln und Kartenwerte abgleichen“ (Version 0.1.0). Der Stand baut auf den
+Aufträgen „Replay gespielter Matches per URL-Parameter“, „Grafische Überarbeitung im Fantasy-Kartenspiel-Stil“, „Heiler-Karte“, „Kartenfilter für die Hand im Match“, „Replay-Szene“, „Minion-Statistik-Overlay nach Match-Ende“, „Fernkämpfer Bogenschütze“, „Start- und Zieh-Konstanten“, „E2E-Tests“, „Dev-Szene mit Balancing-Statistik“,
 „Minion-Tempo“, „Tower-Reichweite 20“, „Energie-Maximum 8“, „Bot-Strategie“, „Handlimit“, „Drag-and-Drop“,
 „Designkonzept“ und „Kern-Logik“ auf.
 
@@ -10,8 +10,15 @@ Aufträgen „Grafische Überarbeitung im Fantasy-Kartenspiel-Stil“, „Heiler
 >   Typen), `src/logic/match-stats.ts`, `src/logic/replay.ts`, `src/logic/seed.ts`, `src/scenes/replay-scene.ts`,
 >   `src/main.ts`, `src/logic/hand-filter.ts`, die Filter-Stellen in `src/scenes/main-scene.ts`. `bot.ts` nur an den
 >   Schnittstellen (`botStep`, `botPlan`).
-> - Aus dem bisherigen Handbuch und den Einzeldokumenten übernommen, nicht neu gegen den Code geprüft: Kartenwerte,
->   Rundenablauf, Platzierung, `main-scene.ts`, Tests.
+> - Abgleich dieses Stands, gegen den Code geprüft: Kartenwerte und Kopienzahlen (`src/logic/cards.ts`), die Regeltabelle,
+>   der Rundenablauf und die Siegbedingungen (`src/logic/match.ts`: `startRound`, `respawnSurvivors`, `advance`,
+>   `destroyedOutcome`, `hpOutcome`), das Kampfmodell und die Heilung (`src/logic/combat.ts`), die Kartenpriorität
+>   (`src/logic/bot.ts`, `PRIORITY`), die Konstanten in Abschnitt 4 sowie die Platzierungsformel (`lineCapacity`,
+>   `playCard`). Soll-Werte aus `docs/designkonzept.md` sind verglichen; Abweichungen stehen in „Abweichungen zum
+>   Designkonzept“ (Abschnitt 2).
+> - Weiterhin nicht neu gegen den Code geprüft: `src/logic/placement.ts` (Slotpositionen, `PLACEMENT_ZONE_END`),
+>   `main-scene.ts` (außer den Filter-Stellen) und die Testbeschreibungen in Abschnitt 6. Die Balance-Szene und
+>   `balance-sim` sind nicht neu bewertet.
 > - Heiler: gegen `cards.ts`, `combat.ts` (Felder `maxHp`, `heals`, Heilformel) und `match.ts` (Beschwören) geprüft sowie
 >   gegen `docs/anwendung-heiler.md`.
 > - Grafik: gegen `docs/grafik-stil.md`, `docs/anwendung-grafik-ueberarbeitung.md`, die Dateiliste der Szenen und die
@@ -25,6 +32,20 @@ Aufträgen „Grafische Überarbeitung im Fantasy-Kartenspiel-Stil“, „Heiler
 > - Nichts committet. Zeilenangaben für `main-scene.ts` sind ungefähr.
 
 ## Änderungen in diesem Stand
+
+Dieser Stand ändert nur das Handbuch (`docs/handbuch.md`), keinen Code:
+
+| Thema | Vorher | Jetzt |
+|---|---|---|
+| Überlebende Minions | „bleiben stehen“ | werden zu Rundenbeginn auf die niedrigsten freien Slots zurückgesetzt (`respawnSurvivors`) |
+| Siegbedingung | Tower-Zerstörung und Wertung kurz | genauer: Prüfung nach jedem Tick, beide ohne Tower = Unentschieden, Wertung nur nach Runde 8 |
+| Deck | „26 Karten“ | Zusammensetzung beschrieben (ein voller Durchgang plus 9 Karten) |
+| Kampfmodell | ohne Tie-Break und Tower-Bedingung | Zielwahl, Gleichstand, zerstörte Tower, Heiler ohne Ziel ergänzt |
+| Designkonzept | ohne Vergleich | Abschnitt „Abweichungen zum Designkonzept“ |
+| Offene Punkte | veraltete Smoke-Angaben | korrigiert, möglicher Code-Fehler beim Tower-Upgrade vermerkt |
+| Kartenwerte, Konstanten | – | unverändert, stimmen mit dem Code überein |
+
+Frühere Änderung (Replay gespielter Matches):
 
 | Thema | Vorher | Jetzt | Datei |
 |---|---|---|---|
@@ -126,6 +147,7 @@ Minion-Tempo, Balance-Szene, E2E, Minion-Statistik, Replay, Kartenfilter, Heiler
 | Replay-Szene `?replay=<seed>` | umgesetzt, getestet |
 | **Teilen und Abspielen gespielter Matches (`&moves=`)** | **umgesetzt, getestet; „Zurücknehmen“ in der `MainScene` nicht bedienbar** |
 | **Kartenfilter für die Hand** | **umgesetzt, getestet** |
+| **Handbuch-Abgleich: Kartenwerte, Regeln, Siegbedingungen, Rollen** | **gegen den Code geprüft (dieser Stand)** |
 | Balance-Szene `balance` | nur im Dev-Server, nicht neu bewertet |
 | Drag-and-Drop von Minions | umgesetzt |
 | `iso.ts` (Iso-Umrechnung, Kamera) | fertig, von der Szene nicht genutzt |
@@ -139,17 +161,21 @@ Minion-Tempo, Balance-Szene, E2E, Minion-Statistik, Replay, Kartenfilter, Heiler
 | Spielfeld | 3 Lines, pro Spieler und Line 1 Tower am eigenen Ende. Spieler 0 (Mensch) unten, Spieler 1 (Bot) oben. |
 | Start | 5 identische Handkarten (`START_HAND`). |
 | Ziehen | Ab Runde 2 dieselben 3 Karten für beide (`DRAW_PER_ROUND`). |
-| Handlimit | `HAND_LIMIT = 10`, überzählige Karten verfallen. |
+| Handlimit | `HAND_LIMIT = 10`; nach dem Ziehen werden die zuletzt gezogenen Karten am Ende der Hand abgeschnitten (keine Ablage). Sie zählen als gezogen. |
 | Runden | Planung, dann Kampf, höchstens `MAX_ROUNDS = 8`. |
-| Energie | `min(8, 3 + (Runde - 1))`: 3, 4, 5, 6, 7, 8, 8, 8. Unverbrauchte Energie verfällt. |
-| Kampf | 400 Ticks à 50 ms (20 s) über `delta`. Überlebende bleiben stehen. |
-| Sieg | Alle 3 gegnerischen Tower zerstört; nach Runde 8 zählen die Tower-LP; Gleichstand ist Unentschieden. |
+| Energie | `min(MAX_ENERGY, BASE_ENERGY + (Runde - 1) * ENERGY_PER_ROUND)` = `min(8, 3 + (Runde - 1))`: 3, 4, 5, 6, 7, 8, 8, 8. Wird je Runde neu gesetzt; Unverbrauchtes verfällt. |
+| Kampf | `COMBAT_TICKS = 400` Ticks à `TICK_MS = 50` ms (20 s), über `delta` in festen Ticks. |
+| Überlebende | Zu Rundenbeginn (`respawnSurvivors`) auf die niedrigsten freien Slots ihrer Line gesetzt, nach `id` aufsteigend; HP, Werte und Line bleiben. Sie zählen zur Line-Kapazität, aber nicht zu `placements` (nicht verschieb- oder zurücknehmbar). |
+| Sieg | Nach jedem Kampf-Tick: hat ein Spieler keinen lebenden Tower mehr, endet das Match sofort; der andere gewinnt. Haben beide in demselben Tick keinen mehr, ist es unentschieden. Nach den 400 Ticks von Runde 8 gewinnt, wer mehr Tower-LP (Summe aller 3 Lines) hat; gleiche Summe ist unentschieden. Vor Runde 8 zählt der Tower-LP-Vergleich nie. |
 
-Deck-Länge: `START_HAND + DRAW_PER_ROUND * (MAX_ROUNDS - 1)` = 26 Karten, Mischung per Seed (Fisher-Yates).
+Deck-Länge: `START_HAND + DRAW_PER_ROUND * (MAX_ROUNDS - 1)` = 26 Karten, Mischung per Seed (Fisher-Yates). Der Vorrat
+besteht aus Durchgängen der Kopienzahlen (je 17 Karten); die 26 Karten sind ein voller Durchgang plus die ersten 9
+Karten des zweiten (Minion ×4, Brocken ×2, Bogenschütze ×2, Heiler ×1). Im Deck stecken daher Minion 8, Brocken 4,
+Bogenschütze 4, Heiler 2, die übrigen Karten wie in der Tabelle. Beide Spieler ziehen dieselben Karten.
 
 ### Karten (`src/logic/cards.ts`)
 
-| ID | Name | Kosten | Wirkung | Reichw. | Tempo | Kopien |
+| ID | Name | Kosten | Wirkung | Reichw. | Tempo | Kopien je Durchgang |
 |---|---|---|---|---|---|---|
 | `summon-minion` | Minion | 1 | 30 LP, 6 Schaden/s | 4 | 10 | 4 |
 | `summon-brute` | Brocken | 2 | 80 LP, 12 Schaden/s | 4 | 8 | 2 |
@@ -164,15 +190,40 @@ Deck-Länge: `START_HAND + DRAW_PER_ROUND * (MAX_ROUNDS - 1)` = 26 Karten, Misch
 Upgrades ändern nur `hp` und `damage`, wirken nur auf später beschworene Minions und sind nicht rücknehmbar.
 Eine abgelehnte Karte lässt den Zustand unverändert (`PlayResult.ok === false`, mit `reason`).
 
+Rollen (Werte aus `CARD_DEFS`; ohne eigenes `range` gilt `MINION_RANGE = 4`, ohne `speed` `MINION_SPEED = 10`):
+Nahkampf Minion (Reichweite 4, Tempo 10), Tank Brocken (4, Tempo 8), Fernkampf Bogenschütze (Reichweite 14, Tempo 10),
+Heiler (`role: 'healer'`, Reichweite 10, Tempo 10; `damage` 5 ist dort Heilung pro Sekunde). Die Bot-Priorität
+(`PRIORITY` in `bot.ts`) lautet: Minion, Bogenschütze, Heiler, Tower Leben, Line +1, Minions Line, Brocken, Tower
+Schaden, Minions alle.
+
+#### Abweichungen zum Designkonzept
+
+Maßgeblich ist der Code; `docs/designkonzept.md` bleibt unverändert und ist an diesen Stellen veraltet:
+
+| Stelle im Designkonzept | Designkonzept | Ist (Code) |
+|---|---|---|
+| Abschnitt 3, Kartenliste | nur 7 Karten, ohne Bogenschütze und Heiler | 9 Karten (Tabelle oben); Abschnitt 4 des Designkonzepts nennt beide |
+| Abschnitt 3, „Soll-Änderungen“ | `START_HAND` Ist 7 / Soll 5, `DRAW_PER_ROUND` Ist 5 / Soll 3; Abschnitt 10: „noch nicht geändert“ | im Code 5 und 3 (umgesetzt) |
+| Abschnitt 3, Ablage | Ablage als Datenfeld in Folgeauftrag 4 | keine Ablage im Code; verfallene und gespielte Karten werden nicht gespeichert |
+| Abschnitt 8, Frage 7 | „Überlebende bleiben stehen“ | werden in der nächsten Runde auf freie Slots zurückgesetzt (`respawnSurvivors`; Abschnitt 2 des Designkonzepts beschreibt das richtig) |
+| Abschnitt 3, Deck | keine Zusammensetzung | siehe „Deck-Länge“ oben: Die Spalte „Im Deck“ bzw. „Kopien“ gilt je Durchgang; im 26-Karten-Deck kommen Minion, Brocken, Bogenschütze und Heiler doppelt so oft vor |
+| Abschnitt 4, Heiler/Bogenschütze | LP 20, Schaden 7 bzw. Heilung 5, Reichweite 14 bzw. 10, Tempo 10, Kopien 2 bzw. 1 | stimmt (Kopien je Durchgang) |
+
+Kartenwerte, Reichweiten und Tempo stimmen sonst mit dem Designkonzept überein.
+
 ### Kampfmodell (`src/logic/combat.ts`)
 
 - Line-Länge `LINE_LENGTH = 100`; Position 0 am eigenen, 100 am gegnerischen Tower.
 - Pflichtfelder eines `Minion`: `id`, `line`, `position`, `hp`, `damage`, `range`, `speed`. Standardwerte
   `MINION_RANGE = 4`, `MINION_SPEED = 10`. Neue `Minion`-Literale in Tests brauchen `range` und `speed`.
-- Ein Minion greift einen gegnerischen Minion auf derselben Line an, wenn der Abstand (`gap`) höchstens `range` ist
-  (nächster zuerst). Sonst greift er den Tower an, wenn der höchstens `range` entfernt ist. Sonst läuft er
-  `speed * deltaSeconds` weiter. Hat er ein Ziel, bleibt er stehen.
-- Tower (100 LP, 8 Schaden/s) treffen den am weitesten vorgerückten Gegner innerhalb `TOWER_RANGE = 20`.
+- Abstand zweier gegnerischer Minions: `gap = 100 − Position(a) − Position(b)`.
+- Ein Minion (kein Heiler) greift einen gegnerischen Minion auf derselben Line an, wenn der Abstand (`gap`) höchstens
+  `range` ist (kleinster Abstand zuerst, bei Gleichstand der kleinere Index). Sonst greift er den Tower seiner Line an,
+  wenn dieser noch lebt und `100 − Position <= range` gilt. Sonst läuft er `speed * deltaSeconds` weiter, höchstens bis
+  `LINE_LENGTH`. Hat er ein Ziel, bleibt er stehen. Fernkampf ist nur eine größere `range` (Bogenschütze 14).
+- Tower (100 LP, 8 Schaden/s, durch Upgrades änderbar) treffen den am weitesten vorgerückten Gegner (höchste Position,
+  bei Gleichstand der kleinere Index) der eigenen Line, dessen `100 − Position <= TOWER_RANGE = 20` ist. Zerstörte
+  Tower (`hp <= 0`) greifen nicht an.
 - Beide Seiten werden pro Tick aus demselben Zustand berechnet und gleichzeitig angewendet.
 - Minions mit `hp <= 1e-9` werden nach dem Tick entfernt.
 - Optionale Felder: `maxHp` (fehlt es, gilt `hp` als Maximum) und `heals` (Heiler-Merkmal). Literale in Tests brauchen
@@ -185,7 +236,8 @@ Eine abgelehnte Karte lässt den Zustand unverändert (`PlayResult.ok === false`
 - Ein Heiler heilt pro Tick `damage * deltaSeconds` auf **einen** Verbündeten: gleiche Line, Abstand
   `|position − heiler.position| <= range`, lebend, verwundet (`hp < maxHp`), nicht er selbst. Gewählt wird der niedrigste
   HP-Anteil, bei Gleichstand der kleinere Index (kein Zufall).
-- Der Heiler greift nie an, weder Minion noch Tower, auch ohne Ziel. Er läuft immer mit seinem Tempo weiter.
+- Der Heiler greift nie an, weder Minion noch Tower, auch ohne Ziel. Er läuft immer mit seinem Tempo weiter (bis
+  `LINE_LENGTH`), auch während er heilt; er bleibt nicht stehen.
 - Heilung wird wie Schaden aus dem Zustand vor dem Tick berechnet und danach angewendet:
   `hp = min(maxHp, hp − Schaden + Heilung)`. Wer im selben Tick auf `hp <= 1e-9` fällt, wird entfernt; Heilung belebt
   nicht wieder. Das Ergebnis hängt nicht von der Spielerreihenfolge ab.
@@ -539,7 +591,13 @@ Vor jeder Übergabe müssen `npm run build`, `npm test` und `npm run test:smoke`
 - Teilen: „Zurücknehmen“ ist in der `MainScene` nicht bedienbar. Nach jeder Regeländerung `RECORD_VERSION` prüfen, sonst
   geben alte Links ein anderes Match wieder oder brechen ab.
 - Smoke-Test „Drag eines beschworenen Minions“: überspringt sich per `test.skip`, wenn die Starthand keinen Minion
-  enthält (`smoke.spec.ts`, ca. Zeile 261). Im letzten Lauf liefen alle 17 Smoke-Fälle.
+  enthält (`smoke.spec.ts`, ca. Zeile 384).
+- Möglicher Code-Fehler (nicht geändert): `playCard` prüft bei `tower-upgrade` nicht, ob der Tower der Line noch lebt
+  (`hp > 0`). `tower-hp` auf einen zerstörten Tower setzt dessen `hp` wieder auf 30; der Tower greift dann wieder an,
+  und `towersAlive` zählt ihn erneut. Das betrifft nur Lines, deren Tower gefallen ist, während die anderen noch
+  stehen (fällt der letzte, endet das Match sofort). Ob diese Wiederbelebung gewollt ist, ist offen.
+- Ablage (Designkonzept Abschnitt 3) und Hand-/Iso-Folgeaufträge sind im Code nicht vorhanden; siehe „Abweichungen zum
+  Designkonzept“.
 - Heiler: Balance (Werte sind Startwerte) und Stehenbleiben hinter Verbündeten sind nicht Teil des Auftrags. Der Panel-
   und Filtertext der Szene enthält keine Heiler-Sonderfälle; der Typ `summon` fällt unter „Beschwörung“.
 - Grafik: Karten sind klein (66×62 px), der Text hat etwa 6,5 px und ist auf zwei kurze Zeilen gekürzt. Lesbarkeit auf
