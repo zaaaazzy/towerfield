@@ -25,6 +25,8 @@ export interface Tower {
   maxHp: number;
   /** Schaden pro Sekunde. */
   damage: number;
+  /** Schild-Punkte (Runden-Ereignis): absorbieren Schaden vor den HP; fehlt das Feld, gilt 0. Verfällt nach dem Kampf. */
+  shield?: number;
 }
 
 export interface Minion {
@@ -75,6 +77,11 @@ export function gap(a: Minion, b: Minion): number {
 /** Abstand eines gegnerischen Minions (Position `position`, vom anderen Ende gezählt) zu einem Tower der Lane. */
 export function towerDistance(tower: Tower, position: number): number {
   return LINE_LENGTH - position - (tower.offset ?? 0);
+}
+
+/** Was ein Tower vor dem Fall noch aushält: Schild plus HP. */
+function towerHealth(tower: Tower): number {
+  return tower.hp + (tower.shield ?? 0);
 }
 
 /** Index des lebenden Towers, der dem anrückenden Minion am nächsten steht, oder `-1`, wenn keiner lebt. */
@@ -258,7 +265,9 @@ export function combatTick(
           ? minionDamage[hit.targetSide]![hit.target]!
           : towerDamage[hit.targetSide]![hit.target]![hit.tower]!;
       const remaining =
-        hit.kind === 'minion' ? target.minions[hit.target]!.hp : target.lines[hit.target]!.towers[hit.tower]!.hp;
+        hit.kind === 'minion'
+          ? target.minions[hit.target]!.hp
+          : towerHealth(target.lines[hit.target]!.towers[hit.tower]!);
       const share = incoming > remaining ? remaining / incoming : 1;
       collector(hit.side, hit.minionId, hit.kind, hit.amount * share);
     }
@@ -271,7 +280,10 @@ export function combatTick(
     });
     player.lines.forEach((line, index) => {
       line.towers.forEach((tower, towerIndex) => {
-        tower.hp = Math.max(0, tower.hp - towerDamage[side]![index]![towerIndex]!);
+        const damage = towerDamage[side]![index]![towerIndex]!;
+        const absorbed = Math.min(tower.shield ?? 0, damage);
+        if (absorbed > 0) tower.shield = (tower.shield ?? 0) - absorbed;
+        tower.hp = Math.max(0, tower.hp - (damage - absorbed));
       });
     });
   });

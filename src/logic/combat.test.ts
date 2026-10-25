@@ -25,6 +25,46 @@ function minion(id: number, line: number, position: number, hp = 30, damage = 6,
   return { id, line, position, hp, damage, range, speed };
 }
 
+describe('Tower-Schild', () => {
+  function shielded(shield: number): [CombatPlayer, CombatPlayer] {
+    const players: [CombatPlayer, CombatPlayer] = [player(), player()];
+    players[1].lines[0]!.towers[0]!.shield = shield;
+    // Minion 0 steht in Reichweite des gegnerischen Towers: 10 Schaden pro Sekunde.
+    players[0].minions.push(minion(1, 0, 96, 30, 10));
+    return players;
+  }
+
+  it('absorbiert Schaden zuerst und lässt die HP unberührt', () => {
+    const players = shielded(5);
+    combatTick(players, 0.5);
+    const tower = players[1].lines[0]!.towers[0]!;
+    expect(tower.shield).toBeCloseTo(0, 9);
+    expect(tower.hp).toBe(100);
+  });
+
+  it('gibt den Rest nach dem Schild an die HP weiter', () => {
+    const players = shielded(2);
+    combatTick(players, 0.5);
+    const tower = players[1].lines[0]!.towers[0]!;
+    expect(tower.shield).toBe(0);
+    expect(tower.hp).toBeCloseTo(97, 9);
+  });
+
+  it('meldet dem Sammler den vollen Schaden, solange Schild und HP reichen', () => {
+    const players = shielded(5);
+    const calls: [number, number, string, number][] = [];
+    combatTick(players, 0.5, (side, id, kind, amount) => void calls.push([side, id, kind, amount]));
+    expect(calls).toContainEqual([0, 1, 'tower', 5]);
+  });
+
+  it('ohne Schild verhält sich der Tower wie bisher', () => {
+    const players = shielded(0);
+    delete players[1].lines[0]!.towers[0]!.shield;
+    combatTick(players, 0.5);
+    expect(players[1].lines[0]!.towers[0]!.hp).toBe(95);
+  });
+});
+
 describe('Kampf mit Schaden-Sammler', () => {
   type Call = [number, number, string, number];
   const collect = (calls: Call[]) => (side: number, id: number, kind: 'minion' | 'tower', amount: number) =>

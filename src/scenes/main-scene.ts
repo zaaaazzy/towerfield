@@ -11,6 +11,7 @@ import {
   laneSlotCounts,
   moveMinion,
 } from '../logic/match';
+import { getRoundEventDef } from '../logic/round-events';
 import { LANE_COUNT, laneShortName } from '../logic/lanes';
 import { botPlanRecorded, createRecord, performAction, type RecordedMatch } from '../logic/match-record';
 import { HAND_FILTER_NAMES, type HandFilter, isCardVisible, nextHandFilter } from '../logic/hand-filter';
@@ -469,6 +470,10 @@ export class MainScene extends Phaser.Scene {
       bold: true,
     });
     this.label(`Gegner: ${bot.hand.length} Karten`, VIEW.width / 2, 40, { size: 11, color: TEXT.dim });
+    if (state.event && state.phase !== 'over') {
+      const event = getRoundEventDef(state.event);
+      this.label(`${event.name}: ${event.description}`, VIEW.width / 2, 54, { size: 11, color: TEXT.gold });
+    }
 
     const drag = this.drag?.dragging ? this.drag : null;
     if (drag?.target) {

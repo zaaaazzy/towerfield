@@ -22,15 +22,108 @@ import {
   type PlayerIndex,
   playCard,
   respawnSurvivors,
+  roundEnergy,
   setReady,
   START_HAND,
   TOWER_DAMAGE,
   TOWER_HP,
   undoSummon,
 } from './match';
-import { effectiveRange, LINE_LENGTH, MINION_RANGE, TICK_MS, towersAlive } from './combat';
+import { effectiveRange, LINE_LENGTH, MINION_RANGE, TICK_MS, TICK_SECONDS, towersAlive } from './combat';
+import { deriveEventSeed, EARLY_RESPAWN_TICKS, pickRoundEvent, type RoundEventId, TOWER_SHIELD } from './round-events';
 import { isLaneUnlocked, MAX_FIELD_LEVEL, unlockedLanes } from './lanes';
 import { PLACEMENT_ZONE_END, slotPosition } from './placement';
+
+describe('Runden-Ereignisse', () => {
+  function seedWith(event: RoundEventId): number {
+    for (let seed = 0; seed < 1000; seed += 1) {
+      if (pickRoundEvent(deriveEventSeed(seed), 3).event === event) return seed;
+    }
+    throw new Error(`Kein Seed mit ${event}`);
+  }
+  function toRound(seed: number, round: number): MatchState {
+    let state = createMatch(seed);
+    while (state.round < round) state = advance(setReady(setReady(state, 0), 1), COMBAT_TICKS * TICK_MS);
+    return state;
+  }
+
+  it('Energie +1: beide Spieler haben genau 1 mehr als ohne Ereignis, höchstens MAX_ENERGY', () => {
+    const state = toRound(seedWith('energy'), 3);
+    expect(state.event).toBe('energy');
+    for (const player of state.players) expect(player.energy).toBe(energyForRound(3) + 1);
+    expect(roundEnergy(3, null)).toBe(energyForRound(3));
+    expect(roundEnergy(6, 'energy')).toBe(MAX_ENERGY);
+    expect(roundEnergy(7, 'energy')).toBe(MAX_ENERGY);
+  });
+
+  it('Runden ohne Ereignis verhalten sich wie bisher', () => {
+    const state = toRound(seedWith('energy'), 4);
+    expect(state.event).toBeNull();
+    expect(state.players[0].energy).toBe(energyForRound(4));
+  });
+
+  it('Früher Aufbruch: Überlebende starten in der Kampfphase weiter vorn als ohne Ereignis', () => {
+    const base = toRound(seedWith('early-respawn'), 3);
+    expect(base.event).toBe('early-respawn');
+    const withSurvivor = structuredClone(base);
+    withSurvivor.players[0].minions.push({
+      id: 50,
+      line: 0,
+      position: slotPosition(0),
+      hp: 30,
+      damage: 6,
+      range: MINION_RANGE,
+      speed: 10,
+    });
+    const without = structuredClone(withSurvivor);
+    without.event = null;
+    const early = setReady(setReady(withSurvivor, 0), 1);
+    const normal = setReady(setReady(without, 0), 1);
+    expect(early.phase).toBe('combat');
+    expect(early.players[0].minions[0]!.position).toBe(slotPosition(0) + 10 * EARLY_RESPAWN_TICKS * TICK_SECONDS);
+    expect(normal.players[0].minions[0]!.position).toBe(slotPosition(0));
+  });
+
+  it('Früher Aufbruch: frisch beschworene Minions bekommen keinen Vorsprung und der Weg endet an der Lane', () => {
+    const state = toRound(seedWith('early-respawn'), 3);
+    state.players[0].minions.push(
+      { id: 1, line: 0, position: slotPosition(0), hp: 30, damage: 6, range: MINION_RANGE, speed: 10 },
+      { id: 2, line: 0, position: LINE_LENGTH - 1, hp: 30, damage: 6, range: MINION_RANGE, speed: 10 },
+    );
+    state.players[0].placements.push({ minionId: 1, cardId: 'x' });
+    const combat = setReady(setReady(state, 0), 1);
+    expect(combat.players[0].minions[0]!.position).toBe(slotPosition(0));
+    expect(combat.players[0].minions[1]!.position).toBe(LINE_LENGTH);
+  });
+
+  it('Tower-Schild: alle Tower haben den Schild in der Planung und verlieren ihn nach der Kampfphase', () => {
+    const state = toRound(seedWith('tower-shield'), 3);
+    expect(state.event).toBe('tower-shield');
+    const towers = state.players.flatMap((p) => p.lines.flatMap((l) => l.towers));
+    expect(towers.length).toBeGreaterThan(0);
+    for (const tower of towers) expect(tower.shield).toBe(TOWER_SHIELD);
+    const next = advance(setReady(setReady(state, 0), 1), COMBAT_TICKS * TICK_MS);
+    expect(next.round).toBe(4);
+    for (const tower of next.players.flatMap((p) => p.lines.flatMap((l) => l.towers))) {
+      expect(tower.shield).toBeUndefined();
+    }
+  });
+
+  it('Tower-Schild: fällt ein Tower-Satz, ist der Schild am Ende des Matches entfernt', () => {
+    const state = toRound(seedWith('tower-shield'), 3);
+    for (const line of state.players[1].lines) for (const tower of line.towers) tower.hp = 0;
+    const last = state.players[1].lines[0]!.towers[0]!;
+    last.hp = 1;
+    last.shield = 1;
+    state.players[0].minions.push({ id: 1, line: 0, position: 96, hp: 30, damage: 6, range: MINION_RANGE, speed: 10 });
+    const done = advance(setReady(setReady(state, 0), 1), COMBAT_TICKS * TICK_MS);
+    expect(done.phase).toBe('over');
+    expect(done.outcome).toBe('player0');
+    for (const tower of done.players.flatMap((p) => p.lines.flatMap((l) => l.towers))) {
+      expect(tower.shield).toBeUndefined();
+    }
+  });
+});
 
 /** Index der ersten Handkarte mit dieser ID, im Test garantiert vorhanden (sonst Testfehler). */
 function find(state: MatchState, player: PlayerIndex, id: string): number {

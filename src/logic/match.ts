@@ -1,23 +1,34 @@
 /**
  * Spielzustand und Regeln eines 1-gegen-1-Matches: Runden, Hand, Energie, Karten ausspielen, Sieg.
  * Ohne Phaser, DOM und Canvas. Alle Funktionen geben einen neuen Zustand zurück; der alte bleibt unverändert.
- * Die Planung wirkt nur auf den eigenen Spieler, deshalb ist die Reihenfolge der Spieler egal. Kein Zufall außer
- * der Deck-Reihenfolge, die der Seed einmal festlegt.
+ * Die Planung wirkt nur auf den eigenen Spieler, deshalb ist die Reihenfolge der Spieler egal. Zufall nur
+ * zwischen den Runden und über Seeds: die Deck-Reihenfolge und die Runden-Ereignisse (`round-events.ts`); der Kampf
+ * bleibt zufallsfrei.
  */
 import { applyMinionBuff } from './buff';
 import { buildDeck, getCardDef } from './cards';
 import {
   combatTick,
   type CombatPlayer,
+  LINE_LENGTH,
   type Minion,
   MINION_RANGE,
   MINION_SPEED,
   TICK_MS,
+  TICK_SECONDS,
   type Tower,
   totalTowerHp,
   towersAlive,
 } from './combat';
 import { createStats, type MatchStats, recordDamage, recordMove, recordSummon, recordUndo } from './match-stats';
+import {
+  deriveEventSeed,
+  EARLY_RESPAWN_TICKS,
+  EVENT_ENERGY_BONUS,
+  pickRoundEvent,
+  type RoundEventId,
+  TOWER_SHIELD,
+} from './round-events';
 import { isLaneUnlocked, LANE_COUNT, laneTowerOffsets, MAX_FIELD_LEVEL } from './lanes';
 import { firstFreeSlot, isSlotFree, isValidSlot, slotPosition } from './placement';
 import { type ActiveSynergy, activeSynergies, type PlayedCard, synergyBonus } from './synergies';
@@ -83,6 +94,10 @@ export interface MatchState {
   outcome: Outcome | null;
   /** Statistik des eigenen Spielers (Spieler 0), siehe `match-stats.ts`. */
   stats: MatchStats;
+  /** Zustand des Event-Zufalls, getrennt vom Deck-Seed (siehe `round-events.ts`). */
+  eventSeed: number;
+  /** Ereignis der laufenden Runde für beide Spieler; `null` in Runden ohne Ereignis. */
+  event: RoundEventId | null;
 }
 
 export type PlayError =
@@ -123,6 +138,12 @@ function upgradeTarget(towers: Tower[]): Tower {
 
 export function energyForRound(round: number): number {
   return Math.min(MAX_ENERGY, BASE_ENERGY + (round - 1) * ENERGY_PER_ROUND);
+}
+
+/** Energie zu Beginn der Runde: `energyForRound` plus der Bonus des Ereignisses, höchstens `MAX_ENERGY`. */
+export function roundEnergy(round: number, event: RoundEventId | null): number {
+  const bonus = event === 'energy' ? EVENT_ENERGY_BONUS : 0;
+  return Math.min(MAX_ENERGY, energyForRound(round) + bonus);
 }
 
 function createPlayer(): PlayerState {
@@ -167,6 +188,29 @@ export function respawnSurvivors(player: PlayerState): void {
 }
 
 /**
+ * „Früher Aufbruch“ (verändert `player`): Die überlebenden Minions (alle, die nicht in dieser Planung beschworen wurden)
+ * starten `EARLY_RESPAWN_TICKS` Ticks früher, also um die in dieser Zeit gelaufene Strecke weiter vorn. Gilt ab Beginn
+ * der Kampfphase, damit die Slots der Planung unberührt bleiben (siehe `respawnSurvivors`).
+ */
+export function applyEarlyRespawn(player: PlayerState): void {
+  const fresh = new Set(player.placements.map((p) => p.minionId));
+  for (const minion of player.minions) {
+    if (fresh.has(minion.id)) continue;
+    minion.position = Math.min(LINE_LENGTH, minion.position + minion.speed * EARLY_RESPAWN_TICKS * TICK_SECONDS);
+  }
+}
+
+/** Entfernt alle Tower-Schilde (verändert `player`); am Ende der Kampfphase. */
+function clearShields(player: PlayerState): void {
+  for (const line of player.lines) for (const tower of line.towers) delete tower.shield;
+}
+
+/** „Tower-Schild“: Schild auf allen lebenden Towern (verändert `player`). */
+function applyTowerShield(player: PlayerState): void {
+  for (const line of player.lines) for (const tower of line.towers) if (tower.hp > 0) tower.shield = TOWER_SHIELD;
+}
+
+/**
  * Wertet die Synergien aus `player.played` neu aus (verändert `player`) und setzt den temporären Reichweitenbonus aller
  * Minions nach ihrer aktuellen Lane. Ohne Bonus fehlt das Feld; `LineState.bonus` und Basiswerte bleiben unberührt.
  */
@@ -189,8 +233,13 @@ function startRound(state: MatchState, round: number): void {
   state.ready = [false, false];
   state.accumulatorMs = 0;
   state.combatTicks = 0;
+  const pick = pickRoundEvent(state.eventSeed, round);
+  state.eventSeed = pick.seed;
+  state.event = pick.event;
   for (const player of state.players) {
-    player.energy = energyForRound(round);
+    clearShields(player);
+    if (state.event === 'tower-shield') applyTowerShield(player);
+    player.energy = roundEnergy(round, state.event);
     player.placements = [];
     player.played = [];
     respawnSurvivors(player);
@@ -213,6 +262,8 @@ export function createMatch(seed: number): MatchState {
     combatTicks: 0,
     outcome: null,
     stats: createStats(),
+    eventSeed: deriveEventSeed(seed),
+    event: null,
   };
   startRound(state, 1);
   return state;
@@ -392,6 +443,7 @@ export function setReady(state: MatchState, playerIndex: PlayerIndex): MatchStat
     next.phase = 'combat';
     next.accumulatorMs = 0;
     next.combatTicks = 0;
+    if (next.event === 'early-respawn') for (const player of next.players) applyEarlyRespawn(player);
   }
   return next;
 }
@@ -417,6 +469,7 @@ export function hpOutcome(state: MatchState): Outcome {
 function finish(state: MatchState, outcome: Outcome): void {
   state.phase = 'over';
   state.outcome = outcome;
+  for (const player of state.players) clearShields(player);
   state.accumulatorMs = 0;
 }
 
