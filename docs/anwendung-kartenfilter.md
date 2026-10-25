@@ -22,7 +22,7 @@ nicht.
 | --- | --- |
 | Beschwörung | `summon` |
 | Upgrade | `line-upgrade`, `minion-upgrade` |
-| Tower | `tower-upgrade` |
+| Tower | `tower-upgrade`, `tower-specialize` |
 | Alle | alle Typen |
 
 ## Für Entwickler

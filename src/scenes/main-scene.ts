@@ -436,6 +436,10 @@ export class MainScene extends Phaser.Scene {
         return 'Lane ist voll';
       case 'max-level':
         return 'Feld ist auf Höchststufe';
+      case 'level-too-low':
+        return 'Lane-Level zu niedrig';
+      case 'already-specialized':
+        return 'Tower schon spezialisiert';
       case 'slot-taken':
         return 'Platz ist belegt';
       case 'invalid-target':

@@ -29,7 +29,7 @@ import {
   type RoundEventId,
   TOWER_SHIELD,
 } from './round-events';
-import { isLaneUnlocked, LANE_COUNT, laneTowerOffsets, MAX_FIELD_LEVEL } from './lanes';
+import { isLaneUnlocked, LANE_COUNT, laneTowerOffsets, laneUnlockLevel, MAX_FIELD_LEVEL } from './lanes';
 import { firstFreeSlot, isSlotFree, isValidSlot, slotPosition } from './placement';
 import { type ActiveSynergy, activeSynergies, type PlayedCard, synergyBonus } from './synergies';
 
@@ -46,6 +46,8 @@ export const MAX_ENERGY = 8;
 export const BASE_CAPACITY = 2;
 export const TOWER_HP = 100;
 export const TOWER_DAMAGE = 8;
+/** Mindest-Level einer Lane (Ausbaustufe, ab der sie frei ist, siehe `laneUnlockLevel`) für eine Tower-Spezialisierung. */
+export const SPECIALIZE_MIN_LEVEL = 2;
 /** Dauer der Kampfphase in Ticks (20 Sekunden). */
 export const COMBAT_TICKS = 400;
 
@@ -111,6 +113,8 @@ export type PlayError =
   | 'no-such-minion'
   | 'line-full'
   | 'max-level'
+  | 'level-too-low'
+  | 'already-specialized'
   | 'invalid-target';
 
 export type PlayResult = { ok: true; state: MatchState } | { ok: false; state: MatchState; reason: PlayError };
@@ -134,6 +138,16 @@ export function createLaneTowers(lane: number): Tower[] {
 function upgradeTarget(towers: Tower[]): Tower {
   const alive = towers.filter((tower) => tower.hp > 0);
   return alive.reduce((best, tower) => (tower.hp < best.hp ? tower : best), alive[0] ?? towers[0]!);
+}
+
+/**
+ * Tower, den eine Spezialisierung trifft: der vorderste lebende Tower der Lane ohne Spezialisierung (größter
+ * Standort, er steht dem Gegner am nächsten), sonst `undefined`.
+ */
+export function specializeTarget(towers: Tower[]): Tower | undefined {
+  return towers
+    .filter((tower) => tower.hp > 0 && tower.specialization === undefined)
+    .reduce<Tower | undefined>((best, tower) => (!best || (tower.offset ?? 0) > (best.offset ?? 0) ? tower : best), undefined);
 }
 
 export function energyForRound(round: number): number {
@@ -317,6 +331,10 @@ export function playCard(
     }
   }
   if (def.type === 'line-upgrade' && current.level >= MAX_FIELD_LEVEL) return reject(state, 'max-level');
+  if (def.type === 'tower-specialize') {
+    if (laneUnlockLevel(lineIndex!) < SPECIALIZE_MIN_LEVEL) return reject(state, 'level-too-low');
+    if (!specializeTarget(current.lines[lineIndex!]!.towers)) return reject(state, 'already-specialized');
+  }
 
   const next = structuredClone(state);
   const player = next.players[playerIndex];
@@ -341,6 +359,9 @@ export function playCard(
       tower.damage += def.damage;
       break;
     }
+    case 'tower-specialize':
+      specializeTarget(line!.towers)!.specialization = def.path;
+      break;
     case 'summon': {
       const minion: Minion = {
         id: player.nextMinionId,

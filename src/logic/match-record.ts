@@ -3,8 +3,8 @@
  * zurücknehmen, bereit) samt Runde, dazu ein kompaktes URL-Format und das Nachspielen mit Prüfung.
  * Ohne Phaser, DOM und Canvas. Die Regeln kommen unverändert aus `match.ts`; hier wird nur mitgeschrieben.
  *
- * Format (Version 4, nur Zeichen `0-9 a-z . -`, damit nichts maskiert werden muss):
- *   `v4` gefolgt von Aktionen, je mit `.` davor. Eine Aktion beginnt mit Typbuchstabe, Runde (1 Ziffer) und Spieler
+ * Format (Version 5, nur Zeichen `0-9 a-z . -`, damit nichts maskiert werden muss):
+ *   `v5` gefolgt von Aktionen, je mit `.` davor. Eine Aktion beginnt mit Typbuchstabe, Runde (1 Ziffer) und Spieler
  *   (0/1), danach Felder mit `-`:
  *   `p<R><P>-<Kartenindex>[-<Lane>]` Karte spielen (bei Karten mit Ziel-Minion steht an der Stelle der Lane die
  *   Minion-Id) · `m<R><P>-<Minion>-<Lane>-<Slot>` verschieben ·
@@ -31,11 +31,11 @@ import {
 } from './match';
 
 /**
- * Version 4: neue Karte `buff-minion` (ändert das gemischte Deck); ihr Zug trägt statt der Lane die Minion-Id. Version 3
- * brachte `summon-destroyer`, Version 2 das horizontale Lane-Layout. Links aus älteren Versionen gelten nicht mehr,
- * weil sie sonst ein anderes Match abspielten.
+ * Version 5: Tower-Spezialisierungskarten (`tower-lightning`, `tower-shield`) ändern Kartenliste und Deck. Version 4
+ * brachte `buff-minion` (der Zug trägt statt der Lane die Minion-Id), Version 3 `summon-destroyer`, Version 2 das
+ * horizontale Lane-Layout. Links aus älteren Versionen gelten nicht mehr, weil sie sonst ein anderes Match abspielten.
  */
-export const RECORD_VERSION = 4;
+export const RECORD_VERSION = 5;
 /** Obergrenze für Länge und Aktionszahl beim Dekodieren; ein Match mit 8 Runden bleibt weit darunter. */
 export const MAX_MOVES_LENGTH = 4000;
 const MAX_ACTIONS = 800;

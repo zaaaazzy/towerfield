@@ -2,10 +2,16 @@
  * Kartendefinitionen und Deck-Reihenfolge. Ohne Phaser: reine Daten und Funktionen.
  * Alle Spieler nutzen dasselbe Deck, das einmal per Seed gemischt wird.
  */
-import { type Explosion, MINION_SPEED } from './combat';
+import { type Explosion, MINION_SPEED, type Specialization } from './combat';
 import { nextRandom } from './game-state';
 
-export type CardType = 'line-upgrade' | 'tower-upgrade' | 'summon' | 'minion-upgrade' | 'minion-buff';
+export type CardType =
+  | 'line-upgrade'
+  | 'tower-upgrade'
+  | 'tower-specialize'
+  | 'summon'
+  | 'minion-upgrade'
+  | 'minion-buff';
 
 interface CardBase {
   id: string;
@@ -18,6 +24,7 @@ interface CardBase {
 export type CardDef =
   | (CardBase & { type: 'line-upgrade' })
   | (CardBase & { type: 'tower-upgrade'; hp: number; damage: number })
+  | (CardBase & { type: 'tower-specialize'; path: Specialization })
   | (CardBase & { type: 'summon'; hp: number; damage: number; range?: number; speed?: number; role?: 'healer' | 'destroyer'; explodes?: Explosion })
   | (CardBase & { type: 'minion-upgrade'; hp: number; damage: number; scope: 'line' | 'all' })
   | (CardBase & { type: 'minion-buff' });
@@ -42,6 +49,8 @@ export const CARD_DEFS: readonly CardDef[] = [
   { id: 'line-upgrade', name: 'Lane +1', type: 'line-upgrade', cost: 2, target: 'none' },
   { id: 'tower-hp', name: 'Tower Leben', type: 'tower-upgrade', cost: 1, target: 'line', hp: 30, damage: 0 },
   { id: 'tower-damage', name: 'Tower Schaden', type: 'tower-upgrade', cost: 2, target: 'line', hp: 0, damage: 4 },
+  { id: 'tower-lightning', name: 'Blitz-Turm', type: 'tower-specialize', cost: 2, target: 'line', path: 'lightning' },
+  { id: 'tower-shield', name: 'Schild-Turm', type: 'tower-specialize', cost: 2, target: 'line', path: 'shield' },
   {
     id: 'minion-upgrade-line',
     name: 'Minions Line',
@@ -76,6 +85,8 @@ const COPIES: Readonly<Record<string, number>> = {
   'line-upgrade': 2,
   'tower-hp': 2,
   'tower-damage': 1,
+  'tower-lightning': 1,
+  'tower-shield': 1,
   'minion-upgrade-line': 2,
   'minion-upgrade-all': 1,
   'buff-minion': 1,

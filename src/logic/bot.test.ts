@@ -8,6 +8,7 @@ import {
   createMatch,
   lineCapacity,
   LINE_COUNT,
+  MAX_ENERGY,
   type MatchState,
   type PlayerIndex,
 } from './match';
@@ -504,6 +505,49 @@ describe('Bot', () => {
       expect(after.players[1].hand).toEqual(['minion-upgrade-all']);
       expect(after.players[1].energy).toBe(0);
       expect(after.ready[1]).toBe(true);
+    });
+  });
+
+  describe('Spezialisierung', () => {
+    const hand = ['tower-lightning', 'tower-shield', 'tower-lightning', 'tower-shield', 'tower-lightning'];
+
+    it('spielt sie auf Lanes mit dem höchsten Level zuerst, bei Gleichstand die niedrigste Lane', () => {
+      let state = grow(withHand(hand, 20), MAX_FIELD_LEVEL);
+      const lanes: (number | undefined)[] = [];
+      for (let move = botStep(state, 1); move; move = botStep(state, 1)) {
+        lanes.push(move.line);
+        state = move.state;
+      }
+      // Lane 3 und 4 haben Level 3, Lane 1 und 2 Level 2; die Start-Lane (Level 1) bleibt außen vor.
+      expect(lanes).toEqual([3, 4, 1, 2]);
+      expect(state.players[1].hand).toHaveLength(1);
+      expect(state.players[1].lines[0]!.towers.some((tower) => tower.specialization)).toBe(false);
+    });
+
+    it('spielt sie nicht, wenn keine Lane das Mindest-Level hat', () => {
+      expect(botStep(withHand(hand, 20), 1)).toBeNull();
+      const after = botPlan(withHand(hand, 20), 1);
+      expect(after.players[1].hand).toEqual(hand);
+      expect(after.players[1].energy).toBe(20);
+    });
+
+    it('überspringt Lanes ohne lebenden, unspezialisierten Tower', () => {
+      const state = grow(withHand(['tower-shield'], 5), MAX_FIELD_LEVEL);
+      for (const lane of [3, 4, 1]) state.players[1].lines[lane]!.towers[0]!.hp = 0;
+      expect(botStep(state, 1)?.line).toBe(2);
+    });
+
+    it('verursacht nie einen Fehler in playCard', () => {
+      for (let seed = 1; seed <= 20; seed += 1) {
+        const state = grow(withHand(hand, MAX_ENERGY, seed), 1 + (seed % MAX_FIELD_LEVEL));
+        const after = botPlan(state, 1);
+        const left = after.players[1].hand.filter((id) => getCardDef(id).type === 'tower-specialize');
+        // Was übrig bleibt, hat entweder keine zulässige Lane oder nicht mehr genug Energie.
+        for (const id of left) {
+          const result = botStep(after, 1, [id]);
+          expect(result === null || after.players[1].energy >= cost(id)).toBe(true);
+        }
+      }
     });
   });
 });

@@ -201,6 +201,8 @@ const ABORT_TEXT: Readonly<Record<ReplayAbortReason, string>> = {
   'no-such-minion': 'Den Minion gibt es nicht.',
   'line-full': 'Die Lane ist voll.',
   'max-level': 'Das Feld hat die Höchststufe.',
+  'level-too-low': 'Das Lane-Level ist zu niedrig für eine Spezialisierung.',
+  'already-specialized': 'Der Tower ist schon spezialisiert.',
   'invalid-target': 'Der Ziel-Minion ist ungültig.',
 };
 

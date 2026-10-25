@@ -12,6 +12,7 @@ export const HAND_TYPE_ORDER: readonly CardType[] = [
   'minion-upgrade',
   'minion-buff',
   'tower-upgrade',
+  'tower-specialize',
 ];
 
 /**

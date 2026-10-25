@@ -24,6 +24,8 @@ import {
   respawnSurvivors,
   roundEnergy,
   setReady,
+  SPECIALIZE_MIN_LEVEL,
+  specializeTarget,
   START_HAND,
   TOWER_DAMAGE,
   TOWER_HP,
@@ -877,6 +879,98 @@ describe('Sieg', () => {
     const final = playMatch(11, 1000 / 60, 'pass');
     expect(advance(final, 1000)).toBe(final);
     expect(playCard(final, 0, 0, 0).ok).toBe(false);
+  });
+});
+
+describe('Tower-Spezialisierung', () => {
+  const lightning = ['tower-lightning'];
+
+  it('hält SPECIALIZE_MIN_LEVEL im Bereich der Ausbaustufen', () => {
+    expect(SPECIALIZE_MIN_LEVEL).toBeGreaterThanOrEqual(1);
+    expect(SPECIALIZE_MIN_LEVEL).toBeLessThanOrEqual(MAX_FIELD_LEVEL);
+  });
+
+  it('setzt den Pfad der Karte, zieht die Kosten ab und entfernt die Karte aus der Hand', () => {
+    for (const [cardId, path] of [['tower-lightning', 'lightning'], ['tower-shield', 'shield']] as const) {
+      const state = withLevel(withHand(createMatch(1), [cardId, 'summon-minion']), 2);
+      const result = playCard(state, 0, 0, 1);
+      expect(result.ok).toBe(true);
+      const player = result.state.players[0];
+      expect(player.lines[1]!.towers[0]!.specialization).toBe(path);
+      expect(player.energy).toBe(MAX_ENERGY - getCardDef(cardId).cost);
+      expect(player.hand).toEqual(['summon-minion']);
+      // Der alte Zustand und der Gegner bleiben unberührt.
+      expect(state.players[0].lines[1]!.towers[0]!.specialization).toBeUndefined();
+      expect(result.state.players[1].lines[1]!.towers[0]!.specialization).toBeUndefined();
+    }
+  });
+
+  it('lehnt eine Lane unter SPECIALIZE_MIN_LEVEL mit level-too-low ab und lässt den Zustand unverändert', () => {
+    const state = withLevel(withHand(createMatch(1), lightning), 3);
+    const result = playCard(state, 0, 0, 0);
+    expect(result).toEqual({ ok: false, state, reason: 'level-too-low' });
+    expect(result.state).toBe(state);
+    expect(state.players[0].energy).toBe(MAX_ENERGY);
+  });
+
+  it('lehnt einen bereits spezialisierten Tower mit already-specialized ab, ohne Energie abzuziehen', () => {
+    const first = playCard(withLevel(withHand(createMatch(1), ['tower-lightning', 'tower-shield']), 2), 0, 0, 1);
+    expect(first.ok).toBe(true);
+    const second = playCard(first.state, 0, 0, 1);
+    expect(second).toEqual({ ok: false, state: first.state, reason: 'already-specialized' });
+    expect(second.state).toBe(first.state);
+    // Eine andere Lane bleibt frei.
+    expect(playCard(first.state, 0, 0, 2).ok).toBe(true);
+  });
+
+  it('liefert weiter invalid-line und not-enough-energy', () => {
+    const state = withLevel(withHand(createMatch(1), lightning), 2);
+    const reasonOf = (result: ReturnType<typeof playCard>) => (result.ok ? null : result.reason);
+    expect(reasonOf(playCard(state, 0, 0))).toBe('invalid-line');
+    expect(reasonOf(playCard(state, 0, 0, 3))).toBe('invalid-line');
+    const poor = withLevel(withHand(createMatch(1), lightning, 1), 2);
+    expect(reasonOf(playCard(poor, 0, 0, 1))).toBe('not-enough-energy');
+  });
+
+  it('bleibt über Runden, Klonen und den Gegner-Kampf erhalten', () => {
+    const played = playCard(withLevel(withHand(createMatch(1), lightning), 2), 0, 0, 1);
+    const ready = setReady(setReady(played.state, 0), 1);
+    const next = advance(ready, COMBAT_TICKS * TICK_MS);
+    expect(next.round).toBe(2);
+    expect(next.players[0].lines[1]!.towers[0]!.specialization).toBe('lightning');
+    expect(structuredClone(next).players[0].lines[1]!.towers[0]!.specialization).toBe('lightning');
+    expect(JSON.parse(JSON.stringify(next)).players[0].lines[1]!.towers[0].specialization).toBe('lightning');
+  });
+
+  describe('specializeTarget', () => {
+    const tower = (offset: number | undefined, hp = 100, specialization?: 'lightning') => ({
+      ...(offset === undefined ? {} : { offset }),
+      hp,
+      maxHp: 100,
+      damage: 8,
+      ...(specialization ? { specialization } : {}),
+    });
+
+    it('wählt den vordersten lebenden Tower ohne Spezialisierung', () => {
+      const towers = [tower(0), tower(8), tower(16)];
+      expect(specializeTarget(towers)).toBe(towers[2]);
+      towers[2]!.hp = 0;
+      expect(specializeTarget(towers)).toBe(towers[1]);
+      towers[1]!.specialization = 'lightning';
+      expect(specializeTarget(towers)).toBe(towers[0]);
+    });
+
+    it('behandelt einen fehlenden Standort als 0', () => {
+      const towers = [tower(undefined), tower(0), tower(8)];
+      expect(specializeTarget(towers)).toBe(towers[2]);
+      expect(specializeTarget([towers[0]!, towers[1]!])).toBe(towers[0]);
+      expect(specializeTarget([towers[1]!, towers[0]!])).toBe(towers[1]);
+    });
+
+    it('liefert undefined, wenn kein Tower übrig ist', () => {
+      expect(specializeTarget([])).toBeUndefined();
+      expect(specializeTarget([tower(0, 0), tower(8, 100, 'lightning')])).toBeUndefined();
+    });
   });
 });
 

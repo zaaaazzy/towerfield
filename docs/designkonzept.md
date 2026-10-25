@@ -64,6 +64,8 @@ flowchart LR
 | `line-upgrade` | Line +1 | Linien-Upgrade | 2 | Line-Stufe +1: Kapazität +1, ein Slot mehr | Line, Stufe < `MAX_LINE_LEVEL` (5) | 2 |
 | `tower-hp` | Tower Leben | Turm-Upgrade | 1 | Tower-Max-LP und -LP +30 | eigene Line | 2 |
 | `tower-damage` | Tower Schaden | Turm-Upgrade | 2 | Tower-Schaden +4/s | eigene Line | 1 |
+| `tower-lightning` | Blitz-Turm | Turm-Spezialisierung | 2 | Einmalig: der Tower trifft alle gegnerischen Minions der Lane in Reichweite (je 60 % Schaden) | eigene Lane ab Lane-Level 2, Tower noch nicht spezialisiert | 1 |
+| `tower-shield` | Schild-Turm | Turm-Spezialisierung | 2 | Einmalig: 50 % des Schadens, den Minions dem Tower zufügen, werfen sie auf sich selbst zurück | eigene Lane ab Lane-Level 2, Tower noch nicht spezialisiert | 1 |
 | `minion-upgrade-line` | Minions Line | Minion-Upgrade | 1 | Künftige Minions der Line: +10 LP, +2 Schaden | eigene Line | 2 |
 | `minion-upgrade-all` | Minions alle | Minion-Upgrade | 3 | Künftige Minions aller Lines: +5 LP, +1 Schaden | keins | 1 |
 | `buff-minion` | Minion stärken | Minion-Stärkung | 2 | Ein bestehender Minion: Max-LP, LP und Schaden +50 % (Math.round) | eigener lebender Minion | 1 |

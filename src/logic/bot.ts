@@ -3,9 +3,9 @@
  * und entscheidet ohne Zufall.
  */
 import { getCardDef } from './cards';
-import { unlockedLanes } from './lanes';
+import { laneUnlockLevel, unlockedLanes } from './lanes';
 import type { Minion } from './combat';
-import { lineCapacity, type MatchState, type PlayerIndex, playCard, setReady } from './match';
+import { lineCapacity, type MatchState, type PlayerIndex, playCard, setReady, specializeTarget, SPECIALIZE_MIN_LEVEL } from './match';
 
 /** Reihenfolge, in der der Bot Karten bevorzugt. */
 const PRIORITY = [
@@ -19,6 +19,8 @@ const PRIORITY = [
   'summon-brute',
   'buff-minion',
   'tower-damage',
+  'tower-lightning',
+  'tower-shield',
   'minion-upgrade-all',
 ];
 
@@ -52,6 +54,15 @@ function chooseLine(state: MatchState, playerIndex: PlayerIndex, cardId: string)
       );
     case 'tower-upgrade':
       return pick(lines, (line) => player.lines[line]!.towers.reduce((sum, tower) => sum + tower.hp, 0));
+    case 'tower-specialize':
+      // Nur Lanes ab dem Mindest-Level mit freiem Tower; die mit dem höchsten Level, bei Gleichstand die niedrigste.
+      return pick(
+        lines.filter(
+          (line) =>
+            laneUnlockLevel(line) >= SPECIALIZE_MIN_LEVEL && specializeTarget(player.lines[line]!.towers) !== undefined,
+        ),
+        (line) => -laneUnlockLevel(line),
+      );
     case 'minion-upgrade':
       return pick(lines, (line) => -player.lines[line]!.bonus.hp);
   }

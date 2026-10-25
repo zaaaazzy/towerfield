@@ -187,6 +187,8 @@ Bogenschütze 4, Heiler 1, Zerstörer 1, die übrigen Karten wie in der Tabelle.
 | `line-upgrade` | Lane +1 | 2 | Feld-Stufe +1 (max. 3, ohne Ziel): je eine neue Lane oben und unten, ein Slot mehr je Lane | – | – | 2 |
 | `tower-hp` | Tower Leben | 1 | +30 max. LP und +30 LP | – | – | 2 |
 | `tower-damage` | Tower Schaden | 2 | +4 Schaden/s | – | – | 1 |
+| `tower-lightning` | Blitz-Turm | 2 | Spezialisierung (Ziel Lane): der Tower trifft alle Minions der Lane in `TOWER_RANGE`, je mit 60 % Schaden (`LIGHTNING_FACTOR`), siehe [Tower-Spezialisierung](anwendung-tower-spezialisierung.md) | – | – | 1 |
+| `tower-shield` | Schild-Turm | 2 | Spezialisierung (Ziel Lane): 50 % (`SHIELD_REFLECT`) des Schadens, den ein Minion dem Tower zufügt, fällt auf ihn zurück (gedeckelt auf seine Rest-LP) | – | – | 1 |
 | `minion-upgrade-line` | Minions Line | 1 | +10 LP, +2 Schaden für künftige Minions der Line | – | – | 2 |
 | `minion-upgrade-all` | Minions alle | 3 | +5 LP, +1 Schaden für künftige Minions aller Lines | – | – | 1 |
 | `buff-minion` | Minion stärken | 2 | +50 % `maxHp`, `hp` und `damage` eines eigenen lebenden Minions (Ziel `minion`, Rundung `Math.round`) | – | – | 1 |
@@ -197,7 +199,7 @@ prüft Phase, Bereit-Status, Karte, Energie und Ziel (eigener Minion mit `hp > 0
 ist `buffGain(Wert) = Math.round(Wert × BUFF_RATIO)` aus `buff.ts`; mehrere Buffs wirken nacheinander auf die aktuellen
 Werte. `line.bonus` bleibt unberührt, `respawnSurvivors` behält die Werte. Der Bot stärkt den lebenden Minion mit dem
 größten `maxHp` oder spielt die Karte nicht. In der Aufzeichnung steht die Ziel-ID anstelle der Lane (`p<R><P>-10-<Id>`,
-Format Version 4; ältere Links sind ungültig, weil das Deck sich ändert). In der UI wählt der Spieler die Karte und tippt
+Format Version 5; ältere Links sind ungültig, weil das Deck sich ändert). In der UI wählt der Spieler die Karte und tippt
 dann einen eigenen Minion (grüner Ring).
 Eine abgelehnte Karte lässt den Zustand unverändert (`PlayResult.ok === false`, mit `reason`).
 
@@ -462,7 +464,7 @@ flowchart LR
 | `card-style.ts` | `cardTypeStyle` (Typ → Rahmenfarbe, Symbol, Banner) und `describeCard` (Kurztext); mit Test. |
 | `fx-events.ts` | `diffFx` leitet Treffer, Tod, Beschwörung und Turmschaden aus zwei Zuständen ab; mit Test. |
 
-Kartentypen: `summon` Rot/Schwert, `tower-upgrade` Blau/Turm, `line-upgrade` Grün/Pfeil, `minion-upgrade` Violett/Edelstein.
+Kartentypen: `summon` Rot/Schwert, `tower-upgrade` Blau/Turm, `line-upgrade` Grün/Pfeil, `minion-upgrade` Violett/Edelstein, `tower-specialize` Gold/Blitz (spezialisierte Tower tragen eine gelbe Raute für Blitz, eine blaue für Schild).
 
 **Regeln für Änderungen:**
 - Farben und Schriften nur aus `theme.ts`. Neue Szenen nutzen `ensureTextures`/`addBackdrop`.
@@ -488,7 +490,7 @@ Reine Darstellungs- und Eingabehilfe für die Hand des Menschen (Handlimit 10). 
 | `nextHandFilter(filter)` | nächster Filter, nach Tower wieder Alle |
 | `isCardVisible(type, filter)` | ist eine Karte dieses `CardType` beim Filter sichtbar |
 
-Zuordnung: `summon` → Beschwörung; `line-upgrade`, `minion-upgrade` und `minion-buff` → Upgrade; `tower-upgrade` → Tower.
+Zuordnung: `summon` → Beschwörung; `line-upgrade`, `minion-upgrade` und `minion-buff` → Upgrade; `tower-upgrade` und `tower-specialize` → Tower.
 
 **Szene (`main-scene.ts`):**
 - `LAYOUT.filterButton`: x 122, y 592, 102 × 40, links neben der Taste bei 230/592 und unter den Handkarten (bis ca.
@@ -567,7 +569,7 @@ Funktionen: `createStats`, `recordSummon`, `recordUndo`, `recordMove`, `recordDa
   `>>> 0` auf 32 Bit gekürzt; ungültige Werte ergeben `null`.
 - URL-Parameter `&moves=<kodiert>` (zusammen mit `replay`) spielt aufgezeichnete Züge ab; Format und Grenzen siehe
   „Teilen und Abspielen gespielter Matches“. `main.ts` liest nur `replay`, `moves` liest die Szene.
-- `RECORD_VERSION` (`match-record.ts`): Formatversion der Aufzeichnung, aktuell 2.
+- `RECORD_VERSION` (`match-record.ts`): Formatversion der Aufzeichnung, aktuell 5.
 - Die Szene `balance` ist nur im Dev-Server registriert, nicht im Produktions-Build.
 
 ## 5. Betrieb und Entwicklung

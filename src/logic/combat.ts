@@ -17,6 +17,13 @@ export const MINION_RANGE = 4;
 /** Standard-Tempo (Minions ohne eigene Rolle); die Simulation nutzt `Minion.speed`. */
 export const MINION_SPEED = 10;
 export const TOWER_RANGE = 20;
+/** Blitz-Turm: Anteil des Tower-Schadens, den jedes getroffene Minion erleidet (er trifft dafür alle in Reichweite). */
+export const LIGHTNING_FACTOR = 0.6;
+/** Schild-Turm: Anteil des Schadens, den ein Minion dem Tower zufügt und der als Rückwurf auf das Minion fällt. */
+export const SHIELD_REFLECT = 0.5;
+
+/** Spezialisierung eines Towers: Blitz trifft alle Minions der Lane, Schild wirft Schaden zurück. */
+export type Specialization = 'lightning' | 'shield';
 
 export interface Tower {
   /** Standort auf der Lane, vom eigenen Ende aus; fehlt er, steht der Tower am Ende (0). */
@@ -25,6 +32,8 @@ export interface Tower {
   maxHp: number;
   /** Schaden pro Sekunde. */
   damage: number;
+  /** Einmalige Spezialisierung per Karte; fehlt sie, ist es ein normaler Tower. */
+  specialization?: Specialization;
   /** Schild-Punkte (Runden-Ereignis): absorbieren Schaden vor den HP; fehlt das Feld, gilt 0. Verfällt nach dem Kampf. */
   shield?: number;
 }
@@ -234,6 +243,10 @@ export function combatTick(
       const tower = nearestTower(towers, minion.position);
       if (tower >= 0 && towerDistance(towers[tower]!, minion.position) <= effectiveRange(minion)) {
         towerDamage[enemySide]![minion.line]![tower]! += minion.damage * deltaSeconds;
+        if (towers[tower]!.specialization === 'shield') {
+          // Rückwurf aus dem Zustand vor dem Tick, gedeckelt auf die Rest-HP des Angreifers.
+          minionDamage[side]![index]! += Math.min(minion.hp, minion.damage * deltaSeconds * SHIELD_REFLECT);
+        }
         hits.push({ side, minionId: minion.id, kind: 'tower', targetSide: enemySide, target: minion.line, tower, amount: minion.damage * deltaSeconds });
         return;
       }
@@ -243,6 +256,13 @@ export function combatTick(
     me.lines.forEach((line, lineIndex) => {
       for (const tower of line.towers) {
         if (tower.hp <= 0) continue;
+        if (tower.specialization === 'lightning') {
+          enemy.minions.forEach((other, otherIndex) => {
+            if (other.line !== lineIndex || towerDistance(tower, other.position) > TOWER_RANGE) return;
+            minionDamage[enemySide]![otherIndex]! += tower.damage * deltaSeconds * LIGHTNING_FACTOR;
+          });
+          continue;
+        }
         let target = -1;
         let furthest = -Infinity;
         enemy.minions.forEach((other, otherIndex) => {
