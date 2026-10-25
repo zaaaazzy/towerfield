@@ -6,7 +6,14 @@
 import type { CardType } from './cards';
 
 /** Typ-Reihenfolge von links nach rechts: Einheiten, Line-, Minion-, Tower-Upgrades. */
-export const HAND_TYPE_ORDER: readonly CardType[] = ['summon', 'line-upgrade', 'minion-upgrade', 'tower-upgrade'];
+export const HAND_TYPE_ORDER: readonly CardType[] = [
+  'summon',
+  'line-upgrade',
+  'minion-upgrade',
+  'minion-buff',
+  'tower-upgrade',
+  'tower-specialize',
+];
 
 /**
  * Hand-Indizes in Anzeigereihenfolge (Eintrag `slot` ist der Hand-Index der Karte auf Platz `slot`).

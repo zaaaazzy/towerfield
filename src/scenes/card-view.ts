@@ -56,6 +56,30 @@ function drawSymbol(g: Phaser.GameObjects.Graphics, symbol: CardSymbol, cx: numb
         true,
       );
       break;
+    case 'bolt':
+      g.fillStyle(dark, 0.8).fillPoints(
+        [
+          new Phaser.Geom.Point(cx + r * 0.3, cy - r),
+          new Phaser.Geom.Point(cx - r * 0.6, cy + r * 0.1),
+          new Phaser.Geom.Point(cx - r * 0.05, cy + r * 0.1),
+          new Phaser.Geom.Point(cx - r * 0.3, cy + r),
+          new Phaser.Geom.Point(cx + r * 0.6, cy - r * 0.2),
+          new Phaser.Geom.Point(cx + r * 0.05, cy - r * 0.2),
+        ],
+        true,
+      );
+      g.fillStyle(PALETTE.goldLight, 1).fillPoints(
+        [
+          new Phaser.Geom.Point(cx + r * 0.2, cy - r * 0.8),
+          new Phaser.Geom.Point(cx - r * 0.4, cy + r * 0.05),
+          new Phaser.Geom.Point(cx + r * 0.1, cy + r * 0.05),
+          new Phaser.Geom.Point(cx - r * 0.2, cy + r * 0.8),
+          new Phaser.Geom.Point(cx + r * 0.4, cy - r * 0.1),
+          new Phaser.Geom.Point(cx - r * 0.05, cy - r * 0.1),
+        ],
+        true,
+      );
+      break;
     case 'arrow':
       g.lineStyle(Math.max(1.5, r * 0.5), PALETTE.white, 0.95);
       g.lineBetween(cx, cy + r * 0.8, cx, cy - r * 0.6);

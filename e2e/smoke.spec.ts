@@ -294,7 +294,7 @@ test('?replay=<seed>&moves=<ungültig>: kein Konsolenfehler, das Replay bleibt m
   await page.waitForFunction(() => window.game?.scene.isActive('main') && !window.game.scene.isActive('replay'));
 
   // Lesbar, aber regelwidrig (sechsmal dieselbe Karte): das Replay bricht an der ersten ungültigen Aktion ab.
-  await page.goto('/?replay=7&moves=v2.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0');
+  await page.goto('/?replay=7&moves=v5.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0');
   await page.waitForFunction(() => window.game?.scene.isActive('replay') && window.game.loop.frame > 10);
   await page.waitForFunction(
     () => (window.game!.scene.getScene('replay') as unknown as RecordedReplayView).current.aborted !== null,
@@ -305,7 +305,7 @@ test('?replay=<seed>&moves=<ungültig>: kein Konsolenfehler, das Replay bleibt m
   expect((await visibleTexts(page)).some((text) => text.startsWith('Replay abgebrochen bei Zug'))).toBe(true);
 
   // Leerer Wert und Quatsch ohne Punkte und Ziffern.
-  for (const moves of ['', '%00%FF', 'v2.p10-', 'v1.p10-0']) {
+  for (const moves of ['', '%00%FF', 'v5.p10-', 'v4.p10-0', 'v3.p10-0', 'v2.p10-0', 'v1.p10-0']) {
     await page.goto(`/?replay=7&moves=${moves}`);
     await page.waitForFunction(() => window.game?.scene.isActive('replay') && window.game.loop.frame > 5);
     await expect.poll(async () => (await visibleTexts(page)).includes('Replay gestoppt')).toBe(true);

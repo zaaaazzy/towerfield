@@ -17,6 +17,7 @@ import {
   type Outcome,
   type PlayerIndex,
 } from './match';
+import { ROUND_EVENTS, type RoundEventId } from './round-events';
 
 /** Kartenreihenfolge je Spieler. */
 export type Strategies = readonly [readonly string[], readonly string[]];
@@ -29,7 +30,12 @@ export interface MatchResult {
   endedBy: 'towers' | 'round-limit';
   /** Gespielte Karten-IDs je Spieler (eine Eintrag pro Einsatz). */
   played: [string[], string[]];
+  /** Ereignisse, die in diesem Match aufgetreten sind (eine Runde, ein Eintrag). */
+  events?: RoundEventId[];
 }
+
+/** Häufigkeit je Ereignis des Pools (immer alle Ereignisse, auch mit 0). */
+export type EventCounts = Record<RoundEventId, number>;
 
 export interface CardStats {
   cardId: string;
@@ -56,6 +62,8 @@ export interface BalanceReport {
   roundLimitShare: number;
   /** Basisquote: Siegquote über alle Spieler-Matches. */
   baselineWinRate: number;
+  /** Wie oft jedes Runden-Ereignis über alle Matches aufgetreten ist. */
+  eventCounts: EventCounts;
   cards: CardStats[];
 }
 
@@ -104,9 +112,13 @@ function removedCards(before: string[], after: string[]): string[] {
 export function simulateMatch(seed: number, strategies: Strategies): MatchResult {
   let state: MatchState = createMatch(seed);
   const played: [string[], string[]] = [[], []];
+  const events: RoundEventId[] = [];
+  let eventRound = 0;
   // Sicherung gegen Endlosschleifen: je Runde ein Planungs- und ein Kampfschritt.
   for (let step = 0; step < MAX_ROUNDS * 4 && state.phase !== 'over'; step += 1) {
     if (state.phase === 'planning') {
+      if (state.event && state.round !== eventRound) events.push(state.event);
+      eventRound = state.round;
       for (const index of [0, 1] as PlayerIndex[]) {
         const before = state.players[index].hand;
         state = botPlan(state, index, strategies[index]);
@@ -125,6 +137,7 @@ export function simulateMatch(seed: number, strategies: Strategies): MatchResult
     rounds: state.round,
     endedBy: destroyedOutcome(state) !== null ? 'towers' : 'round-limit',
     played,
+    events,
   };
 }
 
@@ -164,6 +177,9 @@ export function buildReport(results: readonly MatchResult[], startSeed: number):
     };
   });
 
+  const eventCounts = Object.fromEntries(ROUND_EVENTS.map((def) => [def.id, 0])) as EventCounts;
+  for (const result of results) for (const id of result.events ?? []) eventCounts[id] += 1;
+
   return {
     startSeed,
     totalMatches: total,
@@ -179,6 +195,7 @@ export function buildReport(results: readonly MatchResult[], startSeed: number):
     towerKillShare: ratio(towerKills, total),
     roundLimitShare: ratio(total - towerKills, total),
     baselineWinRate,
+    eventCounts,
     cards,
   };
 }

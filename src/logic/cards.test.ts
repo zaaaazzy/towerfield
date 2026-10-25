@@ -2,9 +2,44 @@ import { describe, expect, it } from 'vitest';
 import { buildDeck, CARD_DEFS, getCardDef } from './cards';
 
 describe('Karten', () => {
-  it('deckt alle vier Kartentypen ab', () => {
+  it('deckt alle sechs Kartentypen ab', () => {
     const types = new Set(CARD_DEFS.map((card) => card.type));
-    expect([...types].sort()).toEqual(['line-upgrade', 'minion-upgrade', 'summon', 'tower-upgrade']);
+    expect([...types].sort()).toEqual([
+      'line-upgrade',
+      'minion-buff',
+      'minion-upgrade',
+      'summon',
+      'tower-specialize',
+      'tower-upgrade',
+    ]);
+  });
+
+  it('definiert Blitz- und Schild-Turm als Spezialisierung mit Ziel Line und passendem Pfad', () => {
+    expect(getCardDef('tower-lightning')).toMatchObject({ type: 'tower-specialize', target: 'line', path: 'lightning' });
+    expect(getCardDef('tower-shield')).toMatchObject({ type: 'tower-specialize', target: 'line', path: 'shield' });
+  });
+
+  it('legt beide Spezialisierungen einmal pro Durchgang ins Deck, deterministisch pro Seed', () => {
+    const deck = buildDeck(9, 21);
+    expect(deck.filter((id) => id === 'tower-lightning')).toHaveLength(1);
+    expect(deck.filter((id) => id === 'tower-shield')).toHaveLength(1);
+    expect(buildDeck(9, 21)).toEqual(deck);
+  });
+
+  it('definiert „Minion stärken“ als Karte mit Ziel-Minion', () => {
+    expect(getCardDef('buff-minion')).toMatchObject({
+      name: 'Minion stärken',
+      type: 'minion-buff',
+      target: 'minion',
+      cost: 2,
+    });
+  });
+
+  it('legt „Minion stärken“ einmal pro Durchgang ins Deck, deterministisch pro Seed', () => {
+    // Ein Durchgang des Decks hat 21 Karten (Summe von COPIES).
+    expect(buildDeck(1, 21).filter((id) => id === 'buff-minion')).toHaveLength(1);
+    expect(buildDeck(3, 42).filter((id) => id === 'buff-minion')).toHaveLength(2);
+    expect(buildDeck(3, 42)).toEqual(buildDeck(3, 42));
   });
 
   it('hat eindeutige IDs und positive Kosten', () => {
@@ -34,7 +69,7 @@ describe('Karten', () => {
   });
 
   it('legt den Bogenschützen genau zweimal in einen Durchgang des Decks', () => {
-    const passLength = 16;
+    const passLength = 21;
     expect(buildDeck(1, passLength).filter((id) => id === 'summon-archer')).toHaveLength(2);
     expect(buildDeck(7, passLength * 3).filter((id) => id === 'summon-archer')).toHaveLength(6);
   });
@@ -53,8 +88,29 @@ describe('Karten', () => {
   });
 
   it('legt den Heiler einmal pro Durchgang ins Deck, deterministisch pro Seed', () => {
-    expect(buildDeck(1, 17).filter((id) => id === 'summon-healer')).toHaveLength(1);
-    expect(buildDeck(3, 34).filter((id) => id === 'summon-healer')).toHaveLength(2);
+    expect(buildDeck(1, 21).filter((id) => id === 'summon-healer')).toHaveLength(1);
+    expect(buildDeck(3, 42).filter((id) => id === 'summon-healer')).toHaveLength(2);
+    expect(buildDeck(3, 42)).toEqual(buildDeck(3, 42));
+  });
+
+  it('definiert den Zerstörer als Summon-Karte mit Rolle destroyer und Explosionswerten', () => {
+    expect(getCardDef('summon-destroyer')).toMatchObject({
+      name: 'Zerstörer',
+      type: 'summon',
+      target: 'line',
+      cost: 2,
+      hp: 40,
+      damage: 8,
+      speed: 8,
+      role: 'destroyer',
+      explodes: { radius: 10, damage: 15 },
+    });
+  });
+
+  it('legt den Zerstörer einmal pro Durchgang ins Deck, deterministisch pro Seed', () => {
+    // Ein Durchgang des Decks hat 17 Karten.
+    expect(buildDeck(2, 17).filter((id) => id === 'summon-destroyer')).toHaveLength(1);
+    expect(buildDeck(3, 34).filter((id) => id === 'summon-destroyer')).toHaveLength(2);
     expect(buildDeck(3, 34)).toEqual(buildDeck(3, 34));
   });
 

@@ -29,6 +29,8 @@ async function setHand(page: Parameters<typeof openGame>[0], hand: string[]): Pr
 }
 
 test('Fächer: ein Tipp auf eine überlappende Karte wählt genau die sichtbar getroffene Karte', async ({ page }) => {
+  // Zehn Antipp-Runden dauern allein etwa 15 s; bei paralleler Last reichen die üblichen 30 s nicht.
+  test.setTimeout(90_000);
   const errors = collectErrors(page);
   await openGame(page);
   // Jede Karte wird an ihrer sichtbaren Stelle angetippt. Eine Karte mit Ziel Lane muss mit ihrem echten Hand-Index

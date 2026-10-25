@@ -8,6 +8,7 @@ import {
   createMatch,
   lineCapacity,
   LINE_COUNT,
+  MAX_ENERGY,
   type MatchState,
   type PlayerIndex,
 } from './match';
@@ -139,6 +140,18 @@ describe('Bot', () => {
       expect(minions.filter((m) => m.heals)).toHaveLength(1);
       expect(minions.find((m) => m.heals)).toMatchObject({ range: 10, maxHp: 20 });
       expect(minions.find((m) => !m.heals)!.heals).toBeUndefined();
+    });
+
+    it('beschwört einen Zerstörer mit Explosionswerten, andere Minions ohne', () => {
+      const after = botPlan(
+        withHand(['summon-destroyer', 'summon-minion'], cost('summon-destroyer') + cost('summon-minion')),
+        1,
+      );
+      const minions = after.players[1].minions;
+      expect(minions).toHaveLength(2);
+      expect(minions.find((m) => m.explodes)).toMatchObject({ explodes: { radius: 10, damage: 15 }, maxHp: 40 });
+      expect(minions.filter((m) => m.explodes)).toHaveLength(1);
+      expect(minions.some((m) => m.heals)).toBe(false);
     });
 
     it('beschwört einen Bogenschützen mit Reichweite 14', () => {
@@ -389,6 +402,47 @@ describe('Bot', () => {
     });
   });
 
+  describe('buff-minion', () => {
+    it('stärkt den lebenden Minion mit dem größten maxHp (bei Gleichstand die kleinste Id) und meldet seine Id', () => {
+      const state = withHand(['buff-minion'], cost('buff-minion'));
+      addMinions(state, 0, 3);
+      state.players[1].minions[1]!.maxHp = 50;
+      state.players[1].minions[2]!.maxHp = 50;
+      state.players[1].minions[0]!.maxHp = 80;
+      state.players[1].minions[0]!.hp = 0;
+      const move = botStep(state, 1);
+      expect(move).toMatchObject({ cardId: 'buff-minion', line: undefined, minionId: 101 });
+      expect(move!.state.players[1].minions.find((m) => m.id === 101)).toMatchObject({ maxHp: 75, damage: 9 });
+      expect(move!.state.players[1].minions.find((m) => m.id === 102)).toMatchObject({ maxHp: 50, damage: 6 });
+    });
+
+    it('nimmt hp als Größe, wenn ein Minion kein maxHp hat', () => {
+      const state = withHand(['buff-minion'], cost('buff-minion'));
+      addMinions(state, 0, 2);
+      state.players[1].minions[1]!.hp = 40;
+      expect(botStep(state, 1)).toMatchObject({ minionId: 101 });
+    });
+
+    it('spielt die Karte nicht, wenn kein lebender eigener Minion existiert', () => {
+      const state = withHand(['buff-minion'], cost('buff-minion'));
+      expect(botStep(state, 1)).toBeNull();
+      addMinions(state, 0, 1);
+      state.players[1].minions[0]!.hp = 0;
+      const after = botPlan(state, 1);
+      expect(after.players[1].hand).toEqual(['buff-minion']);
+      expect(after.players[1].energy).toBe(cost('buff-minion'));
+      expect(after.ready[1]).toBe(true);
+    });
+
+    it('beschwört erst und stärkt dann den neuen Minion, weil die Beschwörung höher priorisiert ist', () => {
+      const state = withHand(['buff-minion', 'summon-minion'], cost('buff-minion') + cost('summon-minion'));
+      const after = botPlan(state, 1);
+      expect(after.players[1].hand).toEqual([]);
+      expect(after.players[1].minions).toHaveLength(1);
+      expect(after.players[1].minions[0]).toMatchObject({ maxHp: 45, hp: 45, damage: 9 });
+    });
+  });
+
   describe('Determinismus und Isolation', () => {
     const seeds = [1, 4, 8, 42, 1234];
     const sides: PlayerIndex[] = [0, 1];
@@ -451,6 +505,49 @@ describe('Bot', () => {
       expect(after.players[1].hand).toEqual(['minion-upgrade-all']);
       expect(after.players[1].energy).toBe(0);
       expect(after.ready[1]).toBe(true);
+    });
+  });
+
+  describe('Spezialisierung', () => {
+    const hand = ['tower-lightning', 'tower-shield', 'tower-lightning', 'tower-shield', 'tower-lightning'];
+
+    it('spielt sie auf Lanes mit dem höchsten Level zuerst, bei Gleichstand die niedrigste Lane', () => {
+      let state = grow(withHand(hand, 20), MAX_FIELD_LEVEL);
+      const lanes: (number | undefined)[] = [];
+      for (let move = botStep(state, 1); move; move = botStep(state, 1)) {
+        lanes.push(move.line);
+        state = move.state;
+      }
+      // Lane 3 und 4 haben Level 3, Lane 1 und 2 Level 2; die Start-Lane (Level 1) bleibt außen vor.
+      expect(lanes).toEqual([3, 4, 1, 2]);
+      expect(state.players[1].hand).toHaveLength(1);
+      expect(state.players[1].lines[0]!.towers.some((tower) => tower.specialization)).toBe(false);
+    });
+
+    it('spielt sie nicht, wenn keine Lane das Mindest-Level hat', () => {
+      expect(botStep(withHand(hand, 20), 1)).toBeNull();
+      const after = botPlan(withHand(hand, 20), 1);
+      expect(after.players[1].hand).toEqual(hand);
+      expect(after.players[1].energy).toBe(20);
+    });
+
+    it('überspringt Lanes ohne lebenden, unspezialisierten Tower', () => {
+      const state = grow(withHand(['tower-shield'], 5), MAX_FIELD_LEVEL);
+      for (const lane of [3, 4, 1]) state.players[1].lines[lane]!.towers[0]!.hp = 0;
+      expect(botStep(state, 1)?.line).toBe(2);
+    });
+
+    it('verursacht nie einen Fehler in playCard', () => {
+      for (let seed = 1; seed <= 20; seed += 1) {
+        const state = grow(withHand(hand, MAX_ENERGY, seed), 1 + (seed % MAX_FIELD_LEVEL));
+        const after = botPlan(state, 1);
+        const left = after.players[1].hand.filter((id) => getCardDef(id).type === 'tower-specialize');
+        // Was übrig bleibt, hat entweder keine zulässige Lane oder nicht mehr genug Energie.
+        for (const id of left) {
+          const result = botStep(after, 1, [id]);
+          expect(result === null || after.players[1].energy >= cost(id)).toBe(true);
+        }
+      }
     });
   });
 });

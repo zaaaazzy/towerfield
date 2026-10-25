@@ -22,15 +22,110 @@ import {
   type PlayerIndex,
   playCard,
   respawnSurvivors,
+  roundEnergy,
   setReady,
+  SPECIALIZE_MIN_LEVEL,
+  specializeTarget,
   START_HAND,
   TOWER_DAMAGE,
   TOWER_HP,
   undoSummon,
 } from './match';
-import { LINE_LENGTH, MINION_RANGE, TICK_MS, towersAlive } from './combat';
+import { effectiveRange, LINE_LENGTH, MINION_RANGE, TICK_MS, TICK_SECONDS, towersAlive } from './combat';
+import { deriveEventSeed, EARLY_RESPAWN_TICKS, pickRoundEvent, type RoundEventId, TOWER_SHIELD } from './round-events';
 import { isLaneUnlocked, MAX_FIELD_LEVEL, unlockedLanes } from './lanes';
 import { PLACEMENT_ZONE_END, slotPosition } from './placement';
+
+describe('Runden-Ereignisse', () => {
+  function seedWith(event: RoundEventId): number {
+    for (let seed = 0; seed < 1000; seed += 1) {
+      if (pickRoundEvent(deriveEventSeed(seed), 3).event === event) return seed;
+    }
+    throw new Error(`Kein Seed mit ${event}`);
+  }
+  function toRound(seed: number, round: number): MatchState {
+    let state = createMatch(seed);
+    while (state.round < round) state = advance(setReady(setReady(state, 0), 1), COMBAT_TICKS * TICK_MS);
+    return state;
+  }
+
+  it('Energie +1: beide Spieler haben genau 1 mehr als ohne Ereignis, höchstens MAX_ENERGY', () => {
+    const state = toRound(seedWith('energy'), 3);
+    expect(state.event).toBe('energy');
+    for (const player of state.players) expect(player.energy).toBe(energyForRound(3) + 1);
+    expect(roundEnergy(3, null)).toBe(energyForRound(3));
+    expect(roundEnergy(6, 'energy')).toBe(MAX_ENERGY);
+    expect(roundEnergy(7, 'energy')).toBe(MAX_ENERGY);
+  });
+
+  it('Runden ohne Ereignis verhalten sich wie bisher', () => {
+    const state = toRound(seedWith('energy'), 4);
+    expect(state.event).toBeNull();
+    expect(state.players[0].energy).toBe(energyForRound(4));
+  });
+
+  it('Früher Aufbruch: Überlebende starten in der Kampfphase weiter vorn als ohne Ereignis', () => {
+    const base = toRound(seedWith('early-respawn'), 3);
+    expect(base.event).toBe('early-respawn');
+    const withSurvivor = structuredClone(base);
+    withSurvivor.players[0].minions.push({
+      id: 50,
+      line: 0,
+      position: slotPosition(0),
+      hp: 30,
+      damage: 6,
+      range: MINION_RANGE,
+      speed: 10,
+    });
+    const without = structuredClone(withSurvivor);
+    without.event = null;
+    const early = setReady(setReady(withSurvivor, 0), 1);
+    const normal = setReady(setReady(without, 0), 1);
+    expect(early.phase).toBe('combat');
+    expect(early.players[0].minions[0]!.position).toBe(slotPosition(0) + 10 * EARLY_RESPAWN_TICKS * TICK_SECONDS);
+    expect(normal.players[0].minions[0]!.position).toBe(slotPosition(0));
+  });
+
+  it('Früher Aufbruch: frisch beschworene Minions bekommen keinen Vorsprung und der Weg endet an der Lane', () => {
+    const state = toRound(seedWith('early-respawn'), 3);
+    state.players[0].minions.push(
+      { id: 1, line: 0, position: slotPosition(0), hp: 30, damage: 6, range: MINION_RANGE, speed: 10 },
+      { id: 2, line: 0, position: LINE_LENGTH - 1, hp: 30, damage: 6, range: MINION_RANGE, speed: 10 },
+    );
+    state.players[0].placements.push({ minionId: 1, cardId: 'x' });
+    const combat = setReady(setReady(state, 0), 1);
+    expect(combat.players[0].minions[0]!.position).toBe(slotPosition(0));
+    expect(combat.players[0].minions[1]!.position).toBe(LINE_LENGTH);
+  });
+
+  it('Tower-Schild: alle Tower haben den Schild in der Planung und verlieren ihn nach der Kampfphase', () => {
+    const state = toRound(seedWith('tower-shield'), 3);
+    expect(state.event).toBe('tower-shield');
+    const towers = state.players.flatMap((p) => p.lines.flatMap((l) => l.towers));
+    expect(towers.length).toBeGreaterThan(0);
+    for (const tower of towers) expect(tower.shield).toBe(TOWER_SHIELD);
+    const next = advance(setReady(setReady(state, 0), 1), COMBAT_TICKS * TICK_MS);
+    expect(next.round).toBe(4);
+    for (const tower of next.players.flatMap((p) => p.lines.flatMap((l) => l.towers))) {
+      expect(tower.shield).toBeUndefined();
+    }
+  });
+
+  it('Tower-Schild: fällt ein Tower-Satz, ist der Schild am Ende des Matches entfernt', () => {
+    const state = toRound(seedWith('tower-shield'), 3);
+    for (const line of state.players[1].lines) for (const tower of line.towers) tower.hp = 0;
+    const last = state.players[1].lines[0]!.towers[0]!;
+    last.hp = 1;
+    last.shield = 1;
+    state.players[0].minions.push({ id: 1, line: 0, position: 96, hp: 30, damage: 6, range: MINION_RANGE, speed: 10 });
+    const done = advance(setReady(setReady(state, 0), 1), COMBAT_TICKS * TICK_MS);
+    expect(done.phase).toBe('over');
+    expect(done.outcome).toBe('player0');
+    for (const tower of done.players.flatMap((p) => p.lines.flatMap((l) => l.towers))) {
+      expect(tower.shield).toBeUndefined();
+    }
+  });
+});
 
 /** Index der ersten Handkarte mit dieser ID, im Test garantiert vorhanden (sonst Testfehler). */
 function find(state: MatchState, player: PlayerIndex, id: string): number {
@@ -528,6 +623,42 @@ describe('Karten ausspielen', () => {
     expect(other!.maxHp).toBe(other!.hp);
   });
 
+  it('gibt nur dem Zerstörer das Explosions-Merkmal, als eigene Kopie der Kartenwerte', () => {
+    let state = withHand(createMatch(1), ['summon-destroyer', 'summon-minion'], 20);
+    for (const id of ['summon-destroyer', 'summon-minion']) {
+      const result = playCard(state, 0, find(state, 0, id), 0);
+      if (!result.ok) throw new Error(result.reason);
+      state = result.state;
+    }
+    const [destroyer, other] = state.players[0].minions;
+    expect(destroyer!.explodes).toEqual({ radius: 10, damage: 15 });
+    expect(destroyer!.explodes).not.toBe((getCardDef('summon-destroyer') as { explodes: object }).explodes);
+    expect(destroyer).toMatchObject({ hp: 40, damage: 8, speed: 8, range: 4 });
+    expect(destroyer!.heals).toBeUndefined();
+    expect(other!.explodes).toBeUndefined();
+  });
+
+  it('rechnet den Explosionsschaden in der Statistik dem Zerstörer zu', () => {
+    let state = withHand(createMatch(1), ['summon-destroyer'], 20);
+    const result = playCard(state, 0, 0, 0);
+    if (!result.ok) throw new Error(result.reason);
+    state = result.state;
+    const destroyer = state.players[0].minions[0]!;
+    destroyer.position = 50;
+    destroyer.hp = 0.2; // fällt im ersten Tick (Gegner macht 0,3)
+    destroyer.maxHp = 0.2;
+    state.players[1].minions.push({ id: 900, line: 0, position: 50, hp: 100, damage: 6, range: 4, speed: 0 });
+    state.players[1].minions.push({ id: 901, line: 0, position: 42, hp: 100, damage: 0, range: 4, speed: 0 });
+    state.phase = 'combat';
+    state.ready = [true, true];
+    const after = advance(state, 50);
+    expect(after.players[0].minions).toHaveLength(0);
+    expect(after.players[1].minions.find((m) => m.id === 901)!.hp).toBe(85);
+    // Kampfschaden 0,4 an Minion 900 plus Explosion: 15 auf 900 und 15 auf 901.
+    expect(after.stats.damage['summon-destroyer']!.minionDamage).toBeCloseTo(0.4 + 30, 6);
+    expect(after.stats.damage['summon-destroyer']!.towerDamage).toBe(0);
+  });
+
   it('wirkt „Minion verbessern“ je nach Umfang auf eine oder alle Lanes', () => {
     const base = withLevel(withHand(createMatch(1), ['minion-upgrade-line', 'minion-upgrade-all'], 10), 2);
     const one = playCard(base, 0, 0, 2);
@@ -557,6 +688,114 @@ describe('Karten ausspielen', () => {
       return state;
     };
     expect(run([0, 1])).toEqual(run([1, 0]));
+  });
+});
+
+describe('Karte Minion stärken', () => {
+  /** Spieler 0 beschwört zwei Minions (Ids 1 und 2) auf Lane 0 und hält danach `buff-minion` auf der Hand. */
+  function withTwoMinions(hand: string[] = ['buff-minion', 'buff-minion', 'buff-minion']): MatchState {
+    let state = withHand(createMatch(3), ['summon-minion', 'summon-brute', ...hand], 20);
+    for (const index of [0, 0]) {
+      const result = playCard(state, 0, index, 0);
+      if (!result.ok) throw new Error(result.reason);
+      state = result.state;
+    }
+    return state;
+  }
+  const minionOf = (state: MatchState, id: number, player: PlayerIndex = 0) =>
+    state.players[player].minions.find((m) => m.id === id)!;
+
+  it('erhöht maxHp, hp und damage des Ziels um 50 %, zieht Karte und Kosten ab', () => {
+    const state = withTwoMinions();
+    const before = minionOf(state, 2);
+    const result = playCard(state, 0, 0, undefined, undefined, 2);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(minionOf(result.state, 2)).toEqual({
+      ...before,
+      maxHp: 120,
+      hp: 120,
+      damage: 18,
+    });
+    expect(before).toMatchObject({ maxHp: 80, damage: 12 });
+    expect(result.state.players[0].energy).toBe(state.players[0].energy - getCardDef('buff-minion').cost);
+    expect(result.state.players[0].hand).toEqual(['buff-minion', 'buff-minion']);
+    // Der Ausgangszustand bleibt unverändert.
+    expect(minionOf(state, 2)).toEqual(before);
+  });
+
+  it('ändert weder line.bonus noch andere Minions noch den Gegner', () => {
+    const state = withTwoMinions();
+    const result = playCard(state, 0, 0, undefined, undefined, 2);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.state.players[0].lines.map((l) => l.bonus)).toEqual(state.players[0].lines.map((l) => l.bonus));
+    expect(minionOf(result.state, 1)).toEqual(minionOf(state, 1));
+    expect(result.state.players[1]).toEqual(state.players[1]);
+  });
+
+  it('wirkt nicht auf später beschworene Minions derselben Lane', () => {
+    let state = withTwoMinions(['buff-minion', 'summon-brute']);
+    state = (playCard(state, 0, 0, undefined, undefined, 2) as { state: MatchState }).state;
+    const summoned = playCard(state, 0, 0, 0);
+    if (!summoned.ok) throw new Error(summoned.reason);
+    expect(minionOf(summoned.state, 3)).toMatchObject({ hp: 80, maxHp: 80, damage: 12 });
+  });
+
+  it('stapelt mehrere Buffs nacheinander auf die aktuellen Werte, immer gleich', () => {
+    const run = () => {
+      let state = withTwoMinions();
+      for (let count = 0; count < 3; count += 1) {
+        const result = playCard(state, 0, 0, undefined, undefined, 1);
+        if (!result.ok) throw new Error(result.reason);
+        state = result.state;
+      }
+      return state;
+    };
+    // Minion 1: 30 LP, 6 Schaden → 45/9 → 68/14 (aufgerundet) → 102/21.
+    expect(minionOf(run(), 1)).toMatchObject({ hp: 102, maxHp: 102, damage: 21 });
+    expect(run()).toEqual(run());
+  });
+
+  it('lehnt fehlendes, unbekanntes, gegnerisches und totes Ziel mit invalid-target ab', () => {
+    const state = withTwoMinions();
+    state.players[1].minions.push({ id: 50, line: 1, position: 10, hp: 30, maxHp: 30, damage: 6, range: 4, speed: 10 });
+    const dead = structuredClone(state);
+    minionOf(dead, 1).hp = 0;
+    const cases: [MatchState, number | undefined][] = [
+      [state, undefined],
+      [state, 99],
+      [state, 50],
+      [dead, 1],
+    ];
+    for (const [from, target] of cases) {
+      const result = playCard(from, 0, 0, undefined, undefined, target);
+      expect(result).toEqual({ ok: false, state: from, reason: 'invalid-target' });
+    }
+  });
+
+  it('lehnt zu wenig Energie, falsche Phase und „Bereit“ mit den bekannten Gründen ab', () => {
+    const state = withTwoMinions();
+    const poor = structuredClone(state);
+    poor.players[0].energy = 1;
+    expect(playCard(poor, 0, 0, undefined, undefined, 1)).toMatchObject({ ok: false, reason: 'not-enough-energy' });
+    expect(playCard(setReady(state, 0), 0, 0, undefined, undefined, 1)).toMatchObject({
+      ok: false,
+      reason: 'already-ready',
+    });
+    const combat = setReady(setReady(state, 0), 1);
+    expect(playCard(combat, 0, 0, undefined, undefined, 1)).toMatchObject({ ok: false, reason: 'not-planning' });
+    expect(playCard(state, 0, 9, undefined, undefined, 1)).toMatchObject({ ok: false, reason: 'no-such-card' });
+  });
+
+  it('bleibt nach dem Kampf erhalten: Überlebende behalten ihre gestärkten Werte', () => {
+    const state = withTwoMinions();
+    const buffed = playCard(state, 0, 0, undefined, undefined, 2);
+    if (!buffed.ok) throw new Error(buffed.reason);
+    const survivor = { ...minionOf(buffed.state, 2) };
+    const player = structuredClone(buffed.state.players[0]);
+    player.minions = [survivor];
+    respawnSurvivors(player);
+    expect(player.minions[0]).toMatchObject({ id: 2, hp: 120, maxHp: 120, damage: 18 });
   });
 });
 
@@ -640,6 +879,98 @@ describe('Sieg', () => {
     const final = playMatch(11, 1000 / 60, 'pass');
     expect(advance(final, 1000)).toBe(final);
     expect(playCard(final, 0, 0, 0).ok).toBe(false);
+  });
+});
+
+describe('Tower-Spezialisierung', () => {
+  const lightning = ['tower-lightning'];
+
+  it('hält SPECIALIZE_MIN_LEVEL im Bereich der Ausbaustufen', () => {
+    expect(SPECIALIZE_MIN_LEVEL).toBeGreaterThanOrEqual(1);
+    expect(SPECIALIZE_MIN_LEVEL).toBeLessThanOrEqual(MAX_FIELD_LEVEL);
+  });
+
+  it('setzt den Pfad der Karte, zieht die Kosten ab und entfernt die Karte aus der Hand', () => {
+    for (const [cardId, path] of [['tower-lightning', 'lightning'], ['tower-shield', 'shield']] as const) {
+      const state = withLevel(withHand(createMatch(1), [cardId, 'summon-minion']), 2);
+      const result = playCard(state, 0, 0, 1);
+      expect(result.ok).toBe(true);
+      const player = result.state.players[0];
+      expect(player.lines[1]!.towers[0]!.specialization).toBe(path);
+      expect(player.energy).toBe(MAX_ENERGY - getCardDef(cardId).cost);
+      expect(player.hand).toEqual(['summon-minion']);
+      // Der alte Zustand und der Gegner bleiben unberührt.
+      expect(state.players[0].lines[1]!.towers[0]!.specialization).toBeUndefined();
+      expect(result.state.players[1].lines[1]!.towers[0]!.specialization).toBeUndefined();
+    }
+  });
+
+  it('lehnt eine Lane unter SPECIALIZE_MIN_LEVEL mit level-too-low ab und lässt den Zustand unverändert', () => {
+    const state = withLevel(withHand(createMatch(1), lightning), 3);
+    const result = playCard(state, 0, 0, 0);
+    expect(result).toEqual({ ok: false, state, reason: 'level-too-low' });
+    expect(result.state).toBe(state);
+    expect(state.players[0].energy).toBe(MAX_ENERGY);
+  });
+
+  it('lehnt einen bereits spezialisierten Tower mit already-specialized ab, ohne Energie abzuziehen', () => {
+    const first = playCard(withLevel(withHand(createMatch(1), ['tower-lightning', 'tower-shield']), 2), 0, 0, 1);
+    expect(first.ok).toBe(true);
+    const second = playCard(first.state, 0, 0, 1);
+    expect(second).toEqual({ ok: false, state: first.state, reason: 'already-specialized' });
+    expect(second.state).toBe(first.state);
+    // Eine andere Lane bleibt frei.
+    expect(playCard(first.state, 0, 0, 2).ok).toBe(true);
+  });
+
+  it('liefert weiter invalid-line und not-enough-energy', () => {
+    const state = withLevel(withHand(createMatch(1), lightning), 2);
+    const reasonOf = (result: ReturnType<typeof playCard>) => (result.ok ? null : result.reason);
+    expect(reasonOf(playCard(state, 0, 0))).toBe('invalid-line');
+    expect(reasonOf(playCard(state, 0, 0, 3))).toBe('invalid-line');
+    const poor = withLevel(withHand(createMatch(1), lightning, 1), 2);
+    expect(reasonOf(playCard(poor, 0, 0, 1))).toBe('not-enough-energy');
+  });
+
+  it('bleibt über Runden, Klonen und den Gegner-Kampf erhalten', () => {
+    const played = playCard(withLevel(withHand(createMatch(1), lightning), 2), 0, 0, 1);
+    const ready = setReady(setReady(played.state, 0), 1);
+    const next = advance(ready, COMBAT_TICKS * TICK_MS);
+    expect(next.round).toBe(2);
+    expect(next.players[0].lines[1]!.towers[0]!.specialization).toBe('lightning');
+    expect(structuredClone(next).players[0].lines[1]!.towers[0]!.specialization).toBe('lightning');
+    expect(JSON.parse(JSON.stringify(next)).players[0].lines[1]!.towers[0].specialization).toBe('lightning');
+  });
+
+  describe('specializeTarget', () => {
+    const tower = (offset: number | undefined, hp = 100, specialization?: 'lightning') => ({
+      ...(offset === undefined ? {} : { offset }),
+      hp,
+      maxHp: 100,
+      damage: 8,
+      ...(specialization ? { specialization } : {}),
+    });
+
+    it('wählt den vordersten lebenden Tower ohne Spezialisierung', () => {
+      const towers = [tower(0), tower(8), tower(16)];
+      expect(specializeTarget(towers)).toBe(towers[2]);
+      towers[2]!.hp = 0;
+      expect(specializeTarget(towers)).toBe(towers[1]);
+      towers[1]!.specialization = 'lightning';
+      expect(specializeTarget(towers)).toBe(towers[0]);
+    });
+
+    it('behandelt einen fehlenden Standort als 0', () => {
+      const towers = [tower(undefined), tower(0), tower(8)];
+      expect(specializeTarget(towers)).toBe(towers[2]);
+      expect(specializeTarget([towers[0]!, towers[1]!])).toBe(towers[0]);
+      expect(specializeTarget([towers[1]!, towers[0]!])).toBe(towers[1]);
+    });
+
+    it('liefert undefined, wenn kein Tower übrig ist', () => {
+      expect(specializeTarget([])).toBeUndefined();
+      expect(specializeTarget([tower(0, 0), tower(8, 100, 'lightning')])).toBeUndefined();
+    });
   });
 });
 
@@ -769,5 +1100,124 @@ describe('Respawn der Überlebenden', () => {
         for (const m of player.minions) expect(m.position).toBeLessThanOrEqual(PLACEMENT_ZONE_END);
       }
     }
+  });
+});
+
+describe('Synergien', () => {
+  const archerDef = getCardDef('summon-archer');
+  const ARCHER_RANGE = archerDef.type === 'summon' ? (archerDef.range ?? MINION_RANGE) : MINION_RANGE;
+  const start = () => withHand(createMatch(5), ['summon-archer', 'line-upgrade', 'summon-archer', 'summon-minion', 'summon-minion']);
+
+  /** Spielt die Handkarten mit den IDs der Reihe nach (Ziel-Line nur für Beschwörungen); wirft bei Fehlern. */
+  function playAll(state: MatchState, plays: [string, number?][], player: PlayerIndex = 0): MatchState {
+    let current = state;
+    for (const [id, line] of plays) {
+      const result = playCard(current, player, find(current, player, id), line);
+      if (!result.ok) throw new Error(result.reason);
+      current = result.state;
+    }
+    return current;
+  }
+
+  it('gibt dem Bogenschützen mit Lane +1 range +2, ohne Basiswert oder Line-Bonus zu ändern', () => {
+    const state = playAll(start(), [['summon-archer', 0], ['line-upgrade']]);
+    const player = state.players[0];
+    expect(player.synergies).toMatchObject([{ id: 'archer-line-upgrade', line: 0, modifier: { stat: 'range', amount: 2 } }]);
+    expect(player.minions[0]).toMatchObject({ range: ARCHER_RANGE, rangeBonus: 2 });
+    expect(player.lines[0]!.bonus).toEqual({ hp: 0, damage: 0 });
+  });
+
+  it('wirkt unabhängig von der Reihenfolge der Karten', () => {
+    const forward = playAll(start(), [['summon-archer', 0], ['line-upgrade']]);
+    const backward = playAll(start(), [['line-upgrade'], ['summon-archer', 0]]);
+    expect(backward.players[0].synergies).toEqual(forward.players[0].synergies);
+    expect(backward.players[0].minions[0]!.rangeBonus).toBe(2);
+  });
+
+  it('wirkt auf später beschworene Minions der Line, nicht auf andere Lines und nicht auf den Gegner', () => {
+    let state = playAll(start(), [['summon-archer', 0], ['line-upgrade']]);
+    state = playAll(state, [['summon-minion', 0], ['summon-minion', 1]]);
+    state = playAll(withHand(state, ['summon-minion'], 5), [['summon-minion', 0]], 1);
+    const [first, late, other] = state.players[0].minions;
+    expect([first!.rangeBonus, late!.rangeBonus, other!.rangeBonus]).toEqual([2, 2, undefined]);
+    expect(state.players[1].synergies).toEqual([]);
+    expect(state.players[1].minions[0]!.rangeBonus).toBeUndefined();
+  });
+
+  it('stapelt bei einem zweiten Bogenschützen nicht über +2', () => {
+    const state = playAll(start(), [['summon-archer', 0], ['line-upgrade'], ['summon-archer', 0]]);
+    expect(state.players[0].synergies).toHaveLength(1);
+    expect(state.players[0].minions.map((m) => m.rangeBonus)).toEqual([2, 2]);
+  });
+
+  it('verändert nach einem fehlgeschlagenen playCard nichts', () => {
+    const state = playAll(start(), [['summon-archer', 0]]);
+    const broke = structuredClone(state);
+    broke.players[0].energy = 0;
+    const before = structuredClone(broke);
+    const result = playCard(broke, 0, find(broke, 0, 'line-upgrade'));
+    expect(result).toMatchObject({ ok: false, reason: 'not-enough-energy' });
+    expect(result.state).toEqual(before);
+    expect(result.state.players[0].synergies).toEqual([]);
+  });
+
+  it('nimmt die Synergie mit zurückgenommenem oder verschobenem Bogenschützen zurück', () => {
+    const state = playAll(start(), [['summon-archer', 0], ['line-upgrade']]);
+    const id = state.players[0].minions[0]!.id;
+    const undone = undoSummon(state, 0, id);
+    if (!undone.ok) throw new Error(undone.reason);
+    expect(undone.state.players[0].synergies).toEqual([]);
+    expect(undone.state.players[0].played.map((p) => p.cardId)).toEqual(['line-upgrade']);
+    // Auf Lane 1 hat das Upgrade (ohne Lane-Ziel) ebenfalls Wirkung, der Bonus folgt dem Minion.
+    const moved = moveMinion(state, 0, id, 1, 0);
+    if (!moved.ok) throw new Error(moved.reason);
+    expect(moved.state.players[0].synergies[0]!.line).toBe(1);
+    expect(moved.state.players[0].minions[0]!.rangeBonus).toBe(2);
+  });
+
+  it('entfernt den Bonus bei startRound auch bei Überlebenden', () => {
+    let state = playAll(start(), [['summon-archer', 0], ['line-upgrade']]);
+    state.players[0].minions[0]!.hp = 1000;
+    state.players[0].minions[0]!.maxHp = 1000;
+    state = setReady(setReady(state, 0), 1);
+    state = advance(state, COMBAT_TICKS * TICK_MS);
+    expect(state.round).toBe(2);
+    const player = state.players[0];
+    expect(player.minions).toHaveLength(1);
+    expect(player.minions[0]).toMatchObject({ range: ARCHER_RANGE });
+    expect(player.minions[0]!.rangeBonus).toBeUndefined();
+    expect(player.synergies).toEqual([]);
+    expect(player.played).toEqual([]);
+  });
+
+  it('wirkt im Kampf: Treffer ausserhalb der Basisreichweite, innerhalb von Basis plus 2', () => {
+    const setup = (withSynergy: boolean) => {
+      let state = playAll(start(), withSynergy ? [['summon-archer', 0], ['line-upgrade']] : [['summon-archer', 0]]);
+      state = withHand(state, [], 0);
+      const archer = state.players[0].minions[0]!;
+      archer.position = 60;
+      state.players[1].minions.push({
+        id: 99, line: 0, position: LINE_LENGTH - 60 - (ARCHER_RANGE + 1), hp: 50, damage: 0, range: MINION_RANGE, speed: 0,
+      });
+      return advance(setReady(setReady(state, 0), 1), TICK_MS);
+    };
+    expect(setup(false).players[1].minions[0]!.hp).toBe(50);
+    expect(setup(true).players[1].minions[0]!.hp).toBeLessThan(50);
+  });
+
+  it('rechnet die effektive Reichweite als Basis plus Bonus', () => {
+    expect(effectiveRange({ id: 1, line: 0, position: 0, hp: 1, damage: 1, range: 10, speed: 1, rangeBonus: 2 })).toBe(12);
+  });
+
+  it('ergibt bei gleichem Seed und gleichen Zügen identische Zustände', () => {
+    const run = () => {
+      let state = createMatch(11);
+      for (let round = 0; round < 3; round += 1) {
+        state = botPlan(botPlan(state, 0), 1);
+        state = advance(state, COMBAT_TICKS * TICK_MS);
+      }
+      return state;
+    };
+    expect(run()).toEqual(run());
   });
 });

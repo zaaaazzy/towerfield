@@ -1,4 +1,5 @@
 import { expect, type Page, test } from '@playwright/test';
+import { buffGain } from '../src/logic/buff';
 import { type CardDef, getCardDef } from '../src/logic/cards';
 import type { Minion } from '../src/logic/combat';
 import { slotPosition } from '../src/logic/placement';
@@ -64,7 +65,11 @@ test('Karte und danach Lane antippen spielt die Karte: Hand -1, Energie -Kosten,
   const errors = collectErrors(page);
   await openGame(page);
   const before = await readState(page);
-  const index = findCard(before, (def) => def.target === 'line' && def.cost <= before.players[0].energy);
+  // Spezialisierungen brauchen ein Lane-Level und haben ihren eigenen Test (unten).
+  const index = findCard(
+    before,
+    (def) => def.target === 'line' && def.type !== 'tower-specialize' && def.cost <= before.players[0].energy,
+  );
   expect(index).toBeGreaterThanOrEqual(0);
   const def = defOf(before, index);
 
@@ -96,6 +101,44 @@ test('Karte und danach Lane antippen spielt die Karte: Hand -1, Energie -Kosten,
   expect(errors).toEqual([]);
 });
 
+test('Spezialisierungskarte auf der Start-Lane wird mit Hinweis abgelehnt, auf einer Lvl-2-Lane markiert sie den Tower', async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await openGame(page);
+  await unlockField(page, 2);
+  // Die Szene liest ihren Zustand aus `state`; die Karte kommt vorn auf die Hand, die frei geschaltete Lane bekommt ihren Tower.
+  await page.evaluate(() => {
+    const scene = window.game!.scene.getScene('main') as unknown as {
+      state: { players: { hand: string[]; lines: { towers: object[] }[] }[] };
+    };
+    const me = scene.state.players[0]!;
+    me.hand.unshift('tower-lightning');
+    me.lines[1]!.towers = [{ offset: 0, hp: 100, maxHp: 100, damage: 8 }];
+  });
+  const before = await readState(page);
+  const energy = before.players[0].energy;
+
+  await tapCard(page, 0);
+  await tapLine(page, 0);
+  await expect.poll(() => hasVisibleText(page, 'Lane-Level zu niedrig')).toBe(true);
+  const rejected = await readState(page);
+  expect(rejected.players[0].hand).toEqual(before.players[0].hand);
+  expect(rejected.players[0].energy).toBe(energy);
+  expect(rejected.players[0].lines[0]!.towers.some((tower) => tower.specialization)).toBe(false);
+
+  await tapCard(page, 0);
+  await tapLine(page, 1);
+  await expect
+    .poll(async () => (await readState(page)).players[0].lines[1]!.towers[0]?.specialization)
+    .toBe('lightning');
+  const played = await readState(page);
+  expect(played.players[0].energy).toBe(energy - getCardDef('tower-lightning').cost);
+  expect(played.players[0].hand).toHaveLength(before.players[0].hand.length - 1);
+
+  expect(errors).toEqual([]);
+});
+
 test('das Feld startet mit einer Lane; „Lane +1“ schaltet je eine Lane oben und unten frei (Lvl 2, dann Lvl 3)', async ({
   page,
 }) => {
@@ -122,6 +165,34 @@ test('das Feld startet mit einer Lane; „Lane +1“ schaltet je eine Lane oben 
     await expect.poll(() => hasVisibleText(page, shown)).toBe(true);
   }
   expect((await readState(page)).players[1].level).toBe(1);
+  expect(errors).toEqual([]);
+});
+
+test('Bogenschütze und „Lane +1“ auf derselben Line zeigen die Synergie an der Lane, Spielen und Zustand bleiben bedienbar', async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await openGame(page);
+  await page.evaluate(() => {
+    const scene = window.game!.scene.getScene('main') as unknown as { state: { players: { hand: string[]; energy: number }[] } };
+    scene.state.players[0]!.hand = ['summon-archer', 'line-upgrade'];
+    scene.state.players[0]!.energy = 10;
+  });
+  const label = 'Fernkampf-Ausbau · Reichweite +2';
+  expect(await hasVisibleText(page, label)).toBe(false);
+
+  await tapCard(page, 0);
+  await tapLine(page, 0);
+  await expect.poll(async () => (await readState(page)).players[0].minions.length).toBe(1);
+  expect(await hasVisibleText(page, label)).toBe(false);
+
+  await tapCard(page, 0);
+  await expect.poll(async () => (await readState(page)).players[0].synergies.length).toBe(1);
+  await expect.poll(() => hasVisibleText(page, label)).toBe(true);
+  const player = (await readState(page)).players[0];
+  expect(player.minions[0]).toMatchObject({ rangeBonus: 2 });
+  expect(player.lines[0]!.bonus).toEqual({ hp: 0, damage: 0 });
+
   expect(errors).toEqual([]);
 });
 
@@ -250,6 +321,39 @@ async function summonOn(page: Page, line: number): Promise<Minion> {
 }
 
 const minionById = (state: MatchState, id: number) => state.players[0].minions.find((m) => m.id === id);
+
+test('buff-minion: Karte und danach eigenen Minion antippen stärkt nur diesen Minion um 50 %', async ({ page }) => {
+  const errors = collectErrors(page);
+  await openGame(page);
+  const placed = await summonOn(page, 0);
+  // Der Test legt die Karte gezielt in die Hand (Zustand der Szene), die Regeln laufen unverändert.
+  await page.evaluate(() => {
+    const scene = window.game!.scene.getScene('main') as unknown as {
+      state: { players: { hand: string[]; energy: number }[] };
+    };
+    scene.state.players[0]!.hand[0] = 'buff-minion';
+    scene.state.players[0]!.energy = 10;
+  });
+  const before = await readState(page);
+  const cost = getCardDef('buff-minion').cost;
+
+  await tapCard(page, 0);
+  await expect.poll(() => readSelected(page)).toBe(0);
+  await tap(page, minionPoint(placed).x, minionPoint(placed).y);
+  await expect.poll(async () => (await readState(page)).players[0].hand.length).toBe(before.players[0].hand.length - 1);
+
+  const after = await readState(page);
+  const buffed = minionById(after, placed.id)!;
+  const maxHp = placed.maxHp ?? placed.hp;
+  expect(buffed.maxHp).toBe(maxHp + buffGain(maxHp));
+  expect(buffed.hp).toBe(placed.hp + buffGain(maxHp));
+  expect(buffed.damage).toBe(placed.damage + buffGain(placed.damage));
+  expect(after.players[0].energy).toBe(before.players[0].energy - cost);
+  expect(after.players[0].lines).toEqual(before.players[0].lines);
+  expect(await readSelected(page)).toBeNull();
+
+  expect(errors).toEqual([]);
+});
 
 test('Drag: ein Minion auf einen freien Slot einer anderen Lane gezogen setzt line und position, Energie bleibt', async ({
   page,

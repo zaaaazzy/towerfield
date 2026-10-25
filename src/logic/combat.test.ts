@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
+import { applyMinionBuff } from './buff';
 import {
   combatTick,
   type CombatPlayer,
+  explosionVictims,
+  LIGHTNING_FACTOR,
   LINE_LENGTH,
   MINION_RANGE,
   MINION_SPEED,
+  SHIELD_REFLECT,
   TICK_SECONDS,
   TOWER_RANGE,
   totalTowerHp,
@@ -22,6 +26,46 @@ function player(towerHp = 100, towerDamage = 8): CombatPlayer {
 function minion(id: number, line: number, position: number, hp = 30, damage = 6, speed = MINION_SPEED, range = MINION_RANGE) {
   return { id, line, position, hp, damage, range, speed };
 }
+
+describe('Tower-Schild', () => {
+  function shielded(shield: number): [CombatPlayer, CombatPlayer] {
+    const players: [CombatPlayer, CombatPlayer] = [player(), player()];
+    players[1].lines[0]!.towers[0]!.shield = shield;
+    // Minion 0 steht in Reichweite des gegnerischen Towers: 10 Schaden pro Sekunde.
+    players[0].minions.push(minion(1, 0, 96, 30, 10));
+    return players;
+  }
+
+  it('absorbiert Schaden zuerst und lässt die HP unberührt', () => {
+    const players = shielded(5);
+    combatTick(players, 0.5);
+    const tower = players[1].lines[0]!.towers[0]!;
+    expect(tower.shield).toBeCloseTo(0, 9);
+    expect(tower.hp).toBe(100);
+  });
+
+  it('gibt den Rest nach dem Schild an die HP weiter', () => {
+    const players = shielded(2);
+    combatTick(players, 0.5);
+    const tower = players[1].lines[0]!.towers[0]!;
+    expect(tower.shield).toBe(0);
+    expect(tower.hp).toBeCloseTo(97, 9);
+  });
+
+  it('meldet dem Sammler den vollen Schaden, solange Schild und HP reichen', () => {
+    const players = shielded(5);
+    const calls: [number, number, string, number][] = [];
+    combatTick(players, 0.5, (side, id, kind, amount) => void calls.push([side, id, kind, amount]));
+    expect(calls).toContainEqual([0, 1, 'tower', 5]);
+  });
+
+  it('ohne Schild verhält sich der Tower wie bisher', () => {
+    const players = shielded(0);
+    delete players[1].lines[0]!.towers[0]!.shield;
+    combatTick(players, 0.5);
+    expect(players[1].lines[0]!.towers[0]!.hp).toBe(95);
+  });
+});
 
 describe('Kampf mit Schaden-Sammler', () => {
   type Call = [number, number, string, number];
@@ -447,5 +491,313 @@ describe('Mehrere Tower auf einer Lane', () => {
     for (let tick = 0; tick < 40; tick += 1) combatTick(players);
     expect(players[0].minions[0]!.position).toBe(LINE_LENGTH);
     expect(totalTowerHp(players[1])).toBe(300);
+  });
+});
+
+describe('Tower-Spezialisierungen', () => {
+  const firstTower = (p: CombatPlayer, line = 0) => p.lines[line]!.towers[0]!;
+
+  describe('Blitz-Turm', () => {
+    function setup(specialization?: 'lightning'): [CombatPlayer, CombatPlayer] {
+      const players: [CombatPlayer, CombatPlayer] = [player(), player(100, 8)];
+      // Nur Lane 0 des Verteidigers hat einen Tower; so schießt kein anderer Tower auf die Minions.
+      players[1].lines[1]!.towers = [];
+      players[1].lines[2]!.towers = [];
+      if (specialization) firstTower(players[1]).specialization = specialization;
+      // Abstand zum Tower: 10, 15, 20 (Rand der Reichweite) und 30 (außerhalb); dazu ein Minion auf Lane 1.
+      players[0].minions.push(
+        minion(1, 0, 90, 100, 0),
+        minion(2, 0, 85, 100, 0),
+        minion(3, 0, 80, 100, 0),
+        minion(4, 0, 70, 100, 0),
+        minion(5, 1, 90, 100, 0),
+      );
+      return players;
+    }
+
+    it('trifft alle Minions seiner Lane in Reichweite mit LIGHTNING_FACTOR', () => {
+      const players = setup('lightning');
+      combatTick(players, 1);
+      const hp = players[0].minions.map((m) => m.hp);
+      expect(TOWER_RANGE).toBe(20);
+      expect(hp[0]).toBeCloseTo(100 - 8 * LIGHTNING_FACTOR, 9);
+      expect(hp[1]).toBeCloseTo(100 - 8 * LIGHTNING_FACTOR, 9);
+      expect(hp[2]).toBeCloseTo(100 - 8 * LIGHTNING_FACTOR, 9);
+    });
+
+    it('trifft weder Minions außerhalb der Reichweite noch anderer Lanes', () => {
+      const players = setup('lightning');
+      combatTick(players, 1);
+      expect(players[0].minions[3]!.hp).toBe(100);
+      expect(players[0].minions[4]!.hp).toBe(100);
+    });
+
+    it('lässt einen normalen Tower nur den vordersten Minion treffen', () => {
+      const players = setup();
+      combatTick(players, 1);
+      expect(players[0].minions.map((m) => m.hp)).toEqual([92, 100, 100, 100, 100]);
+    });
+
+    it('schießt nicht mehr, wenn er zerstört ist', () => {
+      const players = setup('lightning');
+      firstTower(players[1]).hp = 0;
+      combatTick(players, 1);
+      expect(players[0].minions.every((m) => m.hp === 100)).toBe(true);
+    });
+  });
+
+  describe('Schild-Turm', () => {
+    function setup(minionHp: number, shield = true): [CombatPlayer, CombatPlayer] {
+      const players: [CombatPlayer, CombatPlayer] = [player(), player(100, 0)];
+      if (shield) firstTower(players[1]).specialization = 'shield';
+      // Abstand 2 zum Tower: der Minion schlägt zu (Reichweite 4).
+      players[0].minions.push(minion(1, 0, 98, minionHp, 6));
+      return players;
+    }
+
+    it('wirft SHIELD_REFLECT des Schadens auf den Angreifer zurück', () => {
+      const players = setup(30);
+      combatTick(players, 1);
+      expect(firstTower(players[1]).hp).toBe(94);
+      expect(players[0].minions[0]!.hp).toBeCloseTo(30 - 6 * SHIELD_REFLECT, 9);
+    });
+
+    it('wirft ohne Schild nichts zurück', () => {
+      const players = setup(30, false);
+      combatTick(players, 1);
+      expect(players[0].minions[0]!.hp).toBe(30);
+    });
+
+    it('deckelt den Rückwurf auf die Rest-HP des Angreifers', () => {
+      const players = setup(1);
+      combatTick(players, 1);
+      expect(players[0].minions).toHaveLength(0);
+      expect(firstTower(players[1]).hp).toBe(94);
+    });
+
+    it('wirft pro Tick anteilig zur Tick-Dauer zurück', () => {
+      const players = setup(30);
+      combatTick(players, 0.5);
+      expect(players[0].minions[0]!.hp).toBeCloseTo(30 - 6 * 0.5 * SHIELD_REFLECT, 9);
+    });
+  });
+
+  it('ändert das Ergebnis nicht, wenn die Spieler vertauscht werden', () => {
+    const build = (): [CombatPlayer, CombatPlayer] => {
+      const a = player(100, 8);
+      const b = player(100, 8);
+      firstTower(a, 0).specialization = 'lightning';
+      firstTower(b, 0).specialization = 'shield';
+      firstTower(a, 1).specialization = 'shield';
+      firstTower(b, 1).specialization = 'lightning';
+      a.minions.push(minion(1, 0, 95, 40, 6), minion(2, 0, 85, 40, 6), minion(3, 1, 97, 40, 9));
+      b.minions.push(minion(1, 0, 96, 40, 7), minion(2, 1, 90, 40, 5), minion(3, 1, 98, 3, 9));
+      return [a, b];
+    };
+    const normal = build();
+    const swapped = build().reverse() as [CombatPlayer, CombatPlayer];
+    for (let tick = 0; tick < 20; tick += 1) {
+      combatTick(normal);
+      combatTick(swapped);
+    }
+    expect(normal[0]).toEqual(swapped[1]);
+    expect(normal[1]).toEqual(swapped[0]);
+  });
+});
+
+describe('Zerstörer', () => {
+  const BLAST = { radius: 10, damage: 15 };
+  /** Zerstörer; Tempo 0, damit die Positionen im Test fest bleiben. */
+  const destroyer = (id: number, line: number, position: number, hp = 40, damage = 8) => ({
+    ...minion(id, line, position, hp, damage, 0),
+    explodes: { ...BLAST },
+  });
+  /** Ruhiger Gegner ohne Schaden und Tempo. */
+  const dummy = (id: number, line: number, position: number, hp = 100) => minion(id, line, position, hp, 0, 0);
+  const setup = (own: ReturnType<typeof minion>[], foes: ReturnType<typeof minion>[], towerDamage = 0) => {
+    const players: [CombatPlayer, CombatPlayer] = [player(100, towerDamage), player(100, towerDamage)];
+    players[0].minions.push(...own);
+    players[1].minions.push(...foes);
+    return players;
+  };
+  const hpOf = (p: CombatPlayer, id: number) => p.minions.find((m) => m.id === id)?.hp;
+
+  describe('explosionVictims', () => {
+    const boom = destroyer(1, 0, 50);
+
+    it('trifft lebende Gegner derselben Lane bis genau zum Radius', () => {
+      const foes = [dummy(2, 0, 50), dummy(3, 0, 58), dummy(4, 0, 60), dummy(5, 0, 41), dummy(6, 0, 40)];
+      // Abstand 0, 8, 10, 9 (hinter dem Zerstörer) und 10; Position 61 wäre bei 11.
+      expect(explosionVictims(boom, foes)).toEqual([0, 1, 2, 3, 4]);
+      expect(explosionVictims(boom, [dummy(7, 0, 61), dummy(8, 0, 39)])).toEqual([]);
+    });
+
+    it('lässt andere Lanes und Gefallene aus und trifft ohne explodes nichts', () => {
+      const foes = [dummy(2, 1, 50), { ...dummy(3, 0, 50), hp: 0 }, dummy(4, 0, 50)];
+      expect(explosionVictims(boom, foes)).toEqual([2]);
+      expect(explosionVictims(minion(9, 0, 50), foes)).toEqual([]);
+    });
+  });
+
+  it('verändert Minions ohne explodes nicht: ein gestorbener Nahkämpfer richtet keinen Flächenschaden an', () => {
+    // Gegner hinter dem Gegenüber (Position < 50) stehen ausser Reichweite, aber im Radius einer Explosion.
+    const players = setup([minion(1, 0, 50, 1, 8, 0)], [minion(2, 0, 50, 100, 6, 0), dummy(3, 0, 42)]);
+    combatTick(players, 1);
+    expect(players[0].minions).toHaveLength(0);
+    expect(hpOf(players[1], 3)).toBe(100);
+    expect(hpOf(players[1], 2)).toBe(92);
+  });
+
+  it('trifft beim Tod jeden gegnerischen Minion im Radius einmalig mit dem Explosionsschaden', () => {
+    const players = setup(
+      [destroyer(1, 0, 50, 1), dummy(10, 0, 50)],
+      // Abstand zur Todesposition (x = 50): 8, 10, 11; Minion 6 steht auf einer anderen Lane.
+      [minion(2, 0, 50, 100, 6, 0), dummy(3, 0, 42), dummy(4, 0, 40), dummy(5, 0, 39), dummy(6, 1, 50)],
+    );
+    combatTick(players, 1);
+    expect(players[0].minions.map((m) => m.id)).toEqual([10]);
+    // Der Angreifer verliert 8 aus dem Kampf und 15 durch die Explosion.
+    expect(hpOf(players[1], 2)).toBe(100 - 8 - 15);
+    expect(hpOf(players[1], 3)).toBe(85);
+    expect(hpOf(players[1], 4)).toBe(85);
+    expect(hpOf(players[1], 5)).toBe(100); // ausserhalb des Radius
+    expect(hpOf(players[1], 6)).toBe(100); // andere Lane
+    expect(hpOf(players[0], 10)).toBe(100); // eigener Minion
+  });
+
+  it('explodiert nicht, solange der Zerstörer den Tick überlebt', () => {
+    const players = setup([destroyer(1, 0, 50, 40)], [minion(2, 0, 50, 100, 6, 0), dummy(3, 0, 42)]);
+    combatTick(players, 1);
+    expect(hpOf(players[0], 1)).toBe(34);
+    expect(hpOf(players[1], 3)).toBe(100);
+    expect(hpOf(players[1], 2)).toBe(92);
+  });
+
+  it('explodiert nur einmal, auch wenn der tote Zerstörer in späteren Ticks nicht mehr existiert', () => {
+    const players = setup([destroyer(1, 0, 50, 1)], [minion(2, 0, 50, 100, 6, 0), dummy(3, 0, 42)]);
+    combatTick(players, 1);
+    combatTick(players, 1);
+    expect(hpOf(players[1], 3)).toBe(85);
+  });
+
+  it('der Schaden hängt nicht von delta ab', () => {
+    const small = setup([destroyer(1, 0, 50, 1)], [dummy(2, 0, 42), minion(3, 0, 50, 100, 600, 0)]);
+    const large = setup([destroyer(1, 0, 50, 1)], [dummy(2, 0, 42), minion(3, 0, 50, 100, 600, 0)]);
+    combatTick(small, 0.05);
+    combatTick(large, 1);
+    expect(hpOf(small[1], 2)).toBe(85);
+    expect(hpOf(large[1], 2)).toBe(85);
+  });
+
+  it('explodiert auch, wenn ein Tower ihn tötet', () => {
+    // Der Zerstörer von Spieler 0 steht bei 85, 15 vor dem gegnerischen Tower (Reichweite 20); der Gegner bei 10 ist 5 entfernt.
+    const players = setup([destroyer(1, 0, 85, 40)], [dummy(2, 0, 10)], 100);
+    combatTick(players, 1);
+    expect(players[0].minions).toHaveLength(0);
+    expect(hpOf(players[1], 2)).toBe(85);
+  });
+
+  it('trifft von beiden Seiten gleichzeitig: sich gegenseitig tötende Zerstörer treffen nur Unbeteiligte', () => {
+    const players = setup(
+      [destroyer(1, 0, 50, 1), dummy(10, 0, 45)],
+      [destroyer(2, 0, 50, 1), dummy(11, 0, 45)],
+    );
+    combatTick(players, 1);
+    expect(players[0].minions.map((m) => m.id)).toEqual([10]);
+    expect(players[1].minions.map((m) => m.id)).toEqual([11]);
+    expect(hpOf(players[0], 10)).toBe(85);
+    expect(hpOf(players[1], 11)).toBe(85);
+  });
+
+  it('löst eine Kettenreaktion im selben Tick aus und endet', () => {
+    // Zerstörer 1 fällt im Kampf mit Gegner 2 (Zerstörer, Rest-HP 2). Seine Explosion tötet 2 und 4; deren Explosionen
+    // töten 3 und 5; Gegner 21 steht im Radius aller drei Zerstörer, die danach explodieren, und überlebt mit 55 HP.
+    const players = setup(
+      [destroyer(1, 0, 50, 1, 0), destroyer(3, 0, 45, 10, 0), destroyer(5, 0, 40, 10, 0), dummy(20, 0, 20)],
+      [destroyer(2, 0, 50, 10), destroyer(4, 0, 58, 10, 0), dummy(21, 0, 60)],
+    );
+    combatTick(players, 1);
+    expect(players[0].minions.map((m) => m.id)).toEqual([20]);
+    expect(players[1].minions.map((m) => m.id)).toEqual([21]);
+    expect(hpOf(players[1], 21)).toBe(55);
+  });
+
+  it('beendet auch eine grosse Kette nach endlich vielen Wellen, jeder Zerstörer explodiert genau einmal', () => {
+    // Der Angreifer 100 tötet nur Zerstörer 1; dessen Explosion tötet alle Gegner-Zerstörer, deren Explosionen die
+    // übrigen eigenen, deren Explosionen treffen den Angreifer. Zehn Zerstörer ergeben also zehn Treffer à 15.
+    const own = Array.from({ length: 10 }, (_, i) => destroyer(i + 1, 0, 50 - (i % 3), i === 0 ? 1 : 10, 0));
+    own[0]!.position = 50;
+    const foes = [
+      minion(100, 0, 50, 1000, 100, 0),
+      ...Array.from({ length: 10 }, (_, i) => destroyer(i + 101, 0, 45, 10, 0)),
+    ];
+    const players = setup(own, foes);
+    combatTick(players, 1);
+    expect(players[0].minions).toHaveLength(0);
+    expect(players[1].minions.map((m) => m.id)).toEqual([100]);
+    expect(hpOf(players[1], 100)).toBe(1000 - 10 * 15);
+  });
+
+  it('meldet den Explosionsschaden dem Zerstörer, gedeckelt auf die Rest-HP des Opfers', () => {
+    const players = setup([destroyer(1, 0, 50, 1)], [minion(2, 0, 50, 100, 6, 0), dummy(3, 0, 42, 100), dummy(4, 0, 40, 4)]);
+    const calls: [number, number, string, number][] = [];
+    combatTick(players, 1, (side, id, kind, amount) => void calls.push([side, id, kind, amount]));
+    const blast = calls.filter((c) => c[0] === 0 && c[1] === 1);
+    // Kampfschaden 8 an Minion 2, Explosion 15 an Minion 2, 15 an Minion 3 und nur 4 (Rest-HP) an Minion 4.
+    expect(blast.map((c) => c[3]).sort((a, b) => a - b)).toEqual([4, 8, 15, 15]);
+    expect(calls.every((c) => c[2] === 'minion')).toBe(true);
+  });
+
+  it('teilt den Schaden mehrerer Explosionen auf ein Opfer mit knappen HP anteilig auf', () => {
+    // Zwei Zerstörer ohne HP explodieren gleichzeitig auf ein Opfer mit 10 HP: 30 Schaden, je Meldung nur 5.
+    const players = setup([destroyer(1, 0, 50, 0, 0), destroyer(3, 0, 50, 0, 0)], [dummy(4, 0, 45, 10)]);
+    const calls: [number, number, string, number][] = [];
+    combatTick(players, 1, (side, id, kind, amount) => void calls.push([side, id, kind, amount]));
+    expect(calls).toHaveLength(2);
+    for (const call of calls) expect(call[3]).toBeCloseTo(5, 9);
+    expect(players[1].minions).toHaveLength(0);
+  });
+
+  it('liefert mit und ohne Sammler dasselbe Ergebnis', () => {
+    const build = () =>
+      setup([destroyer(1, 0, 50, 1), dummy(10, 0, 45)], [destroyer(2, 0, 50, 5), dummy(11, 0, 45)]);
+    const plain = build();
+    const counted = build();
+    combatTick(plain, 1);
+    combatTick(counted, 1, () => {});
+    expect(counted).toEqual(plain);
+  });
+});
+
+describe('Kampf mit gestärkten Minions', () => {
+  /** Zwei Minions auf Lane 0 gegen einen Gegner; `buffs` Mal gestärkt wird der erste. */
+  function fight(buffs: number, ticks: number): [CombatPlayer, CombatPlayer] {
+    const players: [CombatPlayer, CombatPlayer] = [player(), player()];
+    const own = { ...minion(1, 0, 50), maxHp: 30 };
+    for (let count = 0; count < buffs; count += 1) applyMinionBuff(own);
+    players[0].minions = [own, { ...minion(2, 1, 50), maxHp: 30 }];
+    players[1].minions = [{ ...minion(10, 0, 50, 60, 6), maxHp: 60 }];
+    for (let tick = 0; tick < ticks; tick += 1) combatTick(players, 1);
+    return players;
+  }
+
+  it('liefert mit mehreren Buffs und gleichem Ausgangszustand zwei identische Endzustände', () => {
+    expect(fight(3, 200)).toEqual(fight(3, 200));
+    expect(fight(2, 80)).toEqual(fight(2, 80));
+  });
+
+  it('gibt dem gestärkten Minion mehr Leben und Schaden als dem ungestärkten', () => {
+    const [plain, once, twice] = [0, 1, 2].map((buffs) => {
+      const own = { ...minion(1, 0, 50), maxHp: 30 };
+      for (let count = 0; count < buffs; count += 1) applyMinionBuff(own);
+      return own;
+    });
+    expect(once!.damage).toBeGreaterThan(plain!.damage);
+    expect(twice!.damage).toBeGreaterThan(once!.damage);
+    expect(twice!.maxHp).toBeGreaterThan(once!.maxHp!);
+    // Nach einem Tick gegen denselben Gegner: der gestärkte Minion hat mehr LP und der Gegner weniger.
+    const hp = (buffs: number, id: number, side: 0 | 1) => fight(buffs, 1)[side].minions.find((m) => m.id === id)!.hp;
+    expect(hp(2, 1, 0)).toBeGreaterThan(hp(0, 1, 0));
+    expect(hp(2, 10, 1)).toBeLessThan(hp(0, 10, 1));
   });
 });

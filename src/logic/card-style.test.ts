@@ -2,18 +2,26 @@ import { describe, expect, it } from 'vitest';
 import { CARD_DEFS, type CardDef, type CardType, getCardDef } from './cards';
 import { CARD_TYPE_STYLES, cardArtKey, cardStats, cardTypeStyle, describeCard } from './card-style';
 
-const TYPES: CardType[] = ['line-upgrade', 'tower-upgrade', 'summon', 'minion-upgrade'];
+const TYPES: CardType[] = [
+  'line-upgrade',
+  'tower-upgrade',
+  'tower-specialize',
+  'summon',
+  'minion-upgrade',
+  'minion-buff',
+];
 
 describe('cardTypeStyle', () => {
-  it('kennt alle vier Kartentypen', () => {
+  it('kennt alle Kartentypen', () => {
     for (const type of TYPES) expect(cardTypeStyle(type)).toBe(CARD_TYPE_STYLES[type]);
   });
 
   it('unterscheidet die Typen nach Rahmenfarbe und Symbol', () => {
     const accents = new Set(TYPES.map((type) => cardTypeStyle(type).accent));
     const symbols = new Set(TYPES.map((type) => cardTypeStyle(type).symbol));
-    expect(accents.size).toBe(4);
-    expect(symbols.size).toBe(4);
+    expect(accents.size).toBe(TYPES.length);
+    // „Minion stärken“ teilt sich das Symbol mit den Minion-Upgrades, unterscheidet sich aber in Farbe und Banner.
+    expect(symbols.size).toBe(TYPES.length - 1);
   });
 
   it('gibt jedem Typ ein Banner', () => {
@@ -22,10 +30,13 @@ describe('cardTypeStyle', () => {
 });
 
 describe('cardArtKey', () => {
-  it('gibt jeder Karte der Definition ein eigenes Bild', () => {
-    const keys = CARD_DEFS.map((def) => cardArtKey(def));
+  it('gibt jeder Karte der Definition ein eigenes Bild, außer den Spezialisierungen (nur Typ-Symbol)', () => {
+    const withArt = CARD_DEFS.filter((def) => def.type !== 'tower-specialize');
+    const keys = withArt.map((def) => cardArtKey(def));
     expect(keys.every((key) => key !== null)).toBe(true);
-    expect(new Set(keys).size).toBe(CARD_DEFS.length);
+    expect(new Set(keys).size).toBe(withArt.length);
+    expect(cardArtKey(getCardDef('tower-lightning'))).toBeNull();
+    expect(cardArtKey(getCardDef('tower-shield'))).toBeNull();
   });
 
   it('kennt kein Bild für unbekannte Karten (Rückfall auf das Typ-Symbol)', () => {
@@ -40,8 +51,10 @@ describe('cardStats', () => {
     expect(cardStats(getCardDef('minion-upgrade-all'))).toEqual({ hp: 5, damage: 1, bonus: true });
   });
 
-  it('hat für die Line-Karte keine Werte', () => {
+  it('hat für die Line-Karte und die Spezialisierungen keine Werte', () => {
     expect(cardStats(getCardDef('line-upgrade'))).toBeNull();
+    expect(cardStats(getCardDef('tower-lightning'))).toBeNull();
+    expect(cardStats(getCardDef('tower-shield'))).toBeNull();
   });
 });
 
@@ -65,8 +78,18 @@ describe('describeCard', () => {
     expect(describeCard(getCardDef('summon-minion'))).toBe('6 Schaden\n30 Leben');
     expect(describeCard(getCardDef('summon-archer'))).toBe('7 Fernschaden\n20 Leben');
     expect(describeCard(getCardDef('summon-healer'))).toBe('Heilt 5/s\n20 Leben');
+    expect(describeCard(getCardDef('summon-destroyer'))).toBe('8 Schaden · 40 Leben\nTod: 15 Fläche');
     expect(describeCard(getCardDef('minion-upgrade-all'))).toBe('Alle: +5 Leben\n+1 Schaden');
     expect(describeCard(getCardDef('minion-upgrade-line'))).toBe('Lane: +10 Leben\n+2 Schaden');
     expect(describeCard(getCardDef('line-upgrade'))).toBe('Lane +1 Stufe\noben + unten');
+    expect(describeCard(getCardDef('tower-lightning'))).toContain('Trifft alle Gegner');
+    expect(describeCard(getCardDef('tower-shield'))).toContain('Wirft 50 % des Schadens');
+    expect(describeCard(getCardDef('buff-minion'))).toBe('Ein Minion:\n+50 % Leben, Schaden');
+  });
+
+  it('gibt „Minion stärken“ ein eigenes Banner und keine Wert-Plaketten', () => {
+    expect(cardStats(getCardDef('buff-minion'))).toBeNull();
+    expect(cardTypeStyle('minion-buff').banner).toBe('STÄRKUNG');
+    expect(cardTypeStyle('minion-buff').accent).not.toBe(cardTypeStyle('minion-upgrade').accent);
   });
 });

@@ -17,6 +17,13 @@ export const MINION_RANGE = 4;
 /** Standard-Tempo (Minions ohne eigene Rolle); die Simulation nutzt `Minion.speed`. */
 export const MINION_SPEED = 10;
 export const TOWER_RANGE = 20;
+/** Blitz-Turm: Anteil des Tower-Schadens, den jedes getroffene Minion erleidet (er trifft dafür alle in Reichweite). */
+export const LIGHTNING_FACTOR = 0.6;
+/** Schild-Turm: Anteil des Schadens, den ein Minion dem Tower zufügt und der als Rückwurf auf das Minion fällt. */
+export const SHIELD_REFLECT = 0.5;
+
+/** Spezialisierung eines Towers: Blitz trifft alle Minions der Lane, Schild wirft Schaden zurück. */
+export type Specialization = 'lightning' | 'shield';
 
 export interface Tower {
   /** Standort auf der Lane, vom eigenen Ende aus; fehlt er, steht der Tower am Ende (0). */
@@ -25,6 +32,10 @@ export interface Tower {
   maxHp: number;
   /** Schaden pro Sekunde. */
   damage: number;
+  /** Einmalige Spezialisierung per Karte; fehlt sie, ist es ein normaler Tower. */
+  specialization?: Specialization;
+  /** Schild-Punkte (Runden-Ereignis): absorbieren Schaden vor den HP; fehlt das Feld, gilt 0. Verfällt nach dem Kampf. */
+  shield?: number;
 }
 
 export interface Minion {
@@ -42,14 +53,29 @@ export interface Minion {
   damage: number;
   /** Reichweite in Einheiten. */
   range: number;
+  /** Temporärer Zusatz zur Reichweite für die laufende Runde (Synergien); fehlt er, gilt 0. */
+  rangeBonus?: number;
   /** Tempo in Einheiten pro Sekunde. */
   speed: number;
+  /** Explodiert beim Tod: fügt gegnerischen Minions derselben Lane im Abstand `radius` einmalig `damage` zu. */
+  explodes?: Explosion;
+}
+
+/** Flächenschaden eines Zerstörers beim Tod: Radius in Einheiten, fester Schaden je Opfer (unabhängig von `delta`). */
+export interface Explosion {
+  radius: number;
+  damage: number;
 }
 
 /** Was der Kampf von einem Spieler braucht; `lines[i].towers` sind die Tower der Lane i (leer: Lane nicht frei). */
 export interface CombatPlayer {
   lines: { towers: Tower[] }[];
   minions: Minion[];
+}
+
+/** Reichweite im Kampf: Basiswert plus temporärer Bonus. */
+export function effectiveRange(minion: Minion): number {
+  return minion.range + (minion.rangeBonus ?? 0);
 }
 
 /** Abstand zweier gegnerischer Minions auf derselben Lane. */
@@ -60,6 +86,11 @@ export function gap(a: Minion, b: Minion): number {
 /** Abstand eines gegnerischen Minions (Position `position`, vom anderen Ende gezählt) zu einem Tower der Lane. */
 export function towerDistance(tower: Tower, position: number): number {
   return LINE_LENGTH - position - (tower.offset ?? 0);
+}
+
+/** Was ein Tower vor dem Fall noch aushält: Schild plus HP. */
+function towerHealth(tower: Tower): number {
+  return tower.hp + (tower.shield ?? 0);
 }
 
 /** Index des lebenden Towers, der dem anrückenden Minion am nächsten steht, oder `-1`, wenn keiner lebt. */
@@ -87,7 +118,7 @@ function healTarget(allies: Minion[], healerIndex: number): number {
   allies.forEach((ally, index) => {
     const maxHp = ally.maxHp ?? ally.hp;
     if (index === healerIndex || ally.line !== healer.line || ally.hp <= 1e-9 || ally.hp >= maxHp) return;
-    if (Math.abs(ally.position - healer.position) > healer.range) return;
+    if (Math.abs(ally.position - healer.position) > effectiveRange(healer)) return;
     const ratio = ally.hp / maxHp;
     if (ratio < lowest) {
       lowest = ratio;
@@ -95,6 +126,59 @@ function healTarget(allies: Minion[], healerIndex: number): number {
     }
   });
   return target;
+}
+
+/**
+ * Indizes der gegnerischen Minions, die die Explosion von `exploder` trifft: lebend, gleiche Lane, Abstand höchstens
+ * `radius`. Ohne `explodes` trifft sie nichts; jedes Opfer kommt höchstens einmal vor.
+ */
+export function explosionVictims(exploder: Minion, enemies: readonly Minion[]): number[] {
+  const blast = exploder.explodes;
+  if (!blast) return [];
+  const victims: number[] = [];
+  enemies.forEach((enemy, index) => {
+    if (enemy.line === exploder.line && enemy.hp > 1e-9 && Math.abs(gap(exploder, enemy)) <= blast.radius) {
+      victims.push(index);
+    }
+  });
+  return victims;
+}
+
+/**
+ * Löst die Explosionen aller toten Minions mit `explodes` aus (HP ≤ 0, noch nicht aus der Liste entfernt). Die
+ * Kettenreaktion läuft in Wellen im selben Tick: Eine Welle trifft gleichzeitig, danach folgen die in ihr gestorbenen
+ * Zerstörer. Jeder Zerstörer explodiert höchstens einmal, daher gibt es nie mehr Wellen als Minions. Der Schaden geht
+ * als Minion-Schaden des Zerstörers an den `collector`, gedeckelt auf die Rest-HP des Opfers.
+ */
+function resolveExplosions(players: [CombatPlayer, CombatPlayer], collector?: DamageCollector): void {
+  const exploded = new Set<Minion>();
+  for (;;) {
+    const wave: { side: number; minion: Minion }[] = [];
+    players.forEach((player, side) => {
+      for (const minion of player.minions) {
+        if (minion.explodes && minion.hp <= 1e-9 && !exploded.has(minion)) wave.push({ side, minion });
+      }
+    });
+    if (wave.length === 0) return;
+    const incoming = new Map<Minion, number>();
+    const reports: { side: number; id: number; victim: Minion; amount: number }[] = [];
+    for (const { side, minion } of wave) {
+      exploded.add(minion);
+      const enemies = players[1 - side]!.minions;
+      for (const index of explosionVictims(minion, enemies)) {
+        const victim = enemies[index]!;
+        incoming.set(victim, (incoming.get(victim) ?? 0) + minion.explodes!.damage);
+        reports.push({ side, id: minion.id, victim, amount: minion.explodes!.damage });
+      }
+    }
+    if (collector) {
+      for (const { side, id, victim, amount } of reports) {
+        const total = incoming.get(victim)!;
+        collector(side, id, 'minion', amount * (total > victim.hp ? victim.hp / total : 1));
+      }
+    }
+    for (const [victim, total] of incoming) victim.hp -= total;
+  }
 }
 
 /**
@@ -106,6 +190,7 @@ export type DamageCollector = (side: number, minionId: number, kind: 'minion' | 
 /**
  * Ein Tick von `deltaSeconds` Sekunden. Verändert die übergebenen Spieler (der Aufrufer arbeitet auf einer Kopie).
  * Ein optionaler `collector` erfährt den Minion-Schaden; ohne ihn ist das Verhalten unverändert.
+ * Stirbt ein Minion mit `explodes` in diesem Tick (gleich durch wen), trifft seine Explosion noch im selben Tick.
  */
 export function combatTick(
   players: [CombatPlayer, CombatPlayer],
@@ -144,7 +229,7 @@ export function combatTick(
       enemy.minions.forEach((other, otherIndex) => {
         if (other.line !== minion.line) return;
         const distance = gap(minion, other);
-        if (distance <= minion.range && distance < best) {
+        if (distance <= effectiveRange(minion) && distance < best) {
           best = distance;
           target = otherIndex;
         }
@@ -156,8 +241,12 @@ export function combatTick(
       }
       const towers = enemy.lines[minion.line]!.towers;
       const tower = nearestTower(towers, minion.position);
-      if (tower >= 0 && towerDistance(towers[tower]!, minion.position) <= minion.range) {
+      if (tower >= 0 && towerDistance(towers[tower]!, minion.position) <= effectiveRange(minion)) {
         towerDamage[enemySide]![minion.line]![tower]! += minion.damage * deltaSeconds;
+        if (towers[tower]!.specialization === 'shield') {
+          // Rückwurf aus dem Zustand vor dem Tick, gedeckelt auf die Rest-HP des Angreifers.
+          minionDamage[side]![index]! += Math.min(minion.hp, minion.damage * deltaSeconds * SHIELD_REFLECT);
+        }
         hits.push({ side, minionId: minion.id, kind: 'tower', targetSide: enemySide, target: minion.line, tower, amount: minion.damage * deltaSeconds });
         return;
       }
@@ -167,6 +256,13 @@ export function combatTick(
     me.lines.forEach((line, lineIndex) => {
       for (const tower of line.towers) {
         if (tower.hp <= 0) continue;
+        if (tower.specialization === 'lightning') {
+          enemy.minions.forEach((other, otherIndex) => {
+            if (other.line !== lineIndex || towerDistance(tower, other.position) > TOWER_RANGE) return;
+            minionDamage[enemySide]![otherIndex]! += tower.damage * deltaSeconds * LIGHTNING_FACTOR;
+          });
+          continue;
+        }
         let target = -1;
         let furthest = -Infinity;
         enemy.minions.forEach((other, otherIndex) => {
@@ -189,7 +285,9 @@ export function combatTick(
           ? minionDamage[hit.targetSide]![hit.target]!
           : towerDamage[hit.targetSide]![hit.target]![hit.tower]!;
       const remaining =
-        hit.kind === 'minion' ? target.minions[hit.target]!.hp : target.lines[hit.target]!.towers[hit.tower]!.hp;
+        hit.kind === 'minion'
+          ? target.minions[hit.target]!.hp
+          : towerHealth(target.lines[hit.target]!.towers[hit.tower]!);
       const share = incoming > remaining ? remaining / incoming : 1;
       collector(hit.side, hit.minionId, hit.kind, hit.amount * share);
     }
@@ -200,13 +298,19 @@ export function combatTick(
       minion.position = nextPosition[side]![index]!;
       minion.hp = Math.min(minion.maxHp ?? minion.hp, minion.hp - minionDamage[side]![index]! + healing[side]![index]!);
     });
-    player.minions = player.minions.filter((minion) => minion.hp > 1e-9);
     player.lines.forEach((line, index) => {
       line.towers.forEach((tower, towerIndex) => {
-        tower.hp = Math.max(0, tower.hp - towerDamage[side]![index]![towerIndex]!);
+        const damage = towerDamage[side]![index]![towerIndex]!;
+        const absorbed = Math.min(tower.shield ?? 0, damage);
+        if (absorbed > 0) tower.shield = (tower.shield ?? 0) - absorbed;
+        tower.hp = Math.max(0, tower.hp - (damage - absorbed));
       });
     });
   });
+
+  // Tote Zerstörer stehen noch in der Liste, damit Todesposition und Lane bekannt sind.
+  resolveExplosions(players, collector);
+  for (const player of players) player.minions = player.minions.filter((minion) => minion.hp > 1e-9);
 }
 
 export function towersAlive(player: CombatPlayer): number {
