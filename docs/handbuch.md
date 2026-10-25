@@ -1,21 +1,31 @@
 # TowerField – Technisches Handbuch
 
-Stand: Auftrag „Replay-Szene per ?replay=Seed mit Zeitlupe und Kommentaren“ (Version 0.1.0). Der Stand baut auf den
-Aufträgen „Minion-Statistik-Overlay nach Match-Ende“, „Fernkämpfer Bogenschütze“, „Start- und Zieh-Konstanten“, „E2E-Tests“, „Dev-Szene mit Balancing-Statistik“,
+Stand: Auftrag „Kartenfilter für die Hand im Match“ (Version 0.1.0). Der Stand baut auf den
+Aufträgen „Replay-Szene“, „Minion-Statistik-Overlay nach Match-Ende“, „Fernkämpfer Bogenschütze“, „Start- und Zieh-Konstanten“, „E2E-Tests“, „Dev-Szene mit Balancing-Statistik“,
 „Minion-Tempo“, „Tower-Reichweite 20“, „Energie-Maximum 8“, „Bot-Strategie“, „Handlimit“, „Drag-and-Drop“,
 „Designkonzept“ und „Kern-Logik“ auf.
 
 > **Quellenlage**
 > - Geprüft gegen den Code: `package.json` (Skripte), `src/logic/combat.ts`, `src/logic/match.ts` (Kopf, Konstanten,
 >   Typen), `src/logic/match-stats.ts`, `src/logic/replay.ts`, `src/logic/seed.ts`, `src/scenes/replay-scene.ts`,
->   `src/main.ts`. `bot.ts` nur an den Schnittstellen (`botStep`, `botPlan`).
+>   `src/main.ts`, `src/logic/hand-filter.ts`, die Filter-Stellen in `src/scenes/main-scene.ts`. `bot.ts` nur an den
+>   Schnittstellen (`botStep`, `botPlan`).
 > - Aus dem bisherigen Handbuch und den Einzeldokumenten übernommen, nicht neu gegen den Code geprüft: Kartenwerte,
 >   Rundenablauf, Platzierung, `main-scene.ts`, Tests.
-> - Ich habe keine Tests und keinen Build ausgeführt. Laut Tester: Typecheck grün, Vitest (57 Tests in 3 Dateien) grün,
->   Smoke 12 bestanden, 1 übersprungen. Der Review war freigegeben.
+> - Ich habe keine Tests und keinen Build ausgeführt. Laut Tester: Typecheck grün, `hand-filter.test.ts` (17 Tests) grün,
+>   Smoke 14 bestanden. Der Review war freigegeben.
 > - Nichts committet. Zeilenangaben für `main-scene.ts` sind ungefähr.
 
 ## Änderungen in diesem Stand
+
+| Thema | Vorher | Jetzt | Datei |
+|---|---|---|---|
+| Kartenfilter | keiner | Taste schaltet Alle → Beschwörung → Upgrade → Tower; nicht passende Karten abgedunkelt und tot | `hand-filter.ts`, `main-scene.ts` |
+| Smoke-Test | – | Fall „Kartenfilter“ (Reihenfolge, Abwahl, tote Karten, echter Hand-Index) | `e2e/smoke.spec.ts` |
+
+Nicht geändert (Kartenfilter): `match.ts`, `combat.ts`, `bot.ts`, `cards.ts`, Bot, Match-Ablauf, Statistik-Overlay.
+
+Frühere Änderung (Replay):
 
 | Thema | Vorher | Jetzt | Datei |
 |---|---|---|---|
@@ -34,8 +44,8 @@ Frühere Änderung (Minion-Statistik):
 | Match-Ende | Ergebnistext, Tippen startet neu | Overlay mit zwei Tabellen, erst „Schließen“, dann Tippen | `src/scenes/main-scene.ts` |
 | E2E-Neustart | tippt direkt | prüft Overlay, tippt daneben, schließt, startet neu | `e2e/gameplay.spec.ts` |
 
-Nicht geändert: Balance, Regeln, Kampfablauf, `MatchState`, Balance-Szene. Details: `docs/anwendung-replay.md` und
-`docs/anwendung-minion-statistik.md`.
+Nicht geändert: Balance, Regeln, Kampfablauf, `MatchState`, Balance-Szene. Details: `docs/anwendung-kartenfilter.md`,
+`docs/anwendung-replay.md` und `docs/anwendung-minion-statistik.md`.
 
 ## 1. Zweck
 
@@ -58,7 +68,8 @@ Minion-Tempo, Balance-Szene, E2E, Minion-Statistik, Replay, Kartenfilter).
 | Reichweite je Minion, Bogenschütze | umgesetzt |
 | Start 5 / Ziehen 3, Handlimit 10, Energie-Max. 8, Tower-Reichweite 20, Minion-Tempo | umgesetzt |
 | Minion-Statistik und Overlay nach Match-Ende | umgesetzt, getestet |
-| **Replay-Szene `?replay=<seed>`** | **umgesetzt, getestet** |
+| Replay-Szene `?replay=<seed>` | umgesetzt, getestet |
+| **Kartenfilter für die Hand** | **umgesetzt, getestet** |
 | Balance-Szene `balance` | nur im Dev-Server, nicht neu bewertet |
 | Drag-and-Drop von Minions | umgesetzt |
 | `iso.ts` (Iso-Umrechnung, Kamera) | fertig, von der Szene nicht genutzt |
@@ -123,6 +134,7 @@ src/
     combat.ts      combatTick, Tower, Minion
     match.ts       MatchState, playCard, moveMinion, undoSummon, setReady, advance
     match-stats.ts Statistik des eigenen Spielers
+    hand-filter.ts Kartenfilter der Hand (Sichtbarkeit je Kartentyp)
     replay.ts      Bot-gegen-Bot-Replay zu einem Seed, Zeitlupe, Kommentartexte
     seed.ts        parseSeed, parseReplaySeed
     placement.ts, iso.ts, bot.ts, balance-sim.ts
@@ -198,6 +210,37 @@ liefern die Getter `current` und `comments` den Zustand.
   Szene nur bei gültigem Wert.
 - Eine neue Szene, die ohne Eingabe erreichbar ist, gehört in `e2e/smoke.spec.ts`.
 
+### Kartenfilter (`src/logic/hand-filter.ts`)
+
+Reine Darstellungs- und Eingabehilfe für die Hand des Menschen (Handlimit 10). Keine Regel ändert sich.
+
+| Name | Aufgabe |
+|---|---|
+| `HandFilter` | `'all'`, `'summon'`, `'upgrade'`, `'tower'` |
+| `HAND_FILTERS`, `HAND_FILTER_NAMES` | Reihenfolge und Anzeigenamen (Alle, Beschwörung, Upgrade, Tower) |
+| `nextHandFilter(filter)` | nächster Filter, nach Tower wieder Alle |
+| `isCardVisible(type, filter)` | ist eine Karte dieses `CardType` beim Filter sichtbar |
+
+Zuordnung: `summon` → Beschwörung; `line-upgrade` und `minion-upgrade` → Upgrade; `tower-upgrade` → Tower.
+
+**Szene (`main-scene.ts`):**
+- `LAYOUT.filterButton`: x 122, y 592, 102 × 40, links neben der Taste bei 230/592 und unter den Handkarten (bis ca.
+  y 572). Beschriftung „Filter: X (n)“, `n` ist die Zahl der passenden Handkarten.
+- Feld `handFilter`, in `create()` auf `'all'` gesetzt, nicht gespeichert.
+- Die Karten bleiben auf ihren festen Slots (`cardRect(index)`). Eine Abbildung Anzeige-Slot → Hand-Index gibt es
+  nicht; `handleTap` und `playCard` nutzen den echten Hand-Index. Nicht passende Karten sind abgedunkelt, ohne Text und
+  nicht antippbar.
+- Wird die gewählte Karte durch den Wechsel ausgeblendet, ist `selected` danach `null`. Das Feld heißt `selected`, nicht
+  `selectedCard`.
+- Die Taste reagiert nur in der Planung (`handleTap` kehrt sonst vorher zurück). Ein gesetzter Filter bleibt im Kampf
+  aktiv.
+
+**Auf einen Blick:**
+- Neuer `CardType` in `cards.ts`: die Zuordnung `GROUPS` in `hand-filter.ts` ergänzen. Der Typ `Record<CardType, …>`
+  meldet das Fehlen beim Typecheck.
+- Der Meldungstext unten (`this.message`) hat keine Breitenbegrenzung; ein sehr langer Text kann unter die Filtertaste
+  ragen.
+
 ### Minion-Statistik
 
 ```mermaid
@@ -252,8 +295,6 @@ Funktionen: `createStats`, `recordSummon`, `recordUndo`, `recordMove`, `recordDa
 | `LINE_LENGTH`, `TICK_MS`, `MINION_RANGE`, `MINION_SPEED`, `TOWER_RANGE` | 100, 50, 4, 10, 20 | `combat.ts` |
 | `SLOWMO_FACTOR`, `PLAY_PAUSE_MS` | 0,35, 700 | `replay.ts` |
 
-, `PLAY_PAUSE_MS` | 0,35, 700 | `replay.ts` |
-
 - URL-Parameter `?seed=<1–15 Ziffern>` legt den Seed fest (genutzt von den E2E-Tests).
 - URL-Parameter `?replay=<1–15 Ziffern>` startet die Replay-Szene (Dev und Produktion). Beide Parameter werden mit
   `>>> 0` auf 32 Bit gekürzt; ungültige Werte ergeben `null`.
@@ -280,6 +321,8 @@ Vor jeder Übergabe müssen `npm run build`, `npm test` und `npm run test:smoke`
   gleicher Seed gleiche `stats`), `combat.test.ts` (Sammler, Tower-Schaden, Ergebnis mit und ohne Sammler gleich).
 - `e2e/gameplay.spec.ts`: vollständige Spielabläufe. Nach Match-Ende zuerst Overlay prüfen, daneben tippen (kein
   Neustart), „Schließen“, dann Neustart. Tests, die direkt neu starten, scheitern sonst.
+- Kartenfilter: `hand-filter.test.ts` (jeder `CardType` gegen jeden Filter, Umschaltreihenfolge). Smoke-Fall
+  „Kartenfilter“: Tastenreihenfolge, Abwahl der gewählten Karte, tote Karten, Spielen mit echtem Hand-Index.
 - Replay: `replay.test.ts` (gleicher Seed gleiches Ergebnis, verschiedene Seeds verschiedene Ereignisse, ein Ereignis
   je Karte, `describeEvent` nicht leer, Kampf verbraucht weniger Spielzeit, Ende in `over` mit gültigem `Outcome`),
   `seed.test.ts` (`parseReplaySeed`), `bot.test.ts` (`botPlan` nach dem `botStep`-Umbau unverändert).
@@ -296,7 +339,8 @@ Vor jeder Übergabe müssen `npm run build`, `npm test` und `npm run test:smoke`
 - Test „volle Line“ im Browser (in Runde 1 ist keine vierte Beschwörung bezahlbar).
 - Replay: sehr lange Laufzeit (bis etwa 450 s) bei vollen Runden; falls gewünscht, später Geschwindigkeitswahl
   (laut Auftrag ausgeschlossen).
-- Smoke-Test: ein Fall (Drag eines beschworenen Minions) wird übersprungen; Grund im Test prüfen.
+- Smoke-Test „Drag eines beschworenen Minions“: überspringt sich per `test.skip`, wenn die Starthand keinen Minion
+  enthält (`smoke.spec.ts`, ca. Zeile 261). Im letzten Lauf liefen alle 14 Fälle.
 - Hand-UI, Undo-Knopf, Iso-Szene, Projektile, Tempo-Anzeige auf Karten.
 - Reviewer-Hinweise: lange `hits.push(...)`-Zeilen in `combat.ts` ggf. mit Hilfstyp lesbarer machen; fehlendes
   Leerzeichen in `this.graphics =this.add.graphics();` in `main-scene.ts`.
