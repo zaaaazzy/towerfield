@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { getCardDef } from '../src/logic/cards';
-import { cardCenter, collectErrors, openGame, readState, tap, tapCard, tapLine, tapReady } from './helpers';
+import { cardPointOf, collectErrors, openGame, readState, tap, tapCard, tapLine, tapReady } from './helpers';
 
 /** Was die Tests von den Darstellungsfeldern der Szene lesen (zur Laufzeit erreichbar). */
 interface GraphicsSceneView {
@@ -16,7 +16,7 @@ test('Hover hebt eine Karte an, Wegbewegen senkt sie wieder', async ({ page }, t
   const errors = collectErrors(page);
   await openGame(page);
   const box = (await page.locator('#game canvas').boundingBox())!;
-  const center = cardCenter(1);
+  const center = await cardPointOf(page, 1);
   await page.mouse.move(box.x + (center.x / 360) * box.width, box.y + (center.y / 640) * box.height);
   await expect.poll(async () => (await lifts(page))[1]).toBeGreaterThan(0.8);
   expect((await lifts(page))[0]).toBeLessThan(0.1);

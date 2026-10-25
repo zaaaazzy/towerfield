@@ -3,7 +3,7 @@ import { START_HAND, MAX_ROUNDS } from '../src/logic/match';
 import { decodeMatch, encodeMatch, type RecordedMatch, replayRecorded } from '../src/logic/match-record';
 import { playScriptedMatch } from '../src/logic/match-record-fixture';
 import { createRecordedReplay, describeEvent, PLAY_PAUSE_MS, stepReplay } from '../src/logic/replay';
-import { collectErrors, fastForwardCombat, openGame, readState, tap, tapReady } from './helpers';
+import { cardPoint, collectErrors, fastForwardCombat, openGame, readState, tap, tapReady } from './helpers';
 
 /** Was der Test von der Szene liest (nur Typ, der Code läuft im Browser). */
 interface MainSceneView {
@@ -372,12 +372,12 @@ test('ein beschworener Minion lässt sich in der Planung ziehen, danach nicht me
   const at = (x: number, y: number) => ({ x: box.x + (x / 360) * box.width, y: box.y + (y / 640) * box.height });
   const humanMinions = () =>
     page.evaluate(() => (window.game!.scene.getScene('main') as unknown as DragSceneView).current.players[0]!.minions);
-  const cardPoint = (index: number) => at(7 + (index % 5) * 70 + 33, 440 + Math.floor(index / 5) * 66 + 31);
   const click = (point: { x: number; y: number }) => page.mouse.click(point.x, point.y);
 
   // Karten der Reihe nach auf Line 0 spielen, bis ein Minion auf dem Feld steht.
   for (let attempt = 0; attempt < 7 && (await humanMinions()).length === 0; attempt += 1) {
-    await click(cardPoint(attempt % 3));
+    const card = cardPoint((await readState(page)).players[0].hand, attempt % 3);
+    await click(at(card.x, card.y));
     await click(at(60, 300));
   }
   const placed = await humanMinions();
@@ -432,7 +432,11 @@ test('Kartenfilter: Tasten-Reihenfolge, Abwahl, nicht passende Karten tot, echte
   const box = (await canvas.boundingBox())!;
   const at = (x: number, y: number) => ({ x: box.x + (x / 360) * box.width, y: box.y + (y / 640) * box.height });
   const click = (point: { x: number; y: number }) => page.mouse.click(point.x, point.y);
-  const cardPoint = (index: number) => at(7 + (index % 5) * 70 + 33, 440 + Math.floor(index / 5) * 66 + 31);
+  const fixedHand = ['tower-hp', 'summon-minion', 'line-upgrade', 'summon-brute'];
+  const cardAtIndex = (index: number, exclusive = false) => {
+    const point = cardPoint(fixedHand, index, exclusive);
+    return at(point.x, point.y);
+  };
   const filterButton = at(173, 612);
   const read = () =>
     page.evaluate(() => {
@@ -450,9 +454,10 @@ test('Kartenfilter: Tasten-Reihenfolge, Abwahl, nicht passende Karten tot, echte
     human.hand = ['tower-hp', 'summon-minion', 'line-upgrade', 'summon-brute'];
     human.energy = 10;
   });
+  // Anzeige: Minion, Brocken (Einheiten links), dann Line-Upgrade und Tower Leben; Hand-Indizes bleiben unsortiert.
 
   // Minion wählen, auf „Beschwörung“ schalten: Auswahl bleibt, Karte ist sichtbar.
-  await click(cardPoint(1));
+  await click(cardAtIndex(1));
   expect((await read()).selected).toBe(1);
   await click(filterButton);
   expect(await read()).toMatchObject({ filter: 'summon', selected: 1 });
@@ -462,9 +467,9 @@ test('Kartenfilter: Tasten-Reihenfolge, Abwahl, nicht passende Karten tot, echte
   expect(await read()).toMatchObject({ filter: 'upgrade', selected: null });
 
   // Abgedunkelte Karte (Tower Leben, Index 0) reagiert nicht, Upgrade-Karte (Index 2) schon.
-  await click(cardPoint(0));
+  await click(cardAtIndex(0, true));
   expect((await read()).selected).toBeNull();
-  await click(cardPoint(2));
+  await click(cardAtIndex(2));
   expect((await read()).selected).toBe(2);
 
   // Tower → Alle → Beschwörung.
@@ -476,7 +481,7 @@ test('Kartenfilter: Tasten-Reihenfolge, Abwahl, nicht passende Karten tot, echte
   expect((await read()).filter).toBe('summon');
 
   // Bei „Beschwörung“ wird der Brocken mit dem echten Hand-Index 3 gespielt.
-  await click(cardPoint(3));
+  await click(cardAtIndex(3));
   await click(at(60, 300));
   const after = await read();
   expect(after.hand).toEqual(['tower-hp', 'summon-minion', 'line-upgrade']);

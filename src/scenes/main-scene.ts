@@ -1,11 +1,11 @@
 import Phaser from 'phaser';
-import { cardTypeStyle } from '../logic/card-style';
+import { CARD_ART_IDS, cardTypeStyle } from '../logic/card-style';
 import { getCardDef } from '../logic/cards';
 import { diffFx } from '../logic/fx-events';
+import { type CardPose, cardAt, fanLayout, HAND_FAN, liftedPose, sortHand } from '../logic/hand-layout';
 import {
   advance,
   createMatch,
-  HAND_LIMIT,
   type MatchState,
   MAX_ROUNDS,
   lineCapacity,
@@ -15,7 +15,7 @@ import { botPlanRecorded, createRecord, performAction, type RecordedMatch } from
 import { HAND_FILTER_NAMES, type HandFilter, isCardVisible, nextHandFilter } from '../logic/hand-filter';
 import { parseSeed } from '../logic/seed';
 import { type DropTarget, dropTargetAt, slotPosition } from '../logic/placement';
-import { drawCard } from './card-view';
+import { CardView } from './card-view';
 import { Effects, type Locator } from './effects';
 import {
   drawBoard,
@@ -59,10 +59,6 @@ const LAYOUT = {
   lineHalfWidth: FIELD.lineHalfWidth,
   enemyTowerY: FIELD.enemyTowerY,
   ownTowerY: FIELD.ownTowerY,
-  cardWidth: 66,
-  cardHeight: 62,
-  cardGap: 4,
-  cardsPerRow: 5,
   handTop: 440,
   button: { x: 230, y: 592, width: 120, height: 40 },
   /** Filtertaste für die Hand: schaltet bei jedem Tipp weiter, links neben `button`, unter den Karten. */
@@ -97,16 +93,8 @@ interface DragState {
   valid: boolean;
 }
 
-function cardRect(index: number): { x: number; y: number; width: number; height: number } {
-  const column = index % LAYOUT.cardsPerRow;
-  const row = Math.floor(index / LAYOUT.cardsPerRow);
-  return {
-    x: 7 + column * (LAYOUT.cardWidth + LAYOUT.cardGap),
-    y: LAYOUT.handTop + row * (LAYOUT.cardHeight + LAYOUT.cardGap),
-    width: LAYOUT.cardWidth,
-    height: LAYOUT.cardHeight,
-  };
-}
+/** Karten, die beim aktiven Filter nicht passen, liegen hinter allen anderen. */
+const FADED_Z_OFFSET = -20;
 
 function inside(rect: { x: number; y: number; width: number; height: number }, x: number, y: number): boolean {
   return x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height;
@@ -137,9 +125,15 @@ export class MainScene extends Phaser.Scene {
   private statsClosed = false;
   /** Kartenfilter der Hand; reiner Darstellungs- und Eingabezustand, wird nicht gespeichert. */
   private handFilter: HandFilter = 'all';
+  /** Ansichten der Handkarten, je Anzeigeplatz von links nach rechts (wiederverwendet). */
+  private cardViews: CardView[] = [];
 
   constructor() {
     super('main');
+  }
+
+  preload(): void {
+    for (const id of CARD_ART_IDS) this.load.svg(`card-art-${id}`, `assets/cards/${id}.svg`, { width: 268, height: 144 });
   }
 
   /** Aktueller Spielzustand (nur lesen), z. B. für den Smoke-Test. */
@@ -171,6 +165,7 @@ export class MainScene extends Phaser.Scene {
     this.drag = null;
     this.statsClosed = false;
     this.handFilter = 'all';
+    this.cardViews = [];
     this.graphics = this.add.graphics();
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => this.onPointerDown(pointer.worldX, pointer.worldY));
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => this.onPointerMove(pointer.worldX, pointer.worldY));
@@ -240,14 +235,27 @@ export class MainScene extends Phaser.Scene {
     return best;
   }
 
-  /** Index der sichtbaren Handkarte unter dem Punkt (nur in der Planung), sonst `null`. */
+  /**
+   * Anzeigereihenfolge (`order[platz]` = Hand-Index) und Lage jeder Karte je Anzeigeplatz. Mit `target` gilt die
+   * Endlage der Anhebung (Hover/Auswahl), sonst der aktuelle, gleitende Wert; Treffer prüfen die Endlage.
+   */
+  private handLayout(target: boolean): { order: number[]; poses: CardPose[] } {
+    const hand = this.state.players[HUMAN].hand;
+    const order = sortHand(hand.map((id) => getCardDef(id).type));
+    const rest = fanLayout(order.length);
+    const poses = order.map((handIndex, slot) => {
+      const lift = target ? (this.selected === handIndex || this.hovered === handIndex ? 1 : 0) : (this.lifts[handIndex] ?? 0);
+      return liftedPose(rest[slot]!, lift, order.length);
+    });
+    return { order, poses };
+  }
+
+  /** Hand-Index der obersten sichtbaren, antippbaren Handkarte unter dem Punkt (nur in der Planung), sonst `null`. */
   private cardIndexAt(x: number, y: number): number | null {
     if (this.state.phase !== 'planning') return null;
-    const hand = this.state.players[HUMAN].hand;
-    for (let index = 0; index < hand.length; index += 1) {
-      if (inside(cardRect(index), x, y)) return this.isVisibleInHand(index) ? index : null;
-    }
-    return null;
+    const { order, poses } = this.handLayout(true);
+    const slot = cardAt(poses, x, y, (s) => this.isVisibleInHand(order[s]!));
+    return slot === null ? null : order[slot]!;
   }
 
   private onPointerDown(x: number, y: number): void {
@@ -333,12 +341,10 @@ export class MainScene extends Phaser.Scene {
       if (selected !== null && !this.isVisibleInHand(selected)) this.selected = null;
       return;
     }
-    const hand = this.state.players[HUMAN].hand;
-    for (let index = 0; index < hand.length; index += 1) {
-      if (!inside(cardRect(index), x, y)) continue;
-      if (!this.isVisibleInHand(index)) return;
+    const index = this.cardIndexAt(x, y);
+    if (index !== null) {
       this.message = '';
-      const def = getCardDef(hand[index]!);
+      const def = getCardDef(this.state.players[HUMAN].hand[index]!);
       if (def.target === 'none') {
         this.play(index);
       } else {
@@ -360,6 +366,9 @@ export class MainScene extends Phaser.Scene {
   private play(handIndex: number, line?: number): void {
     const cardId = this.state.players[HUMAN].hand[handIndex];
     if (cardId === undefined) return;
+    // Lage vor dem Spielen merken: danach ist die Karte aus der Hand und die Hand ordnet sich neu.
+    const { order, poses } = this.handLayout(false);
+    const pose = poses[order.indexOf(handIndex)];
     const done = performAction(this.state, this.record, HUMAN, { type: 'play', cardId, line: line ?? null });
     const result = done.result;
     this.state = result.state;
@@ -368,7 +377,10 @@ export class MainScene extends Phaser.Scene {
     this.message = result.ok ? '' : this.explain(result.reason);
     if (result.ok) {
       const def = getCardDef(cardId);
-      this.effects.cardPlayed(cardRect(handIndex), def.name, cardTypeStyle(def.type).accent);
+      if (pose) {
+        const { cardWidth: width, cardHeight: height } = HAND_FAN;
+        this.effects.cardPlayed({ x: pose.x - width / 2, y: pose.y - height / 2, width, height }, def.name, cardTypeStyle(def.type).accent);
+      }
       this.lifts.splice(handIndex, 1);
     }
   }
@@ -433,19 +445,26 @@ export class MainScene extends Phaser.Scene {
     drawMinions(g, state, drag?.minionId);
     if (drag) drawMinionBody(g, drag.x, drag.y, HUMAN, undefined, 0.85);
 
-    // Handkarten: die am höchsten angehobenen zuletzt, damit sie oben liegen.
-    const cards = human.hand.slice(0, HAND_LIMIT).map((id, index) => ({ def: getCardDef(id), index }));
-    cards
-      .slice()
-      .sort((a, b) => (this.lifts[a.index] ?? 0) - (this.lifts[b.index] ?? 0))
-      .forEach(({ def, index }) => {
-        drawCard(g, this.label, cardRect(index), def, {
-          lift: this.lifts[index] ?? 0,
-          selected: this.selected === index,
-          affordable: human.energy >= def.cost,
-          visible: isCardVisible(def.type, this.handFilter),
-        });
+    // Handkarten als Fächer in Typ-Reihenfolge; Stapelhöhe und Anhebung stehen in der Pose.
+    const cards = human.hand.map((id, index) => ({ def: getCardDef(id), index }));
+    const { order, poses } = this.handLayout(false);
+    const shown = state.phase === 'over' ? 0 : order.length;
+    order.slice(0, shown).forEach((handIndex, slot) => {
+      const { def } = cards[handIndex]!;
+      const visible = isCardVisible(def.type, this.handFilter);
+      const pose = poses[slot]!;
+      while (this.cardViews.length <= slot) this.cardViews.push(new CardView(this));
+      this.cardViews[slot]!.update(visible ? pose : { ...pose, z: pose.z + FADED_Z_OFFSET }, def, {
+        lift: this.lifts[handIndex] ?? 0,
+        selected: this.selected === handIndex,
+        affordable: human.energy >= def.cost,
+        visible,
       });
+    });
+    // Nach Match-Ende (Overlay auf der Grafik) und für nicht mehr belegte Plätze bleiben die Karten verborgen.
+    this.cardViews.forEach((view, slot) => {
+      if (slot >= shown) view.hide();
+    });
 
     const matching = cards.filter(({ def }) => isCardVisible(def.type, this.handFilter)).length;
     const filterButton = LAYOUT.filterButton;
