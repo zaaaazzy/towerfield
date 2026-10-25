@@ -1,4 +1,5 @@
 import { expect, type Page, test } from '@playwright/test';
+import { buffGain } from '../src/logic/buff';
 import { type CardDef, getCardDef } from '../src/logic/cards';
 import type { Minion } from '../src/logic/combat';
 import { slotPosition } from '../src/logic/placement';
@@ -273,9 +274,10 @@ test('buff-minion: Karte und danach eigenen Minion antippen stärkt nur diesen M
 
   const after = await readState(page);
   const buffed = minionById(after, placed.id)!;
-  expect(buffed.maxHp).toBe(placed.maxHp + Math.round(placed.maxHp * 0.5));
-  expect(buffed.hp).toBe(placed.hp + Math.round(placed.maxHp * 0.5));
-  expect(buffed.damage).toBe(placed.damage + Math.round(placed.damage * 0.5));
+  const maxHp = placed.maxHp ?? placed.hp;
+  expect(buffed.maxHp).toBe(maxHp + buffGain(maxHp));
+  expect(buffed.hp).toBe(placed.hp + buffGain(maxHp));
+  expect(buffed.damage).toBe(placed.damage + buffGain(placed.damage));
   expect(after.players[0].energy).toBe(before.players[0].energy - cost);
   expect(after.players[0].lines).toEqual(before.players[0].lines);
   expect(await readSelected(page)).toBeNull();
