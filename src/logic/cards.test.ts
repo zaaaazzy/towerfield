@@ -2,9 +2,25 @@ import { describe, expect, it } from 'vitest';
 import { buildDeck, CARD_DEFS, getCardDef } from './cards';
 
 describe('Karten', () => {
-  it('deckt alle vier Kartentypen ab', () => {
+  it('deckt alle fünf Kartentypen ab', () => {
     const types = new Set(CARD_DEFS.map((card) => card.type));
-    expect([...types].sort()).toEqual(['line-upgrade', 'minion-upgrade', 'summon', 'tower-upgrade']);
+    expect([...types].sort()).toEqual(['line-upgrade', 'minion-buff', 'minion-upgrade', 'summon', 'tower-upgrade']);
+  });
+
+  it('definiert „Minion stärken“ als Karte mit Ziel-Minion', () => {
+    expect(getCardDef('buff-minion')).toMatchObject({
+      name: 'Minion stärken',
+      type: 'minion-buff',
+      target: 'minion',
+      cost: 2,
+    });
+  });
+
+  it('legt „Minion stärken“ einmal pro Durchgang ins Deck, deterministisch pro Seed', () => {
+    // Ein Durchgang des Decks hat 19 Karten (Summe von COPIES).
+    expect(buildDeck(1, 19).filter((id) => id === 'buff-minion')).toHaveLength(1);
+    expect(buildDeck(3, 38).filter((id) => id === 'buff-minion')).toHaveLength(2);
+    expect(buildDeck(3, 38)).toEqual(buildDeck(3, 38));
   });
 
   it('hat eindeutige IDs und positive Kosten', () => {

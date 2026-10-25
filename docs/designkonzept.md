@@ -63,9 +63,12 @@ flowchart LR
 | `tower-damage` | Tower Schaden | Turm-Upgrade | 2 | Tower-Schaden +4/s | eigene Line | 1 |
 | `minion-upgrade-line` | Minions Line | Minion-Upgrade | 1 | Künftige Minions der Line: +10 LP, +2 Schaden | eigene Line | 2 |
 | `minion-upgrade-all` | Minions alle | Minion-Upgrade | 3 | Künftige Minions aller Lines: +5 LP, +1 Schaden | keins | 1 |
+| `buff-minion` | Minion stärken | Minion-Stärkung | 2 | Ein bestehender Minion: Max-LP, LP und Schaden +50 % (Math.round) | eigener lebender Minion | 1 |
 
-Minion-Upgrades wirken nur auf Beschwörungen **nach** dem Spielen (Bonus liegt an der Line). Upgrades sind nicht
-zurücknehmbar.
+Minion-Upgrades wirken nur auf Beschwörungen **nach** dem Spielen (Bonus liegt an der Line). „Minion stärken“ ist die
+Ausnahme: Sie wirkt sofort und nur auf den gewählten Minion, ändert `line.bonus` nicht und trifft später beschworene
+Minions nicht. Mehrere Stärkungen wirken nacheinander auf die jeweils aktuellen Werte; der Zuwachs ist
+`Math.round(Wert × 0,5)` (`buff.ts`, z. B. 5 → +3). Upgrades und Stärkungen sind nicht zurücknehmbar.
 
 ### Soll-Änderungen an Konstanten
 

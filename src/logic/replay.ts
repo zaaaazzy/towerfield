@@ -201,6 +201,7 @@ const ABORT_TEXT: Readonly<Record<ReplayAbortReason, string>> = {
   'no-such-minion': 'Den Minion gibt es nicht.',
   'line-full': 'Die Lane ist voll.',
   'max-level': 'Das Feld hat die Höchststufe.',
+  'invalid-target': 'Der Ziel-Minion ist ungültig.',
 };
 
 /** Hinweistext zum Abbruch, z. B. „Replay abgebrochen bei Zug 7: Zu wenig Energie.“ */

@@ -1,4 +1,5 @@
 import { expect, type Page, test } from '@playwright/test';
+import { buffGain } from '../src/logic/buff';
 import { type CardDef, getCardDef } from '../src/logic/cards';
 import type { Minion } from '../src/logic/combat';
 import { slotPosition } from '../src/logic/placement';
@@ -250,6 +251,39 @@ async function summonOn(page: Page, line: number): Promise<Minion> {
 }
 
 const minionById = (state: MatchState, id: number) => state.players[0].minions.find((m) => m.id === id);
+
+test('buff-minion: Karte und danach eigenen Minion antippen stärkt nur diesen Minion um 50 %', async ({ page }) => {
+  const errors = collectErrors(page);
+  await openGame(page);
+  const placed = await summonOn(page, 0);
+  // Der Test legt die Karte gezielt in die Hand (Zustand der Szene), die Regeln laufen unverändert.
+  await page.evaluate(() => {
+    const scene = window.game!.scene.getScene('main') as unknown as {
+      state: { players: { hand: string[]; energy: number }[] };
+    };
+    scene.state.players[0]!.hand[0] = 'buff-minion';
+    scene.state.players[0]!.energy = 10;
+  });
+  const before = await readState(page);
+  const cost = getCardDef('buff-minion').cost;
+
+  await tapCard(page, 0);
+  await expect.poll(() => readSelected(page)).toBe(0);
+  await tap(page, minionPoint(placed).x, minionPoint(placed).y);
+  await expect.poll(async () => (await readState(page)).players[0].hand.length).toBe(before.players[0].hand.length - 1);
+
+  const after = await readState(page);
+  const buffed = minionById(after, placed.id)!;
+  const maxHp = placed.maxHp ?? placed.hp;
+  expect(buffed.maxHp).toBe(maxHp + buffGain(maxHp));
+  expect(buffed.hp).toBe(placed.hp + buffGain(maxHp));
+  expect(buffed.damage).toBe(placed.damage + buffGain(placed.damage));
+  expect(after.players[0].energy).toBe(before.players[0].energy - cost);
+  expect(after.players[0].lines).toEqual(before.players[0].lines);
+  expect(await readSelected(page)).toBeNull();
+
+  expect(errors).toEqual([]);
+});
 
 test('Drag: ein Minion auf einen freien Slot einer anderen Lane gezogen setzt line und position, Energie bleibt', async ({
   page,

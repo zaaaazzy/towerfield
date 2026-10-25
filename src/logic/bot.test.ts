@@ -401,6 +401,47 @@ describe('Bot', () => {
     });
   });
 
+  describe('buff-minion', () => {
+    it('stärkt den lebenden Minion mit dem größten maxHp (bei Gleichstand die kleinste Id) und meldet seine Id', () => {
+      const state = withHand(['buff-minion'], cost('buff-minion'));
+      addMinions(state, 0, 3);
+      state.players[1].minions[1]!.maxHp = 50;
+      state.players[1].minions[2]!.maxHp = 50;
+      state.players[1].minions[0]!.maxHp = 80;
+      state.players[1].minions[0]!.hp = 0;
+      const move = botStep(state, 1);
+      expect(move).toMatchObject({ cardId: 'buff-minion', line: undefined, minionId: 101 });
+      expect(move!.state.players[1].minions.find((m) => m.id === 101)).toMatchObject({ maxHp: 75, damage: 9 });
+      expect(move!.state.players[1].minions.find((m) => m.id === 102)).toMatchObject({ maxHp: 50, damage: 6 });
+    });
+
+    it('nimmt hp als Größe, wenn ein Minion kein maxHp hat', () => {
+      const state = withHand(['buff-minion'], cost('buff-minion'));
+      addMinions(state, 0, 2);
+      state.players[1].minions[1]!.hp = 40;
+      expect(botStep(state, 1)).toMatchObject({ minionId: 101 });
+    });
+
+    it('spielt die Karte nicht, wenn kein lebender eigener Minion existiert', () => {
+      const state = withHand(['buff-minion'], cost('buff-minion'));
+      expect(botStep(state, 1)).toBeNull();
+      addMinions(state, 0, 1);
+      state.players[1].minions[0]!.hp = 0;
+      const after = botPlan(state, 1);
+      expect(after.players[1].hand).toEqual(['buff-minion']);
+      expect(after.players[1].energy).toBe(cost('buff-minion'));
+      expect(after.ready[1]).toBe(true);
+    });
+
+    it('beschwört erst und stärkt dann den neuen Minion, weil die Beschwörung höher priorisiert ist', () => {
+      const state = withHand(['buff-minion', 'summon-minion'], cost('buff-minion') + cost('summon-minion'));
+      const after = botPlan(state, 1);
+      expect(after.players[1].hand).toEqual([]);
+      expect(after.players[1].minions).toHaveLength(1);
+      expect(after.players[1].minions[0]).toMatchObject({ maxHp: 45, hp: 45, damage: 9 });
+    });
+  });
+
   describe('Determinismus und Isolation', () => {
     const seeds = [1, 4, 8, 42, 1234];
     const sides: PlayerIndex[] = [0, 1];

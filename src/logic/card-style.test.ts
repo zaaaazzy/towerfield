@@ -2,17 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { CARD_DEFS, type CardDef, type CardType, getCardDef } from './cards';
 import { CARD_TYPE_STYLES, cardArtKey, cardStats, cardTypeStyle, describeCard } from './card-style';
 
-const TYPES: CardType[] = ['line-upgrade', 'tower-upgrade', 'summon', 'minion-upgrade'];
+const TYPES: CardType[] = ['line-upgrade', 'tower-upgrade', 'summon', 'minion-upgrade', 'minion-buff'];
 
 describe('cardTypeStyle', () => {
-  it('kennt alle vier Kartentypen', () => {
+  it('kennt alle fünf Kartentypen', () => {
     for (const type of TYPES) expect(cardTypeStyle(type)).toBe(CARD_TYPE_STYLES[type]);
   });
 
   it('unterscheidet die Typen nach Rahmenfarbe und Symbol', () => {
     const accents = new Set(TYPES.map((type) => cardTypeStyle(type).accent));
     const symbols = new Set(TYPES.map((type) => cardTypeStyle(type).symbol));
-    expect(accents.size).toBe(4);
+    expect(accents.size).toBe(5);
+    // „Minion stärken“ teilt sich das Symbol mit den Minion-Upgrades, unterscheidet sich aber in Farbe und Banner.
     expect(symbols.size).toBe(4);
   });
 
@@ -69,5 +70,12 @@ describe('describeCard', () => {
     expect(describeCard(getCardDef('minion-upgrade-all'))).toBe('Alle: +5 Leben\n+1 Schaden');
     expect(describeCard(getCardDef('minion-upgrade-line'))).toBe('Lane: +10 Leben\n+2 Schaden');
     expect(describeCard(getCardDef('line-upgrade'))).toBe('Lane +1 Stufe\noben + unten');
+    expect(describeCard(getCardDef('buff-minion'))).toBe('Ein Minion:\n+50 % Leben, Schaden');
+  });
+
+  it('gibt „Minion stärken“ ein eigenes Banner und keine Wert-Plaketten', () => {
+    expect(cardStats(getCardDef('buff-minion'))).toBeNull();
+    expect(cardTypeStyle('minion-buff').banner).toBe('STÄRKUNG');
+    expect(cardTypeStyle('minion-buff').accent).not.toBe(cardTypeStyle('minion-upgrade').accent);
   });
 });

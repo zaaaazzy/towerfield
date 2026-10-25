@@ -4,6 +4,7 @@
  */
 import { getCardDef } from './cards';
 import { unlockedLanes } from './lanes';
+import type { Minion } from './combat';
 import { lineCapacity, type MatchState, type PlayerIndex, playCard, setReady } from './match';
 
 /** Reihenfolge, in der der Bot Karten bevorzugt. */
@@ -16,9 +17,21 @@ const PRIORITY = [
   'line-upgrade',
   'minion-upgrade-line',
   'summon-brute',
+  'buff-minion',
   'tower-damage',
   'minion-upgrade-all',
 ];
+
+/** Ziel-Minion einer Karte: der lebende eigene mit dem meisten `maxHp` (bei Gleichstand die kleinste Id), oder `undefined`. */
+function chooseMinion(state: MatchState, playerIndex: PlayerIndex): number | undefined {
+  const size = (m: Minion) => m.maxHp ?? m.hp;
+  return state.players[playerIndex].minions
+    .filter((m) => m.hp > 0)
+    .reduce<Minion | undefined>(
+      (best, m) => (best === undefined || size(m) > size(best) || (size(m) === size(best) && m.id < best.id) ? m : best),
+      undefined,
+    )?.id;
+}
 
 /** Ziel-Lane einer Karte (die freie mit dem kleinsten Wert, bei Gleichstand die niedrigste), oder `undefined`. */
 function chooseLine(state: MatchState, playerIndex: PlayerIndex, cardId: string): number | undefined {
@@ -44,10 +57,11 @@ function chooseLine(state: MatchState, playerIndex: PlayerIndex, cardId: string)
   }
 }
 
-/** Ein einzelner Zug des Bots: gespielte Karte, Zielline (`undefined` ohne Ziel) und der Zustand danach. */
+/** Ein einzelner Zug des Bots: gespielte Karte, Zielline und Ziel-Minion (`undefined` ohne Ziel) und der Zustand danach. */
 export interface BotMove {
   cardId: string;
   line: number | undefined;
+  minionId?: number;
   state: MatchState;
 }
 
@@ -64,8 +78,10 @@ export function botStep(
     const def = getCardDef(id);
     const line = def.target === 'line' ? chooseLine(state, playerIndex, id) : undefined;
     if (def.target === 'line' && line === undefined) continue;
-    const result = playCard(state, playerIndex, handIndex, line);
-    if (result.ok) return { cardId: id, line, state: result.state };
+    const minionId = def.target === 'minion' ? chooseMinion(state, playerIndex) : undefined;
+    if (def.target === 'minion' && minionId === undefined) continue;
+    const result = playCard(state, playerIndex, handIndex, line, undefined, minionId);
+    if (result.ok) return { cardId: id, line, ...(minionId === undefined ? {} : { minionId }), state: result.state };
   }
   return null;
 }

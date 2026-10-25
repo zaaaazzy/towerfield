@@ -596,6 +596,114 @@ describe('Karten ausspielen', () => {
   });
 });
 
+describe('Karte Minion stärken', () => {
+  /** Spieler 0 beschwört zwei Minions (Ids 1 und 2) auf Lane 0 und hält danach `buff-minion` auf der Hand. */
+  function withTwoMinions(hand: string[] = ['buff-minion', 'buff-minion', 'buff-minion']): MatchState {
+    let state = withHand(createMatch(3), ['summon-minion', 'summon-brute', ...hand], 20);
+    for (const index of [0, 0]) {
+      const result = playCard(state, 0, index, 0);
+      if (!result.ok) throw new Error(result.reason);
+      state = result.state;
+    }
+    return state;
+  }
+  const minionOf = (state: MatchState, id: number, player: PlayerIndex = 0) =>
+    state.players[player].minions.find((m) => m.id === id)!;
+
+  it('erhöht maxHp, hp und damage des Ziels um 50 %, zieht Karte und Kosten ab', () => {
+    const state = withTwoMinions();
+    const before = minionOf(state, 2);
+    const result = playCard(state, 0, 0, undefined, undefined, 2);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(minionOf(result.state, 2)).toEqual({
+      ...before,
+      maxHp: 120,
+      hp: 120,
+      damage: 18,
+    });
+    expect(before).toMatchObject({ maxHp: 80, damage: 12 });
+    expect(result.state.players[0].energy).toBe(state.players[0].energy - getCardDef('buff-minion').cost);
+    expect(result.state.players[0].hand).toEqual(['buff-minion', 'buff-minion']);
+    // Der Ausgangszustand bleibt unverändert.
+    expect(minionOf(state, 2)).toEqual(before);
+  });
+
+  it('ändert weder line.bonus noch andere Minions noch den Gegner', () => {
+    const state = withTwoMinions();
+    const result = playCard(state, 0, 0, undefined, undefined, 2);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.state.players[0].lines.map((l) => l.bonus)).toEqual(state.players[0].lines.map((l) => l.bonus));
+    expect(minionOf(result.state, 1)).toEqual(minionOf(state, 1));
+    expect(result.state.players[1]).toEqual(state.players[1]);
+  });
+
+  it('wirkt nicht auf später beschworene Minions derselben Lane', () => {
+    let state = withTwoMinions(['buff-minion', 'summon-brute']);
+    state = (playCard(state, 0, 0, undefined, undefined, 2) as { state: MatchState }).state;
+    const summoned = playCard(state, 0, 0, 0);
+    if (!summoned.ok) throw new Error(summoned.reason);
+    expect(minionOf(summoned.state, 3)).toMatchObject({ hp: 80, maxHp: 80, damage: 12 });
+  });
+
+  it('stapelt mehrere Buffs nacheinander auf die aktuellen Werte, immer gleich', () => {
+    const run = () => {
+      let state = withTwoMinions();
+      for (let count = 0; count < 3; count += 1) {
+        const result = playCard(state, 0, 0, undefined, undefined, 1);
+        if (!result.ok) throw new Error(result.reason);
+        state = result.state;
+      }
+      return state;
+    };
+    // Minion 1: 30 LP, 6 Schaden → 45/9 → 68/14 (aufgerundet) → 102/21.
+    expect(minionOf(run(), 1)).toMatchObject({ hp: 102, maxHp: 102, damage: 21 });
+    expect(run()).toEqual(run());
+  });
+
+  it('lehnt fehlendes, unbekanntes, gegnerisches und totes Ziel mit invalid-target ab', () => {
+    const state = withTwoMinions();
+    state.players[1].minions.push({ id: 50, line: 1, position: 10, hp: 30, maxHp: 30, damage: 6, range: 4, speed: 10 });
+    const dead = structuredClone(state);
+    minionOf(dead, 1).hp = 0;
+    const cases: [MatchState, number | undefined][] = [
+      [state, undefined],
+      [state, 99],
+      [state, 50],
+      [dead, 1],
+    ];
+    for (const [from, target] of cases) {
+      const result = playCard(from, 0, 0, undefined, undefined, target);
+      expect(result).toEqual({ ok: false, state: from, reason: 'invalid-target' });
+    }
+  });
+
+  it('lehnt zu wenig Energie, falsche Phase und „Bereit“ mit den bekannten Gründen ab', () => {
+    const state = withTwoMinions();
+    const poor = structuredClone(state);
+    poor.players[0].energy = 1;
+    expect(playCard(poor, 0, 0, undefined, undefined, 1)).toMatchObject({ ok: false, reason: 'not-enough-energy' });
+    expect(playCard(setReady(state, 0), 0, 0, undefined, undefined, 1)).toMatchObject({
+      ok: false,
+      reason: 'already-ready',
+    });
+    const combat = setReady(setReady(state, 0), 1);
+    expect(playCard(combat, 0, 0, undefined, undefined, 1)).toMatchObject({ ok: false, reason: 'not-planning' });
+    expect(playCard(state, 0, 9, undefined, undefined, 1)).toMatchObject({ ok: false, reason: 'no-such-card' });
+  });
+
+  it('bleibt nach dem Kampf erhalten: Überlebende behalten ihre gestärkten Werte', () => {
+    const state = withTwoMinions();
+    const buffed = playCard(state, 0, 0, undefined, undefined, 2);
+    if (!buffed.ok) throw new Error(buffed.reason);
+    const survivor = { ...minionOf(buffed.state, 2) };
+    const player = structuredClone(buffed.state.players[0]);
+    player.minions = [survivor];
+    respawnSurvivors(player);
+    expect(player.minions[0]).toMatchObject({ id: 2, hp: 120, maxHp: 120, damage: 18 });
+  });
+});
+
 describe('Sieg', () => {
   /** Alle Tower beider Spieler zerstört, bis auf die mit den angegebenen (Lane, Tower)-Indizes, die 0,1 LP behalten. */
   function lastTowers(state: MatchState, survivors: [number, number][]): void {
