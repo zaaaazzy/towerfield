@@ -17,7 +17,7 @@ Karten (Hochformat, Touch, `Scale.FIT`). Aktuell spielt man lokal gegen einen de
 Basiswerte (in `src/logic/match.ts` und `combat.ts`, nur Startwerte, kein Balancing): `HAND_LIMIT = 10`
 (bestätigt, greift schon in Runde 2: 7 + 5 = 12, überzählige Karten verfallen am Ende der Hand; es gilt die
 Reihenfolge der Ankunft), `MAX_ROUNDS = 8`,
-Energie 3 + 1 pro Runde (max. 10), Line-Höchststufe 5, Kapazität 2 + Stufe, Tower 100 HP / 8 Schaden.
+Energie 3 + 1 pro Runde (max. 8), Line-Höchststufe 5, Kapazität 2 + Stufe, Tower 100 HP / 8 Schaden.
 
 Das verbindliche Designkonzept (Karten, Minions, Slot-Platzierung, Iso-Karte, Mobile-Layout, Folgeaufträge) steht in
 [`docs/designkonzept.md`](docs/designkonzept.md). Die Anwendung der Iso-Umrechnung, der Kamera-Begrenzung und der
