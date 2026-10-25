@@ -64,8 +64,8 @@ Schicht überspringt sie, das Spiel läuft still weiter. Der Smoke-Test prüft d
 | `public/assets/audio/melee-hit.wav`, `arrow.wav`, `lightning.wav`, `shield-block.wav`, `heal.wav`, `summon.wav`, `minion-death.wav`, `explosion.wav`, `tower-hit.wav`, `tower-down.wav`, `card-play.wav`, `round-start.wav`, `round-end.wav`, `victory.wav`, `defeat.wav` | Effekte | selbst erzeugt mit `tools/generate-sfx.mjs` (Sinus, Rauschen, Hüllkurven; keine fremden Samples) | CC0 1.0 (gemeinfrei) |
 | `public/assets/audio/tavern-loop.ogg` (alternativ `.mp3`) | Musikschleife | **noch nicht vorhanden**, siehe unten | – |
 
-**Effekte erzeugen:** `npm run audio:sfx` schreibt die 15 WAV-Dateien (mono, 22,05 kHz, 16 Bit, zusammen unter
-200 KB) deterministisch nach `public/assets/audio/`. Danach mit ins Repository nehmen.
+**Effekte erzeugen:** `npm run audio:sfx` schreibt die 15 WAV-Dateien (mono, 22,05 kHz, 16 Bit, zusammen rund
+410 KB) deterministisch nach `public/assets/audio/`. Danach mit ins Repository nehmen.
 
 **Musik:** Der Auftrag schließt eine eigene Komposition aus; es fehlt daher eine lizenzfreie oder bereitgestellte
 Tavernen-Schleife. Sie ist als `public/assets/audio/tavern-loop.ogg` (oder `.mp3`) abzulegen, möglichst kurz und
