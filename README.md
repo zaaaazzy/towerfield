@@ -21,7 +21,9 @@ Energie 3 + 1 pro Runde (max. 10), Line-Höchststufe 5, Kapazität 2 + Stufe, To
 
 Das verbindliche Designkonzept (Karten, Minions, Slot-Platzierung, Iso-Karte, Mobile-Layout, Folgeaufträge) steht in
 [`docs/designkonzept.md`](docs/designkonzept.md). Die Anwendung der Iso-Umrechnung, der Kamera-Begrenzung und der
-Slot-Platzierung beschreibt [`docs/anwendung-iso-platzierung.md`](docs/anwendung-iso-platzierung.md).
+Slot-Platzierung beschreibt [`docs/anwendung-iso-platzierung.md`](docs/anwendung-iso-platzierung.md), das Verschieben
+von Minions [`docs/anwendung-minion-drag-and-drop.md`](docs/anwendung-minion-drag-and-drop.md) und die Handlimit-Regel
+mit ihren Tests [`docs/anwendung-handlimit.md`](docs/anwendung-handlimit.md).
 
 ## Befehle
 
