@@ -20,6 +20,8 @@ Dieses Projekt ist ein Browser-Spiel mit Phaser 3, TypeScript und Vite.
 
 - Jede neue Regel bekommt einen Unit-Test neben der Datei (`src/logic/<name>.test.ts`).
 - `npm run build` (Typprüfung + Build), `npm test` und `npm run test:smoke` müssen grün sein.
+- Testbefehle je Dateityp: `src/**/*.test.ts` laufen mit `npx vitest run <datei>`; Playwright-Specs unter `e2e/`
+  laufen nur über `npm run test:smoke`. `npx vitest run e2e/...` ergibt „No test files found" (Exit-Code 1).
 - Der Smoke-Test (`e2e/smoke.spec.ts`) prüft, dass der Canvas zeichnet und keine Konsolenfehler auftreten. Neue
   Szenen dort mit aufnehmen, wenn sie ohne Eingabe erreichbar sind.
 - Keine Konsolenausgaben mit `console.error` für erwartete Fälle – der Smoke-Test wertet sie als Fehler.
