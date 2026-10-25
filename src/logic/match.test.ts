@@ -798,7 +798,8 @@ describe('Determinismus', () => {
       expect(playMatch(5, 1000 / 144, human)).toEqual(at30);
       expect(playMatch(5, 1000 / 60, human)).toEqual(at30);
     }
-  });
+    // Sechs volle Matches: auf den GitHub-Runnern knapp über Vitests Standard von 5 s.
+  }, 30_000);
 
   it('ist symmetrisch: dieselben Entscheidungen führen zu einem Unentschieden', () => {
     for (const seed of [1, 2, 3, 99]) {
