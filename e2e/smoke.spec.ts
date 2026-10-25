@@ -177,6 +177,45 @@ test('?replay=<seed>: die Replay-Szene startet ohne Eingabe, zeigt Spielfeld und
   expect(errors).toEqual([]);
 });
 
+test('?replay: am Ende erscheinen Ergebnis und Teilen-URL, ein Tastendruck startet dasselbe Replay neu', async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
+  page.on('pageerror', (error) => errors.push(error.message));
+
+  await page.goto('/?replay=42');
+  await page.waitForFunction(() => window.game?.scene.isActive('replay') && window.game.loop.frame > 10);
+  await page.waitForFunction(() => {
+    const view = window.game!.scene.getScene('replay') as unknown as ReplaySceneView;
+    return view.current.events.length > 0;
+  });
+
+  // Ein echtes Match dauert minutenlang: das Ende wird direkt im Szenenzustand gesetzt.
+  await page.evaluate(() => {
+    const view = window.game!.scene.getScene('replay') as unknown as { replay: { match: Record<string, unknown> } };
+    view.replay.match = { ...view.replay.match, phase: 'over', outcome: 'player0' };
+  });
+  await page.waitForFunction(() => {
+    const view = window.game!.scene.getScene('replay') as unknown as ReplaySceneView;
+    return view.children.list.some((c) => c.type === 'Text' && c.visible && c.text === 'Blau gewinnt');
+  });
+  const texts = await page.evaluate(() => {
+    const view = window.game!.scene.getScene('replay') as unknown as ReplaySceneView;
+    return view.children.list.filter((c) => c.type === 'Text' && c.visible).map((c) => c.text ?? '');
+  });
+  expect(texts.some((text) => text.endsWith('?replay=42'))).toBe(true);
+
+  await page.keyboard.press('Space');
+  await page.waitForFunction(() => {
+    const view = window.game!.scene.getScene('replay') as unknown as ReplaySceneView;
+    return view.current.match.phase === 'planning' && view.current.events.length <= 1;
+  });
+  expect(errors).toEqual([]);
+});
+
 test('?replay mit ungültigem Wert fällt auf die MainScene zurück, ohne Konsolenfehler', async ({ page }) => {
   const errors: string[] = [];
   page.on('console', (message) => {

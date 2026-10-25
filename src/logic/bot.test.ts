@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { botPlan } from './bot';
+import { botPlan, botStep } from './bot';
 import { getCardDef } from './cards';
 import {
   BASE_ENERGY,
@@ -66,6 +66,38 @@ describe('Bot', () => {
     const asSecond = botPlan(state, 1).players[1];
     const asFirst = botPlan(state, 0).players[0];
     expect(asFirst).toEqual(asSecond);
+  });
+
+  describe('botStep', () => {
+    it('spielt genau eine Karte und lässt den Eingabezustand unverändert', () => {
+      const before = withHand(['summon-minion', 'summon-minion'], 5);
+      const snapshot = structuredClone(before);
+      const move = botStep(before, 1);
+      expect(move).not.toBeNull();
+      expect(move!.cardId).toBe('summon-minion');
+      expect(move!.state.players[1].hand).toEqual(['summon-minion']);
+      expect(move!.state.players[1].energy).toBe(5 - cost('summon-minion'));
+      expect(before).toEqual(snapshot);
+    });
+
+    it('liefert die Zielline für Karten mit Ziel und undefined ohne Ziel', () => {
+      const move = botStep(withHand(['summon-minion'], 5), 1);
+      expect(move!.line).toBeGreaterThanOrEqual(0);
+      expect(move!.line).toBeLessThan(LINE_COUNT);
+    });
+
+    it('gibt null zurück, wenn keine Karte spielbar ist', () => {
+      expect(botStep(withHand(['summon-minion'], 0), 1)).toBeNull();
+      expect(botStep(withHand([], 5), 1)).toBeNull();
+      expect(botStep(withHand(['summon-minion'], 5), 1, [])).toBeNull();
+    });
+
+    it('wiederholt angewendet ergibt dasselbe wie botPlan ohne Bereit-Meldung', () => {
+      const start = createMatch(4);
+      let current = start;
+      for (let move = botStep(current, 1); move; move = botStep(current, 1)) current = move.state;
+      expect({ ...botPlan(start, 1), ready: current.ready }).toEqual(current);
+    });
   });
 
   describe('Priorisierung', () => {
