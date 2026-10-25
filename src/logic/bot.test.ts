@@ -104,6 +104,7 @@ describe('Bot', () => {
     const PRIORITY = [
       'summon-minion',
       'summon-archer',
+      'summon-healer',
       'tower-hp',
       'line-upgrade',
       'minion-upgrade-line',
@@ -111,6 +112,15 @@ describe('Bot', () => {
       'tower-damage',
       'minion-upgrade-all',
     ];
+
+    it('beschwört einen Heiler mit Reichweite 10 und Heiler-Merkmal, andere Minions ohne', () => {
+      const after = botPlan(withHand(['summon-healer', 'summon-minion'], cost('summon-healer') + cost('summon-minion')), 1);
+      const minions = after.players[1].minions;
+      expect(minions).toHaveLength(2);
+      expect(minions.filter((m) => m.heals)).toHaveLength(1);
+      expect(minions.find((m) => m.heals)).toMatchObject({ range: 10, maxHp: 20 });
+      expect(minions.find((m) => !m.heals)!.heals).toBeUndefined();
+    });
 
     it('beschwört einen Bogenschützen mit Reichweite 14', () => {
       const after = botPlan(withHand(['summon-archer'], cost('summon-archer')), 1);

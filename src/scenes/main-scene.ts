@@ -199,6 +199,7 @@ export function drawMinions(g: Phaser.GameObjects.Graphics, state: MatchState, s
       if (owner === HUMAN && skipHumanId === minion.id) continue;
       const point = minionPoint(owner, minion);
       g.fillStyle(owner === HUMAN ? COLORS.human : COLORS.bot, 1).fillCircle(point.x, point.y, MINION_RADIUS);
+      if (minion.heals) g.fillStyle(COLORS.valid, 1).fillCircle(point.x, point.y, MINION_RADIUS / 2);
     }
   }
 }

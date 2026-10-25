@@ -9,6 +9,7 @@ import { lineCapacity, LINE_COUNT, MAX_LINE_LEVEL, type MatchState, type PlayerI
 const PRIORITY = [
   'summon-minion',
   'summon-archer',
+  'summon-healer',
   'tower-hp',
   'line-upgrade',
   'minion-upgrade-line',

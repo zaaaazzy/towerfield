@@ -218,6 +218,8 @@ export function playCard(
         damage: def.damage + line!.bonus.damage,
         range: def.range ?? MINION_RANGE,
         speed: def.speed ?? MINION_SPEED,
+        maxHp: def.hp + line!.bonus.hp,
+        ...(def.role === 'healer' ? { heals: true } : {}),
       };
       player.nextMinionId += 1;
       player.minions.push(minion);
