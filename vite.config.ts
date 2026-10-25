@@ -7,6 +7,8 @@ const previewPort = Number(process.env.REVIEW_FRONTEND_PORT ?? 4173);
 const devPort = Number(process.env.GAME_DEV_PORT ?? 5180);
 
 export default defineConfig({
+  // Relative Asset-Pfade: GitHub Pages liefert das Spiel unter /towerfield/ aus.
+  base: './',
   // host: true – auch im Netzwerk erreichbar (Handy, Tablet: http://<IP des Rechners>:5180). Namen wie
   // rechner.local zusätzlich freigeben; IP-Adressen und localhost erlaubt Vite ohnehin.
   server: { host: true, port: devPort, strictPort: true, allowedHosts: ['.local'] },
