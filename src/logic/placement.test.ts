@@ -11,7 +11,19 @@ import {
   setReady,
   undoSummon,
 } from './match';
-import { firstFreeSlot, isSlotFree, isValidSlot, PLACEMENT_ZONE_END, SLOT_SPACING, slotPosition } from './placement';
+import {
+  dropTargetAt,
+  firstFreeSlot,
+  isSlotFree,
+  isValidSlot,
+  type LineGeometry,
+  PLACEMENT_ZONE_END,
+  positionToY,
+  SLOT_SPACING,
+  slotAtPosition,
+  slotPosition,
+  yToPosition,
+} from './placement';
 
 /** Match mit Beschwörungskarten und viel Energie, damit nur die Platzierung getestet wird. */
 function setup(): MatchState {
@@ -165,5 +177,40 @@ describe('Rückgängig machen vor „Bereit“', () => {
     state.players[0].minions.push({ id: 50, line: 0, position: 60, hp: 5, damage: 1 });
     expect(undoSummon(state, 0, 50)).toMatchObject({ ok: false, reason: 'no-such-minion' });
     expect(moveMinion(state, 0, 50, 0, 0)).toMatchObject({ ok: false, reason: 'no-such-minion' });
+  });
+});
+
+describe('Zeiger → Line und Slot', () => {
+  const geometry: LineGeometry = { lineCenters: [60, 180, 300], lineHalfWidth: 50, ownTowerY: 400, enemyTowerY: 90 };
+  const counts = [3, 3, 3];
+
+  it('rechnet Position und y ineinander um', () => {
+    for (const position of [0, 2, 14, 100]) {
+      expect(yToPosition(positionToY(position, geometry), geometry)).toBeCloseTo(position);
+    }
+  });
+
+  it('trifft einen Slot genau und mit Toleranz', () => {
+    const y = positionToY(slotPosition(1), geometry);
+    expect(dropTargetAt(180, y, geometry, counts)).toEqual({ line: 1, slot: 1 });
+    expect(dropTargetAt(190, y + 2, geometry, counts)).toEqual({ line: 1, slot: 1 });
+  });
+
+  it('trifft eine Line ohne Slot (hinter den vorhandenen Slots oder zwischen Zonen)', () => {
+    expect(dropTargetAt(60, positionToY(slotPosition(3), geometry), geometry, counts)).toEqual({ line: 0, slot: null });
+    expect(dropTargetAt(300, positionToY(60, geometry), geometry, counts)).toEqual({ line: 2, slot: null });
+  });
+
+  it('liefert null außerhalb aller Lines', () => {
+    const y = positionToY(slotPosition(0), geometry);
+    expect(dropTargetAt(120, y, geometry, counts)).toBeNull();
+    expect(dropTargetAt(60, 600, geometry, counts)).toBeNull();
+    expect(dropTargetAt(60, 20, geometry, counts)).toBeNull();
+  });
+
+  it('slotAtPosition kennt nur gültige Slots', () => {
+    expect(slotAtPosition(slotPosition(2), 3)).toBe(2);
+    expect(slotAtPosition(slotPosition(3), 3)).toBeNull();
+    expect(slotAtPosition(-10, 3)).toBeNull();
   });
 });
