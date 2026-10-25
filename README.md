@@ -26,7 +26,9 @@ von Minions [`docs/anwendung-minion-drag-and-drop.md`](docs/anwendung-minion-dra
 mit ihren Tests [`docs/anwendung-handlimit.md`](docs/anwendung-handlimit.md). Die Tests der Bot-Strategie beschreibt
 [`docs/anwendung-bot-tests.md`](docs/anwendung-bot-tests.md). Die Tower-Reichweite (20) beschreibt
 [`docs/anwendung-tower-reichweite.md`](docs/anwendung-tower-reichweite.md). Das Minion-Tempo (`speed`, Brocken 8)
-beschreibt [`docs/anwendung-minion-tempo.md`](docs/anwendung-minion-tempo.md).
+beschreibt [`docs/anwendung-minion-tempo.md`](docs/anwendung-minion-tempo.md). Die E2E-Tests für vollständige
+Spielabläufe (fester Seed per `?seed=`, Hilfen, Schnellvorlauf) beschreibt
+[`docs/anwendung-e2e-gameplay.md`](docs/anwendung-e2e-gameplay.md).
 
 ## Befehle
 
