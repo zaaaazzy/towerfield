@@ -19,6 +19,7 @@ Dieses Projekt ist ein Browser-Spiel mit Phaser 3, TypeScript und Vite.
 ## Tests
 
 - Jede neue Regel bekommt einen Unit-Test neben der Datei (`src/logic/<name>.test.ts`).
+- Vor Abgabe neuer Regeln `npm run test:coverage` ausführen und Lücken in `src/logic/` schliessen.
 - `npm run build` (Typprüfung + Build), `npm test` und `npm run test:smoke` müssen grün sein.
 - Der Smoke-Test (`e2e/smoke.spec.ts`) prüft, dass der Canvas zeichnet und keine Konsolenfehler auftreten. Neue
   Szenen dort mit aufnehmen, wenn sie ohne Eingabe erreichbar sind.

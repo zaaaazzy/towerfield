@@ -38,8 +38,21 @@ Spielabläufe (fester Seed per `?seed=`, Hilfen, Schnellvorlauf) beschreibt
 | `npm run dev` | Entwicklungsserver mit Hot Reload auf http://localhost:5180 (anderer Port: `GAME_DEV_PORT`) |
 | `npm run build` | Typprüfung und Produktions-Build nach `dist/` |
 | `npm test` | Unit-Tests der Spiellogik (Vitest, ohne Browser) |
+| `npm run test:coverage` | Unit-Tests mit Coverage-Messung für `src/logic/` (Konsolentabelle, HTML-Bericht in `coverage/`) |
 | `npm run test:smoke` | Baut und prüft im Browser (Playwright), dass der Canvas zeichnet und keine Konsolenfehler auftreten |
 | `npm run review` | Baut und liefert den Stand aus (Review-Container von AIdeation, Port aus `REVIEW_FRONTEND_PORT`) |
+
+### Testabdeckung
+
+`npm run test:coverage` misst mit `@vitest/coverage-v8` nur `src/logic/**/*.ts` (ohne `*.test.ts`) und gibt
+Statements, Branches, Functions und Lines pro Datei aus. Den HTML-Bericht öffnet man mit `open coverage/index.html`
+(macOS; sonst die Datei im Browser öffnen). `coverage/` ist von Git ignoriert. Es gibt keine erzwungenen Schwellenwerte;
+Vorschlag für später: 80 % bei Statements, Lines und Functions, 70 % bei Branches.
+
+Gemessene Werte pro Datei: **noch nicht erhoben.** `@vitest/coverage-v8` konnte in der Agent-Umgebung nicht installiert
+werden (`npm install` gesperrt). Nach `npm install -D @vitest/coverage-v8@^5.0.5` und `npm run test:coverage` hier die
+Tabelle eintragen. Für `balance-sim.test.ts` (1000 Matches) die Laufzeit unter Coverage prüfen und bei Bedarf das
+Test-Timeout erhöhen.
 
 ### Dev-Szene Balancing
 
