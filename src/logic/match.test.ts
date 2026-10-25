@@ -20,11 +20,13 @@ import {
   moveMinion,
   type PlayerIndex,
   playCard,
+  respawnSurvivors,
   setReady,
   START_HAND,
   undoSummon,
 } from './match';
 import { LINE_LENGTH, MINION_RANGE, TICK_MS } from './combat';
+import { PLACEMENT_ZONE_END, slotPosition } from './placement';
 
 /** Index der ersten Handkarte mit dieser ID, im Test garantiert vorhanden (sonst Testfehler). */
 function find(state: MatchState, player: PlayerIndex, id: string): number {
@@ -571,5 +573,75 @@ describe('Determinismus', () => {
 
   it('gibt dem Bot gegen einen Spieler, der nichts spielt, einen Vorteil', () => {
     expect(playMatch(5, 1000 / 60, 'pass').outcome).toBe('player1');
+  });
+});
+
+describe('Respawn der Überlebenden', () => {
+  const minion = (id: number, line: number, position: number, hp = 20) => ({
+    id,
+    line,
+    position,
+    hp,
+    maxHp: 30,
+    damage: 7,
+    range: MINION_RANGE,
+    speed: 5,
+  });
+
+  function withMinions(minions: ReturnType<typeof minion>[]): MatchState {
+    const state = structuredClone(createMatch(3));
+    state.players[0].minions = minions;
+    state.players[0].placements = minions.map((m) => ({ minionId: m.id, cardId: 'summon-minion' }));
+    return state;
+  }
+
+  it('setzt Überlebende nach id aufsteigend auf die niedrigsten freien Slots ihrer Line', () => {
+    const state = withMinions([minion(5, 1, 40), minion(2, 1, 33), minion(9, 0, 12), minion(3, 1, 50)]);
+    respawnSurvivors(state.players[0]);
+    const byId = (id: number) => state.players[0].minions.find((m) => m.id === id)!;
+    expect(byId(2).position).toBe(slotPosition(0));
+    expect(byId(3).position).toBe(slotPosition(1));
+    expect(byId(5).position).toBe(slotPosition(2));
+    expect(byId(9).position).toBe(slotPosition(0));
+  });
+
+  it('behält Line und Werte, entfernt Tote und bleibt in der Zone', () => {
+    const state = withMinions([minion(1, 2, 45), minion(2, 2, 10, 0)]);
+    respawnSurvivors(state.players[0]);
+    expect(state.players[0].minions).toEqual([{ ...minion(1, 2, 45), position: slotPosition(0) }]);
+    expect(state.players[0].minions[0]!.position).toBeLessThanOrEqual(PLACEMENT_ZONE_END);
+  });
+
+  it('leert in Runde 2 placements und setzt Überlebende beider Spieler zurück', () => {
+    let state = withMinions([minion(1, 0, 20)]);
+    state.players[1].minions = [minion(1, 0, 20)];
+    state = advance(setReady(setReady(state, 0), 1), COMBAT_TICKS * TICK_MS);
+    expect(state.round).toBe(2);
+    expect(state.players[0].placements).toEqual([]);
+    for (const player of state.players) {
+      for (const m of player.minions) {
+        expect(m.position).toBe(slotPosition(0));
+        expect(m.position).toBeLessThanOrEqual(PLACEMENT_ZONE_END);
+      }
+    }
+  });
+
+  it('entfernt bei übervoller Line keinen Minion und bleibt in der Zone', () => {
+    const state = withMinions(Array.from({ length: 12 }, (_, i) => minion(i + 1, 0, 40 + i)));
+    respawnSurvivors(state.players[0]);
+    expect(state.players[0].minions).toHaveLength(12);
+    for (const m of state.players[0].minions) expect(m.position).toBeLessThanOrEqual(PLACEMENT_ZONE_END);
+    const first = state.players[0].minions.slice(0, 8).map((m) => m.position);
+    expect(new Set(first).size).toBe(8);
+  });
+
+  it('liefert bei gleichem Seed nach Runde 2 identische Positionen', () => {
+    const run = () => {
+      let state = createMatch(7);
+      state = botPlan(botPlan(state, 0), 1);
+      state = advance(state, COMBAT_TICKS * TICK_MS);
+      return state.players.map((p) => p.minions.map((m) => [m.id, m.line, m.position]));
+    };
+    expect(run()).toEqual(run());
   });
 });
