@@ -61,11 +61,16 @@ Schicht überspringt sie, das Spiel läuft still weiter. Der Smoke-Test prüft d
 
 | Datei | Art | Quelle | Lizenz |
 |---|---|---|---|
-| `public/assets/audio/melee-hit.wav`, `arrow.wav`, `lightning.wav`, `shield-block.wav`, `heal.wav`, `summon.wav`, `minion-death.wav`, `explosion.wav`, `tower-hit.wav`, `tower-down.wav`, `card-play.wav`, `round-start.wav`, `round-end.wav`, `victory.wav`, `defeat.wav` | Effekte | selbst erzeugt mit `tools/generate-sfx.mjs` (Sinus, Rauschen, Hüllkurven; keine fremden Samples) | CC0 1.0 (gemeinfrei) |
+| `public/assets/audio/lightning.wav`, `heal.wav`, `summon.wav`, `explosion.wav`, `victory.wav`, `defeat.wav` | Effekte (Magie, Fanfaren) | selbst erzeugt mit `tools/generate-sfx.mjs` (Sinus, Rauschen, Hüllkurven) | CC0 1.0 (gemeinfrei) |
+| `public/assets/audio/melee-hit.wav` (`impactMetal_light_001`), `arrow.wav` (`impactWood_medium_002`), `shield-block.wav` (`impactPlate_heavy_001`), `tower-hit.wav` (`impactPlank_medium_001`), `tower-down.wav` (`impactMining_000`), `minion-death.wav` (`impactSoft_heavy_001`) | Effekte (Holz, Metall) | Kenney „Impact Sounds“, https://kenney.nl/assets/impact-sounds | CC0 1.0 (gemeinfrei) |
+| `public/assets/audio/card-play.wav` (`bookPlace1`), `round-start.wav` (`impactBell_heavy_001`), `round-end.wav` (`impactBell_heavy_002`) | Effekte (Karte, Glocke) | Kenney „RPG Audio“ bzw. „Impact Sounds“, https://kenney.nl/assets/rpg-audio | CC0 1.0 (gemeinfrei) |
 | `public/assets/audio/tavern-loop.m4a` | Musik 1: „Medieval: The Old Tower Inn“ (Loop-Version, 50 s) | RandomMind, https://opengameart.org/content/medieval-the-old-tower-inn | CC0 1.0 (gemeinfrei) |
 | `public/assets/audio/tavern-loop-2.m4a` | Musik 2: „Medieval: The Bard's Tale“ (Loop-Version, 58 s) | RandomMind, https://opengameart.org/content/medieval-the-bards-tale | CC0 1.0 (gemeinfrei) |
 
-**Effekte erzeugen:** `npm run audio:sfx` schreibt die 15 WAV-Dateien (mono, 22,05 kHz, 16 Bit, zusammen rund
+**Kenney-Samples:** aus Ogg mit `afconvert -f WAVE -d LEI16@22050 -c 1` umgewandelt und auf 80 % Spitzenpegel
+normiert (wie die erzeugten Effekte). `tools/generate-sfx.mjs` überspringt diese Schlüssel (`SAMPLED`).
+
+**Effekte erzeugen:** `npm run audio:sfx` schreibt die übrigen 6 WAV-Dateien (mono, 22,05 kHz, 16 Bit, zusammen rund
 410 KB) deterministisch nach `public/assets/audio/`. Danach mit ins Repository nehmen.
 
 **Musik:** Zwei Stücke wechseln sich ab (`MUSIC_KEYS` in `audio.ts`): nach dem Ende des einen startet das andere.

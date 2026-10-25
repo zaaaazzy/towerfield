@@ -69,7 +69,7 @@ Frühere Änderung (Grafik):
 | Handkarten | einfache Rechtecke | Rahmen, Name, Kosten-Kristall, Bild, Text, Banner; Typ durch Farbe und Symbol | `card-view.ts`, `card-style.ts` |
 | Hover/Auswahl | – | Anheben (bis 110 %), Schatten, Leuchten; Ausspielen animiert | `card-view.ts`, `main-scene.ts` |
 | Feld | flach | Tower, Minions, Bauplätze mit Schatten, Leuchten, Teamfarben | `field-view.ts` |
-| Effekte | keine | Partikel, Ringe, Schadenszahlen, Kamerawackeln; Ereignisse aus `diffFx` | `effects.ts`, `fx-events.ts` |
+| Effekte | keine | Pfeilflug, Schwerthieb, Blitz je Schadensquelle; Holzsplitter, Staub, Ringe, Schadenszahlen, Kamerawackeln; Ereignisse aus `diffFx` | `effects.ts`, `fx-events.ts` |
 | Hilfsmodule | `LabelPool`, `drawBoard`, `drawMinions` in `main-scene.ts` | `labels.ts` und `field-view.ts` | `src/scenes/` |
 | E2E | – | `e2e/grafik.spec.ts` liest das Feld `lifts` der Szene | `e2e/grafik.spec.ts` |
 
