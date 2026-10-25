@@ -1,5 +1,9 @@
-import { expect, test } from '@playwright/test';
-import { START_HAND } from '../src/logic/match';
+import { expect, type Page, test } from '@playwright/test';
+import { START_HAND, MAX_ROUNDS } from '../src/logic/match';
+import { decodeMatch, encodeMatch, type RecordedMatch, replayRecorded } from '../src/logic/match-record';
+import { playScriptedMatch } from '../src/logic/match-record-fixture';
+import { createRecordedReplay, describeEvent, PLAY_PAUSE_MS, stepReplay } from '../src/logic/replay';
+import { collectErrors, fastForwardCombat, openGame, readState, tap, tapReady } from './helpers';
 
 /** Was der Test von der Szene liest (nur Typ, der Code läuft im Browser). */
 interface MainSceneView {
@@ -226,6 +230,123 @@ test('?replay mit ungültigem Wert fällt auf die MainScene zurück, ohne Konsol
   await page.goto('/?replay=abc');
   await page.waitForFunction(() => window.game?.scene.isActive('main') && window.game.loop.frame > 5);
   expect(await page.evaluate(() => window.game!.scene.scenes.map((scene) => scene.scene.key))).toEqual(['main']);
+  expect(errors).toEqual([]);
+});
+
+/** Was die Tests zu aufgezeichneten Replays von der Szene lesen. */
+interface RecordedReplayView {
+  current: { events: unknown[]; aborted: { reason: string; index: number } | null; script: unknown[] | null };
+  children: { list: { type: string; visible: boolean; text?: string }[] };
+}
+
+const visibleTexts = (page: Page) =>
+  page.evaluate(() =>
+    (window.game!.scene.getScene('replay') as unknown as RecordedReplayView).children.list
+      .filter((c) => c.type === 'Text' && c.visible)
+      .map((c) => c.text ?? ''),
+  );
+
+test('?replay=<seed>&moves=<gültig>: die Replay-Szene spielt die aufgezeichneten Züge der Reihe nach, ohne Konsolenfehler', async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  const { record } = playScriptedMatch(7);
+  // Die ersten vier Kommentare, wie die Logik sie in dieser Reihenfolge erzeugt.
+  let expected = createRecordedReplay(record);
+  while (expected.events.length < 4) expected = stepReplay(expected, PLAY_PAUSE_MS);
+  const wanted = expected.events.slice(0, 4).map(describeEvent);
+
+  await page.goto(`/?replay=7&moves=${encodeMatch(record)}`);
+  await expect(page.locator('#game canvas')).toBeVisible();
+  await page.waitForFunction(() => window.game?.scene.isActive('replay') && window.game.loop.frame > 10);
+  expect(await page.evaluate(() => window.game!.scene.isActive('main'))).toBeFalsy();
+
+  await page.waitForFunction(
+    () => (window.game!.scene.getScene('replay') as unknown as RecordedReplayView).current.events.length >= 4,
+    undefined,
+    { timeout: 15_000 },
+  );
+  const state = await page.evaluate(() => {
+    const view = window.game!.scene.getScene('replay') as unknown as RecordedReplayView;
+    return { aborted: view.current.aborted, scripted: view.current.script !== null };
+  });
+  expect(state).toEqual({ aborted: null, scripted: true });
+  const texts = await visibleTexts(page);
+  for (const text of wanted) expect(texts).toContain(text);
+  expect(texts).toContain('Line 1 · Stufe 1');
+  expect(errors).toEqual([]);
+});
+
+test('?replay=<seed>&moves=<ungültig>: kein Konsolenfehler, das Replay bleibt mit Hinweis stehen', async ({ page }) => {
+  const errors = collectErrors(page);
+
+  // Nicht lesbare Daten: sofort ein Hinweis, Tippen führt zu einem neuen Spiel.
+  await page.goto('/?replay=7&moves=v9.kaputt');
+  await page.waitForFunction(() => window.game?.scene.isActive('replay') && window.game.loop.frame > 10);
+  await expect.poll(async () => (await visibleTexts(page)).includes('Replay gestoppt')).toBe(true);
+  expect(await visibleTexts(page)).toContain('Replay nicht möglich: Die Zugdaten sind ungültig.');
+  await page.locator('#game canvas').click();
+  await page.waitForFunction(() => window.game?.scene.isActive('main') && !window.game.scene.isActive('replay'));
+
+  // Lesbar, aber regelwidrig (sechsmal dieselbe Karte): das Replay bricht an der ersten ungültigen Aktion ab.
+  await page.goto('/?replay=7&moves=v1.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0');
+  await page.waitForFunction(() => window.game?.scene.isActive('replay') && window.game.loop.frame > 10);
+  await page.waitForFunction(
+    () => (window.game!.scene.getScene('replay') as unknown as RecordedReplayView).current.aborted !== null,
+    undefined,
+    { timeout: 15_000 },
+  );
+  await expect.poll(async () => (await visibleTexts(page)).includes('Replay gestoppt')).toBe(true);
+  expect((await visibleTexts(page)).some((text) => text.startsWith('Replay abgebrochen bei Zug'))).toBe(true);
+
+  // Leerer Wert und Quatsch ohne Punkte und Ziffern.
+  for (const moves of ['', '%00%FF', 'v1.p10-']) {
+    await page.goto(`/?replay=7&moves=${moves}`);
+    await page.waitForFunction(() => window.game?.scene.isActive('replay') && window.game.loop.frame > 5);
+    await expect.poll(async () => (await visibleTexts(page)).includes('Replay gestoppt')).toBe(true);
+  }
+  expect(errors).toEqual([]);
+});
+
+test('Nach Spielende zeigt die MainScene eine Teilen-URL, die dasselbe Match als Replay öffnet', async ({ page }) => {
+  const errors = collectErrors(page);
+  await openGame(page, 7);
+  // Alle Runden ohne eigene Karten, nur „Bereit“; das Match endet nach höchstens MAX_ROUNDS Runden.
+  for (let round = 0; round < MAX_ROUNDS && (await readState(page)).phase === 'planning'; round += 1) {
+    await tapReady(page);
+    await expect.poll(async () => (await readState(page)).phase).toBe('combat');
+    await fastForwardCombat(page);
+  }
+  expect((await readState(page)).phase).toBe('over');
+  const record = await page.evaluate(
+    () => (window.game!.scene.getScene('main') as unknown as { currentRecord: unknown }).currentRecord,
+  );
+  const url = new URL(`/?replay=7&moves=${encodeMatch(record as RecordedMatch)}`, page.url());
+
+  // Schließen der Statistik, dann steht die URL (in Zeilen umbrochen) im Ende-Bild.
+  await tap(page, 180, 524);
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        (window.game!.scene.getScene('main') as unknown as RecordedReplayView).children.list
+          .filter((c) => c.type === 'Text' && c.visible)
+          .map((c) => c.text ?? '')
+          .join('\n')
+          .replace(/\n/g, ''),
+      ),
+    )
+    .toContain(url.search);
+
+  // Der Link spielt dasselbe Match nach und endet mit demselben Ergebnis.
+  const finished = replayRecorded(decodeMatch(7, encodeMatch(record as RecordedMatch))!);
+  expect(finished.ok && finished.state.outcome).toBe((await readState(page)).outcome);
+  await page.goto(url.toString());
+  await page.waitForFunction(() => window.game?.scene.isActive('replay') && window.game.loop.frame > 10);
+  await page.waitForFunction(
+    () => (window.game!.scene.getScene('replay') as unknown as RecordedReplayView).current.events.length >= 2,
+    undefined,
+    { timeout: 15_000 },
+  );
   expect(errors).toEqual([]);
 });
 
