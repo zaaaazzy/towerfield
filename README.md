@@ -35,6 +35,15 @@ Spielabläufe (fester Seed per `?seed=`, Hilfen, Schnellvorlauf) beschreibt
 [`docs/anwendung-e2e-gameplay.md`](docs/anwendung-e2e-gameplay.md). Den Kartenfilter für die Hand im Match beschreibt
 [`docs/anwendung-kartenfilter.md`](docs/anwendung-kartenfilter.md).
 
+## Ton
+
+Soundeffekte für Kampf und Aktionen (Treffer, Pfeil, Blitz, Schild, Heilung, Beschwörung, Tod, Karte, Runde, Sieg,
+Niederlage) und eine Tavernen-Musikschleife, die nach der ersten Eingabe startet. Oben links schaltet „Ton an / Stumm“
+alles um, oben rechts stellen zwei Regler Musik und Effekte getrennt ein; die Werte bleiben im `localStorage`. Das
+Replay spielt die Effekte mit leiserer Musik. Dateien, Quellen und Lizenzen:
+[`docs/anwendung-audio.md`](docs/anwendung-audio.md). Die Musikdatei `tavern-loop.ogg` fehlt noch; ohne sie läuft das
+Spiel nur mit Effekten.
+
 ## Befehle
 
 | Befehl | Zweck |
@@ -44,6 +53,7 @@ Spielabläufe (fester Seed per `?seed=`, Hilfen, Schnellvorlauf) beschreibt
 | `npm test` | Unit-Tests der Spiellogik (Vitest, ohne Browser) |
 | `npm run test:coverage` | Unit-Tests mit Coverage-Messung für `src/logic/` (Konsolentabelle, HTML-Bericht in `coverage/`) |
 | `npm run test:smoke` | Baut und prüft im Browser (Playwright), dass der Canvas zeichnet und keine Konsolenfehler auftreten |
+| `npm run audio:sfx` | Erzeugt die Soundeffekte (WAV) unter `public/assets/audio/` neu (siehe [Ton](docs/anwendung-audio.md)) |
 | `npm run review` | Baut und liefert den Stand aus (Review-Container von AIdeation, Port aus `REVIEW_FRONTEND_PORT`) |
 
 ### Testabdeckung
