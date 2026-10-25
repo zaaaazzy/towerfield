@@ -35,7 +35,13 @@ export function playScriptedMatch(seed: number): PlayedMatch {
       for (const cardId of [...state.players[0].hand]) {
         const def = getCardDef(cardId);
         const lanes = freeLanes();
-        act({ type: 'play', cardId, line: def.target === 'line' ? lanes[state.round % lanes.length]! : null });
+        const minionId = state.players[0].minions.find((m) => m.hp > 0)?.id;
+        act({
+          type: 'play',
+          cardId,
+          line: def.target === 'line' ? lanes[state.round % lanes.length]! : null,
+          ...(def.target === 'minion' && minionId !== undefined ? { minionId } : {}),
+        });
       }
       const placements = state.players[0].placements;
       if (placements.length > 0) {

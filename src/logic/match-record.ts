@@ -3,10 +3,11 @@
  * zurücknehmen, bereit) samt Runde, dazu ein kompaktes URL-Format und das Nachspielen mit Prüfung.
  * Ohne Phaser, DOM und Canvas. Die Regeln kommen unverändert aus `match.ts`; hier wird nur mitgeschrieben.
  *
- * Format (Version 3, nur Zeichen `0-9 a-z . -`, damit nichts maskiert werden muss):
- *   `v3` gefolgt von Aktionen, je mit `.` davor. Eine Aktion beginnt mit Typbuchstabe, Runde (1 Ziffer) und Spieler
+ * Format (Version 5, nur Zeichen `0-9 a-z . -`, damit nichts maskiert werden muss):
+ *   `v5` gefolgt von Aktionen, je mit `.` davor. Eine Aktion beginnt mit Typbuchstabe, Runde (1 Ziffer) und Spieler
  *   (0/1), danach Felder mit `-`:
- *   `p<R><P>-<Kartenindex>[-<Lane>]` Karte spielen · `m<R><P>-<Minion>-<Lane>-<Slot>` verschieben ·
+ *   `p<R><P>-<Kartenindex>[-<Lane>]` Karte spielen (bei Karten mit Ziel-Minion steht an der Stelle der Lane die
+ *   Minion-Id) · `m<R><P>-<Minion>-<Lane>-<Slot>` verschieben ·
  *   `u<R><P>-<Minion>` zurücknehmen · `r<R><P>` bereit.
  * Der Kartenindex ist die Position in `CARD_DEFS`. Ändern sich Regeln oder Kartenliste, muss `RECORD_VERSION` steigen,
  * damit alte Links als ungültig erkannt werden (der Test in `match-record.test.ts` hält die Kartenliste fest).
@@ -30,17 +31,18 @@ import {
 } from './match';
 
 /**
- * Version 3: Tower-Spezialisierungskarten (`tower-lightning`, `tower-shield`) ändern Kartenliste und Deck; Links aus
- * Version 2 gelten nicht mehr. Version 2 war das horizontale Lane-Layout (Lane-Indizes 0 bis 4, `line-upgrade` ohne Ziel).
+ * Version 5: Tower-Spezialisierungskarten (`tower-lightning`, `tower-shield`) ändern Kartenliste und Deck. Version 4
+ * brachte `buff-minion` (der Zug trägt statt der Lane die Minion-Id), Version 3 `summon-destroyer`, Version 2 das
+ * horizontale Lane-Layout. Links aus älteren Versionen gelten nicht mehr, weil sie sonst ein anderes Match abspielten.
  */
-export const RECORD_VERSION = 3;
+export const RECORD_VERSION = 5;
 /** Obergrenze für Länge und Aktionszahl beim Dekodieren; ein Match mit 8 Runden bleibt weit darunter. */
 export const MAX_MOVES_LENGTH = 4000;
 const MAX_ACTIONS = 800;
 
 /** Der Teil einer Aktion, den der Spieler bestimmt; Runde und Spieler ergänzt `performAction`. */
 export type ActionBody =
-  | { type: 'play'; cardId: string; line: number | null }
+  | { type: 'play'; cardId: string; line: number | null; minionId?: number }
   | { type: 'move'; minionId: number; line: number; slot: number }
   | { type: 'undo'; minionId: number }
   | { type: 'ready' };
@@ -79,8 +81,8 @@ export function applyAction(state: MatchState, action: RecordedAction): ActionRe
     case 'play': {
       const handIndex = state.players[player].hand.indexOf(action.cardId);
       if (handIndex < 0) return fail(state, 'no-such-card');
-      if (getCardDef(action.cardId).target === 'none' && action.line !== null) return fail(state, 'invalid-line');
-      return playCard(state, player, handIndex, action.line ?? undefined);
+      if (getCardDef(action.cardId).target !== 'line' && action.line !== null) return fail(state, 'invalid-line');
+      return playCard(state, player, handIndex, action.line ?? undefined, undefined, action.minionId);
     }
     case 'move':
       return moveMinion(state, player, action.minionId, action.line, action.slot);
@@ -124,6 +126,7 @@ export function botPlanRecorded(
       player,
       cardId: move.cardId,
       line: move.line ?? null,
+      ...(move.minionId === undefined ? {} : { minionId: move.minionId }),
     };
     recorded = appendAction(recorded, action);
     current = move.state;
@@ -174,7 +177,8 @@ function encodeAction(action: RecordedAction): string {
     case 'play': {
       const index = CARD_DEFS.findIndex((def) => def.id === action.cardId);
       if (index < 0) throw new Error(`Unbekannte Karte: ${action.cardId}`);
-      return `${head}-${index}${action.line === null ? '' : `-${action.line}`}`;
+      const target = action.minionId ?? action.line;
+      return `${head}-${index}${target === null ? '' : `-${target}`}`;
     }
     case 'move':
       return `${head}-${action.minionId}-${action.line}-${action.slot}`;
@@ -213,6 +217,9 @@ function decodeAction(token: string): RecordedAction | null {
       if (numbers.length < 1 || numbers.length > 2) return null;
       const def = CARD_DEFS[first];
       if (!def) return null;
+      if (def.target === 'minion') {
+        return numbers.length === 2 ? { type: 'play', round, player, cardId: def.id, line: null, minionId: second } : null;
+      }
       if (numbers.length === 2 && second >= LINE_COUNT) return null;
       return { type: 'play', round, player, cardId: def.id, line: numbers.length === 2 ? second : null };
     }

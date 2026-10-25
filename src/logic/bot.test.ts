@@ -142,6 +142,18 @@ describe('Bot', () => {
       expect(minions.find((m) => !m.heals)!.heals).toBeUndefined();
     });
 
+    it('beschwört einen Zerstörer mit Explosionswerten, andere Minions ohne', () => {
+      const after = botPlan(
+        withHand(['summon-destroyer', 'summon-minion'], cost('summon-destroyer') + cost('summon-minion')),
+        1,
+      );
+      const minions = after.players[1].minions;
+      expect(minions).toHaveLength(2);
+      expect(minions.find((m) => m.explodes)).toMatchObject({ explodes: { radius: 10, damage: 15 }, maxHp: 40 });
+      expect(minions.filter((m) => m.explodes)).toHaveLength(1);
+      expect(minions.some((m) => m.heals)).toBe(false);
+    });
+
     it('beschwört einen Bogenschützen mit Reichweite 14', () => {
       const after = botPlan(withHand(['summon-archer'], cost('summon-archer')), 1);
       expect(after.players[1].minions).toHaveLength(1);
@@ -387,6 +399,47 @@ describe('Bot', () => {
       const gain = (getCardDef('minion-upgrade-line') as { hp: number }).hp;
       const after = botPlan(state, 1);
       expect(after.players[1].lines.map((line) => line.bonus.hp)).toEqual([0, 10 + gain, 5, 0, 0]);
+    });
+  });
+
+  describe('buff-minion', () => {
+    it('stärkt den lebenden Minion mit dem größten maxHp (bei Gleichstand die kleinste Id) und meldet seine Id', () => {
+      const state = withHand(['buff-minion'], cost('buff-minion'));
+      addMinions(state, 0, 3);
+      state.players[1].minions[1]!.maxHp = 50;
+      state.players[1].minions[2]!.maxHp = 50;
+      state.players[1].minions[0]!.maxHp = 80;
+      state.players[1].minions[0]!.hp = 0;
+      const move = botStep(state, 1);
+      expect(move).toMatchObject({ cardId: 'buff-minion', line: undefined, minionId: 101 });
+      expect(move!.state.players[1].minions.find((m) => m.id === 101)).toMatchObject({ maxHp: 75, damage: 9 });
+      expect(move!.state.players[1].minions.find((m) => m.id === 102)).toMatchObject({ maxHp: 50, damage: 6 });
+    });
+
+    it('nimmt hp als Größe, wenn ein Minion kein maxHp hat', () => {
+      const state = withHand(['buff-minion'], cost('buff-minion'));
+      addMinions(state, 0, 2);
+      state.players[1].minions[1]!.hp = 40;
+      expect(botStep(state, 1)).toMatchObject({ minionId: 101 });
+    });
+
+    it('spielt die Karte nicht, wenn kein lebender eigener Minion existiert', () => {
+      const state = withHand(['buff-minion'], cost('buff-minion'));
+      expect(botStep(state, 1)).toBeNull();
+      addMinions(state, 0, 1);
+      state.players[1].minions[0]!.hp = 0;
+      const after = botPlan(state, 1);
+      expect(after.players[1].hand).toEqual(['buff-minion']);
+      expect(after.players[1].energy).toBe(cost('buff-minion'));
+      expect(after.ready[1]).toBe(true);
+    });
+
+    it('beschwört erst und stärkt dann den neuen Minion, weil die Beschwörung höher priorisiert ist', () => {
+      const state = withHand(['buff-minion', 'summon-minion'], cost('buff-minion') + cost('summon-minion'));
+      const after = botPlan(state, 1);
+      expect(after.players[1].hand).toEqual([]);
+      expect(after.players[1].minions).toHaveLength(1);
+      expect(after.players[1].minions[0]).toMatchObject({ maxHp: 45, hp: 45, damage: 9 });
     });
   });
 

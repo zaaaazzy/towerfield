@@ -127,7 +127,9 @@ Mobiles 1-gegen-1-Tower-Defense-Spiel mit Karten im Browser (Phaser 3, TypeScrip
 
 - Hochformat 360 × 640, Touch und Maus, `Phaser.Scale.FIT`.
 - Lokal gegen einen deterministischen Bot. Kein Online-Spiel, keine Accounts, keine Töne. Die Grafik entsteht komplett im Code (Abschnitt „Grafik“).
-- Kampf ohne Zufall. Der Seed legt nur die Kartenreihenfolge fest; beide Spieler erhalten dieselben Karten.
+- Kampf ohne Zufall. Der Seed legt die Kartenreihenfolge und (über einen eigenen Event-Seed) die Runden-Ereignisse
+  der Runden 3 und 6 fest (`src/logic/round-events.ts`, siehe `anwendung-rundenereignisse.md`); beide Spieler erhalten
+  dieselben Karten und dasselbe Ereignis.
 - Phaser bleibt auf Version 3 (API-Doku: https://newdocs.phaser.io/docs/3.90.0).
 
 Weiterführend unter `docs/`: `designkonzept.md` (Soll-Regeln) und die `anwendung-*.md` je Auftrag (Bogenschütze,
@@ -169,9 +171,9 @@ Minion-Tempo, Balance-Szene, E2E, Minion-Statistik, Replay, Kartenfilter, Heiler
 | Sieg | Nach jedem Kampf-Tick: hat ein Spieler keinen lebenden Tower mehr, endet das Match sofort; der andere gewinnt. Haben beide in demselben Tick keinen mehr, ist es unentschieden. Nach den 400 Ticks von Runde 8 gewinnt, wer mehr Tower-LP (Summe aller Tower aller freien Lanes) hat; gleiche Summe ist unentschieden. Vor Runde 8 zählt der Tower-LP-Vergleich nie. |
 
 Deck-Länge: `START_HAND + DRAW_PER_ROUND * (MAX_ROUNDS - 1)` = 26 Karten, Mischung per Seed (Fisher-Yates). Der Vorrat
-besteht aus Durchgängen der Kopienzahlen (je 17 Karten); die 26 Karten sind ein voller Durchgang plus die ersten 9
-Karten des zweiten (Minion ×4, Brocken ×2, Bogenschütze ×2, Heiler ×1). Im Deck stecken daher Minion 8, Brocken 4,
-Bogenschütze 4, Heiler 2, die übrigen Karten wie in der Tabelle. Beide Spieler ziehen dieselben Karten.
+besteht aus Durchgängen der Kopienzahlen (je 18 Karten); die 26 Karten sind ein voller Durchgang plus die ersten 8
+Karten des zweiten (Minion ×4, Brocken ×2, Bogenschütze ×2). Im Deck stecken daher Minion 8, Brocken 4,
+Bogenschütze 4, Heiler 1, Zerstörer 1, die übrigen Karten wie in der Tabelle. Beide Spieler ziehen dieselben Karten.
 
 ### Karten (`src/logic/cards.ts`)
 
@@ -181,20 +183,48 @@ Bogenschütze 4, Heiler 2, die übrigen Karten wie in der Tabelle. Beide Spieler
 | `summon-brute` | Brocken | 2 | 80 LP, 12 Schaden/s | 4 | 8 | 2 |
 | `summon-archer` | Bogenschütze | 2 | 20 LP, 7 Schaden/s | 14 | 10 | 2 |
 | `summon-healer` | Heiler | 2 | 20 LP, heilt 5 LP/s (`damage`), greift nie an | 10 | 10 | 1 |
+| `summon-destroyer` | Zerstörer | 2 | 40 LP, 8 Schaden/s; bei Tod Explosion (Radius 10, 15 Schaden an gegnerische Minions der Lane), siehe [Zerstörer](anwendung-zerstoerer.md) | 4 | 8 | 1 |
 | `line-upgrade` | Lane +1 | 2 | Feld-Stufe +1 (max. 3, ohne Ziel): je eine neue Lane oben und unten, ein Slot mehr je Lane | – | – | 2 |
 | `tower-hp` | Tower Leben | 1 | +30 max. LP und +30 LP | – | – | 2 |
 | `tower-damage` | Tower Schaden | 2 | +4 Schaden/s | – | – | 1 |
+| `tower-lightning` | Blitz-Turm | 2 | Spezialisierung (Ziel Lane): der Tower trifft alle Minions der Lane in `TOWER_RANGE`, je mit 60 % Schaden (`LIGHTNING_FACTOR`), siehe [Tower-Spezialisierung](anwendung-tower-spezialisierung.md) | – | – | 1 |
+| `tower-shield` | Schild-Turm | 2 | Spezialisierung (Ziel Lane): 50 % (`SHIELD_REFLECT`) des Schadens, den ein Minion dem Tower zufügt, fällt auf ihn zurück (gedeckelt auf seine Rest-LP) | – | – | 1 |
 | `minion-upgrade-line` | Minions Line | 1 | +10 LP, +2 Schaden für künftige Minions der Line | – | – | 2 |
 | `minion-upgrade-all` | Minions alle | 3 | +5 LP, +1 Schaden für künftige Minions aller Lines | – | – | 1 |
+| `buff-minion` | Minion stärken | 2 | +50 % `maxHp`, `hp` und `damage` eines eigenen lebenden Minions (Ziel `minion`, Rundung `Math.round`) | – | – | 1 |
 
 Upgrades ändern nur `hp` und `damage`, wirken nur auf später beschworene Minions und sind nicht rücknehmbar.
+`buff-minion` wirkt dagegen sofort auf einen Minion: `playCard(state, player, handIndex, line?, slot?, targetMinionId?)`
+prüft Phase, Bereit-Status, Karte, Energie und Ziel (eigener Minion mit `hp > 0`, sonst `invalid-target`). Der Zuwachs
+ist `buffGain(Wert) = Math.round(Wert × BUFF_RATIO)` aus `buff.ts`; mehrere Buffs wirken nacheinander auf die aktuellen
+Werte. `line.bonus` bleibt unberührt, `respawnSurvivors` behält die Werte. Der Bot stärkt den lebenden Minion mit dem
+größten `maxHp` oder spielt die Karte nicht. In der Aufzeichnung steht die Ziel-ID anstelle der Lane (`p<R><P>-10-<Id>`,
+Format Version 5; ältere Links sind ungültig, weil das Deck sich ändert). In der UI wählt der Spieler die Karte und tippt
+dann einen eigenen Minion (grüner Ring).
 Eine abgelehnte Karte lässt den Zustand unverändert (`PlayResult.ok === false`, mit `reason`).
 
 Rollen (Werte aus `CARD_DEFS`; ohne eigenes `range` gilt `MINION_RANGE = 4`, ohne `speed` `MINION_SPEED = 10`):
 Nahkampf Minion (Reichweite 4, Tempo 10), Tank Brocken (4, Tempo 8), Fernkampf Bogenschütze (Reichweite 14, Tempo 10),
-Heiler (`role: 'healer'`, Reichweite 10, Tempo 10; `damage` 5 ist dort Heilung pro Sekunde). Die Bot-Priorität
-(`PRIORITY` in `bot.ts`) lautet: Minion, Bogenschütze, Heiler, Tower Leben, Line +1, Minions Line, Brocken, Tower
+Heiler (`role: 'healer'`, Reichweite 10, Tempo 10; `damage` 5 ist dort Heilung pro Sekunde), Zerstörer
+(`role: 'destroyer'`, `explodes`, Reichweite 4, Tempo 8; Kettenreaktion im selben Tick in Wellen). Die Bot-Priorität
+(`PRIORITY` in `bot.ts`) lautet: Minion, Bogenschütze, Heiler, Zerstörer, Tower Leben, Line +1, Minions Line, Brocken, Tower
 Schaden, Minions alle.
+
+#### Synergien (`src/logic/synergies.ts`)
+
+`SYNERGY_DEFS` listet Paare (`id`, `name`, `cards`, `condition` `sameLine`/`anyLine`, `modifier` `{ stat: 'range', amount }`).
+Umgesetzt: `archer-line-upgrade` (`summon-archer` + `line-upgrade`, `sameLine`, Reichweite +2).
+
+- `activeSynergies(played, defs?)` wertet `PlayedCard[]` (`cardId`, `line?`, `minionId?`) reihenfolgeunabhängig aus: je
+  Definition und Line höchstens ein Treffer, sortiert nach Definition und Line (`line: null` bei `anyLine`). Eine Karte
+  ohne Lane (`line-upgrade`) passt zur Line der anderen Karte; zwei Karten ohne Lane ergeben nichts.
+- `PlayerState.played` (in der Runde gespielte Karten) und `PlayerState.synergies` (aktive Synergien) füllt `playCard`
+  nach erfolgreichem Spielen; ein Fehler lässt den Zustand unverändert. `undoSummon` und `moveMinion` halten beide aktuell.
+  `startRound` leert `played` und entfernt `Minion.rangeBonus`.
+- Der Bonus liegt als `Minion.rangeBonus` an allen Minions der betroffenen Line (auch an später beschworenen); der Kampf
+  nutzt `effectiveRange(minion)` = `range + rangeBonus` (`combat.ts`). `LineState.bonus` und Basiswerte bleiben unberührt.
+- Anzeige: `drawBoard` schreibt `describeSynergy` an die Lane (z. B. „Fernkampf-Ausbau · Reichweite +2“). `balance-sim.ts`
+  und Replay laufen über `playCard`/`advance` und berücksichtigen Synergien automatisch; der Bot bleibt unverändert.
 
 #### Abweichungen zum Designkonzept
 
@@ -245,7 +275,7 @@ Kartenwerte, Reichweiten und Tempo stimmen sonst mit dem Designkonzept überein.
   `hp = min(maxHp, hp − Schaden + Heilung)`. Wer im selben Tick auf `hp <= 1e-9` fällt, wird entfernt; Heilung belebt
   nicht wieder. Das Ergebnis hängt nicht von der Spielerreihenfolge ab.
 - Minion-Upgrades wirken nur über den Line-Bonus beim Beschwören; bereits stehende Minions und ihr `maxHp` ändern sich
-  nicht.
+  nicht. Einzige Ausnahme ist `buff-minion`, der `maxHp`, `hp` und `damage` eines Minions sofort anhebt.
 - Heilung erscheint nicht in `DamageCollector` und `match-stats.ts`. Eine Heilstatistik wäre eine eigene Änderung.
 - Mehrere Heiler wirken gleichzeitig aus demselben Vorzustand und können dasselbe Ziel gemeinsam heilen.
 - Das Deck hat eine Karte mehr im Pool, die Kartenreihenfolge je Seed ändert sich (bleibt deterministisch).
@@ -367,7 +397,7 @@ sie, spielt die Replay-Szene beide Seiten Zug für Zug nach, mit Kommentaren (�
 dazu „verschiebt …“, „nimmt … zurück“, „ist bereit“). Takt `PLAY_PAUSE_MS`, Kampf mit `SLOWMO_FACTOR`; Pause, Spulen und
 Geschwindigkeitswahl gibt es nicht.
 
-**Format `moves` (Version 2, seit dem Lane-Umbau; Links der Version 1 sind ungültig):** Nur die Zeichen `0-9 a-z . -`. Aufbau `v2` und je Aktion ein Token mit `.` davor.
+**Format `moves` (Version 3, seit der Karte Zerstörer; Links der Version 1 und 2 sind ungültig):** Nur die Zeichen `0-9 a-z . -`. Aufbau `v3` und je Aktion ein Token mit `.` davor.
 
 | Aktion | Token | Felder |
 |---|---|---|
@@ -376,7 +406,7 @@ Geschwindigkeitswahl gibt es nicht.
 | Beschwörung zurücknehmen | `u<R><P>-<Minion>` | Minion-Id |
 | Bereit | `r<R><P>` | – |
 
-`<R>` ist die Runde (1–8), `<P>` der Spieler (0 Blau, 1 Orange). Beispiel: `v2.p10-3-0.m10-1-0-2.r10`. Grenzen beim
+`<R>` ist die Runde (1–8), `<P>` der Spieler (0 Blau, 1 Orange). Beispiel: `v3.p10-3-0.m10-1-0-2.r10`. Grenzen beim
 Lesen: 4000 Zeichen und 800 Aktionen.
 
 **Ungültige Links** führen nie zu Absturz oder `console.error`:
@@ -429,12 +459,12 @@ flowchart LR
 | `theme.ts` | `PALETTE`, `TEXT`, `FONTS`, `FRAME`; `fillGradient`, `drawPanel`, `drawBar`, `drawButton`. Einzige Quelle für Farben und Schriften. |
 | `textures.ts` | `ensureTextures`, `addBackdrop`: Hintergrund, Vignette, Boden, Wege, Partikeltexturen (`backdrop`, `spark`, `glow`) per Canvas-Textur; eigener fester Zeichen-Zufall, nicht der Spiel-Seed. |
 | `card-view.ts` | `drawCard`: Rahmen, Kopfzeile, Kosten-Kristall, Bildfläche mit Symbol, Textfeld, Typ-Banner. |
-| `field-view.ts` | `drawBoard`, `drawMinions`, `drawTower`, `drawMinionBody`; Blau = du, Orange = Gegner. Minion-Form nach Rolle: Kreis, Raute (Fernkämpfer), Kreuz (Heiler). |
+| `field-view.ts` | `drawBoard`, `drawMinions`, `drawTower`, `drawMinionBody`; Blau = du, Orange = Gegner. Minion-Form nach Rolle: Kreis, Raute (Fernkämpfer), Kreuz (Heiler), Stachelkugel (Zerstörer). |
 | `effects.ts` | Klasse `Effects`: Partikel, Leuchtringe, Schadenszahlen, Kamerawackeln beim Tower-Fall, Animation beim Ausspielen. |
 | `card-style.ts` | `cardTypeStyle` (Typ → Rahmenfarbe, Symbol, Banner) und `describeCard` (Kurztext); mit Test. |
 | `fx-events.ts` | `diffFx` leitet Treffer, Tod, Beschwörung und Turmschaden aus zwei Zuständen ab; mit Test. |
 
-Kartentypen: `summon` Rot/Schwert, `tower-upgrade` Blau/Turm, `line-upgrade` Grün/Pfeil, `minion-upgrade` Violett/Edelstein.
+Kartentypen: `summon` Rot/Schwert, `tower-upgrade` Blau/Turm, `line-upgrade` Grün/Pfeil, `minion-upgrade` Violett/Edelstein, `tower-specialize` Gold/Blitz (spezialisierte Tower tragen eine gelbe Raute für Blitz, eine blaue für Schild).
 
 **Regeln für Änderungen:**
 - Farben und Schriften nur aus `theme.ts`. Neue Szenen nutzen `ensureTextures`/`addBackdrop`.
@@ -460,7 +490,7 @@ Reine Darstellungs- und Eingabehilfe für die Hand des Menschen (Handlimit 10). 
 | `nextHandFilter(filter)` | nächster Filter, nach Tower wieder Alle |
 | `isCardVisible(type, filter)` | ist eine Karte dieses `CardType` beim Filter sichtbar |
 
-Zuordnung: `summon` → Beschwörung; `line-upgrade` und `minion-upgrade` → Upgrade; `tower-upgrade` → Tower.
+Zuordnung: `summon` → Beschwörung; `line-upgrade`, `minion-upgrade` und `minion-buff` → Upgrade; `tower-upgrade` und `tower-specialize` → Tower.
 
 **Szene (`main-scene.ts`):**
 - `LAYOUT.filterButton`: x 122, y 592, 102 × 40, links neben der Taste bei 230/592 und unter den Handkarten (bis ca.
@@ -539,7 +569,7 @@ Funktionen: `createStats`, `recordSummon`, `recordUndo`, `recordMove`, `recordDa
   `>>> 0` auf 32 Bit gekürzt; ungültige Werte ergeben `null`.
 - URL-Parameter `&moves=<kodiert>` (zusammen mit `replay`) spielt aufgezeichnete Züge ab; Format und Grenzen siehe
   „Teilen und Abspielen gespielter Matches“. `main.ts` liest nur `replay`, `moves` liest die Szene.
-- `RECORD_VERSION` (`match-record.ts`): Formatversion der Aufzeichnung, aktuell 2.
+- `RECORD_VERSION` (`match-record.ts`): Formatversion der Aufzeichnung, aktuell 5.
 - Die Szene `balance` ist nur im Dev-Server registriert, nicht im Produktions-Build.
 
 ## 5. Betrieb und Entwicklung

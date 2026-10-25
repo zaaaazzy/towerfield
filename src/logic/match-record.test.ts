@@ -215,8 +215,10 @@ describe('encodeMatch / decodeMatch', () => {
       'v0.r10',
       'v1.r10',
       'v2.r10',
+      'v3.r10',
       'v4.r10',
-      '3.r10',
+      'v6.r10',
+      '5.r10',
       `V${RECORD_VERSION}.r10`,
       `${v}.x10`,
       `${v}.r90`,
@@ -232,6 +234,8 @@ describe('encodeMatch / decodeMatch', () => {
       `${v}.p10-0-5`,
       `${v}.p10-0-1-2`,
       `${v}.p10-1.5`,
+      `${v}.p10-13`,
+      `${v}.p10-12-1-2`,
       `${v}.m10-1-1`,
       `${v}.m10-1-5-0`,
       `${v}.m10-1-1-0-0`,
@@ -251,19 +255,46 @@ describe('encodeMatch / decodeMatch', () => {
     expect(decodeMatch(1, null as unknown as string)).toBeNull();
   });
 
-  it('lehnt Links aus den Versionen 1 und 2 ab, nimmt aber alle fünf Lane-Indizes an', () => {
-    expect(RECORD_VERSION).toBe(3);
+  it('lehnt Links aus älteren Versionen ab, nimmt aber alle fünf Lane-Indizes an', () => {
+    expect(RECORD_VERSION).toBe(5);
     expect(decodeMatch(1, 'v1.p10-0-0.r10')).toBeNull();
-    expect(decodeMatch(1, 'v2.p10-0-0.r10')).toBeNull();
+    // Ältere Versionen kennen den Zerstörer, „Minion stärken“ oder die Spezialisierungen nicht: Kartenindizes und Deck wären andere.
+    for (const old of ['v2', 'v3', 'v4']) expect(decodeMatch(1, `${old}.p10-0-0.r10`)).toBeNull();
     for (const lane of [0, 1, 2, 3, 4]) {
-      expect(decodeMatch(1, `v3.p10-0-${lane}`)?.actions).toEqual([
+      expect(decodeMatch(1, `v5.p10-0-${lane}`)?.actions).toEqual([
         { type: 'play', round: 1, player: 0, cardId: 'summon-minion', line: lane },
       ]);
-      expect(decodeMatch(1, `v3.m10-1-${lane}-0`)?.actions).toEqual([
+      expect(decodeMatch(1, `v5.m10-1-${lane}-0`)?.actions).toEqual([
         { type: 'move', round: 1, player: 0, minionId: 1, line: lane, slot: 0 },
       ]);
     }
-    expect(decodeMatch(1, 'v2.p10-0-5')).toBeNull();
+    expect(decodeMatch(1, 'v5.p10-0-5')).toBeNull();
+  });
+
+  it('kodiert die Ziel-Minion-ID der Karte „Minion stärken“ und liest sie zurück', () => {
+    const actions: RecordedAction[] = [
+      { type: 'play', round: 2, player: 0, cardId: 'buff-minion', line: null, minionId: 7 },
+      { type: 'play', round: 3, player: 1, cardId: 'buff-minion', line: null, minionId: 0 },
+    ];
+    const record: RecordedMatch = { ...createRecord(9), actions };
+    const text = encodeMatch(record);
+    expect(text).toBe('v5.p20-12-7.p31-12-0');
+    expect(decodeMatch(9, text)).toEqual(record);
+  });
+
+  it('bricht das Nachspielen von „Minion stärken“ ohne gültiges Ziel mit invalid-target ab', () => {
+    const seed = 3;
+    const cardId = 'buff-minion';
+    const state = createMatch(seed);
+    state.players[0].hand = [cardId];
+    expect(applyAction(state, { type: 'play', round: 1, player: 0, cardId, line: null })).toMatchObject({
+      ok: false,
+      reason: 'invalid-target',
+    });
+    expect(applyAction(state, { type: 'play', round: 1, player: 0, cardId, line: 1, minionId: 1 })).toMatchObject({
+      ok: false,
+      reason: 'invalid-line',
+    });
   });
 
   it('bricht das Nachspielen ab, wenn eine Aktion eine noch gesperrte Lane nutzt', () => {
@@ -298,7 +329,7 @@ describe('encodeMatch / decodeMatch', () => {
   });
 
   it('manipulierte, aber lesbare Daten bricht erst das Nachspielen ab', () => {
-    const text = encodeMatch(playScriptedMatch(5).record).replace(/^v3\./, 'v3.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0.');
+    const text = encodeMatch(playScriptedMatch(5).record).replace(/^v5\./, 'v5.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0.');
     const decoded = decodeMatch(5, text);
     expect(decoded).not.toBeNull();
     const result = replayRecorded(decoded!);
@@ -325,6 +356,7 @@ describe('encodeMatch / decodeMatch', () => {
       'summon-brute',
       'summon-archer',
       'summon-healer',
+      'summon-destroyer',
       'line-upgrade',
       'tower-hp',
       'tower-damage',
@@ -332,8 +364,9 @@ describe('encodeMatch / decodeMatch', () => {
       'tower-shield',
       'minion-upgrade-line',
       'minion-upgrade-all',
+      'buff-minion',
     ]);
-    expect(RECORD_VERSION).toBe(3);
+    expect(RECORD_VERSION).toBe(5);
   });
 });
 

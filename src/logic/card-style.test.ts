@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { CARD_DEFS, type CardDef, type CardType, getCardDef } from './cards';
 import { CARD_TYPE_STYLES, cardArtKey, cardStats, cardTypeStyle, describeCard } from './card-style';
 
-const TYPES: CardType[] = ['line-upgrade', 'tower-upgrade', 'tower-specialize', 'summon', 'minion-upgrade'];
+const TYPES: CardType[] = [
+  'line-upgrade',
+  'tower-upgrade',
+  'tower-specialize',
+  'summon',
+  'minion-upgrade',
+  'minion-buff',
+];
 
 describe('cardTypeStyle', () => {
   it('kennt alle Kartentypen', () => {
@@ -13,7 +20,8 @@ describe('cardTypeStyle', () => {
     const accents = new Set(TYPES.map((type) => cardTypeStyle(type).accent));
     const symbols = new Set(TYPES.map((type) => cardTypeStyle(type).symbol));
     expect(accents.size).toBe(TYPES.length);
-    expect(symbols.size).toBe(TYPES.length);
+    // „Minion stärken“ teilt sich das Symbol mit den Minion-Upgrades, unterscheidet sich aber in Farbe und Banner.
+    expect(symbols.size).toBe(TYPES.length - 1);
   });
 
   it('gibt jedem Typ ein Banner', () => {
@@ -70,10 +78,18 @@ describe('describeCard', () => {
     expect(describeCard(getCardDef('summon-minion'))).toBe('6 Schaden\n30 Leben');
     expect(describeCard(getCardDef('summon-archer'))).toBe('7 Fernschaden\n20 Leben');
     expect(describeCard(getCardDef('summon-healer'))).toBe('Heilt 5/s\n20 Leben');
+    expect(describeCard(getCardDef('summon-destroyer'))).toBe('8 Schaden · 40 Leben\nTod: 15 Fläche');
     expect(describeCard(getCardDef('minion-upgrade-all'))).toBe('Alle: +5 Leben\n+1 Schaden');
     expect(describeCard(getCardDef('minion-upgrade-line'))).toBe('Lane: +10 Leben\n+2 Schaden');
     expect(describeCard(getCardDef('line-upgrade'))).toBe('Lane +1 Stufe\noben + unten');
     expect(describeCard(getCardDef('tower-lightning'))).toContain('Trifft alle Gegner');
     expect(describeCard(getCardDef('tower-shield'))).toContain('Wirft 50 % des Schadens');
+    expect(describeCard(getCardDef('buff-minion'))).toBe('Ein Minion:\n+50 % Leben, Schaden');
+  });
+
+  it('gibt „Minion stärken“ ein eigenes Banner und keine Wert-Plaketten', () => {
+    expect(cardStats(getCardDef('buff-minion'))).toBeNull();
+    expect(cardTypeStyle('minion-buff').banner).toBe('STÄRKUNG');
+    expect(cardTypeStyle('minion-buff').accent).not.toBe(cardTypeStyle('minion-upgrade').accent);
   });
 });

@@ -35,6 +35,8 @@ const PENDING_TIMEOUT_MS = 2000;
 const MAX_FLOATERS = 20;
 const MAX_RINGS = 24;
 const MAX_PARTICLES = 150;
+/** Kantenlänge der Textur `glow` in Pixeln. */
+const GLOW_SIZE = 64;
 
 const teamColor = (owner: number): number => (owner === 0 ? PALETTE.human : PALETTE.bot);
 
@@ -69,6 +71,17 @@ export class Effects {
           const at = this.locate.minion(event.owner, event.line, event.position, event.minionId);
           this.burst('death', teamColor(event.owner), at, 16);
           this.ring(at, PALETTE.white, 0.9);
+          break;
+        }
+        case 'explosion': {
+          const at = this.locate.minion(event.owner, event.line, event.position, event.minionId);
+          const edge = this.locate.minion(event.owner, event.line, event.position + event.radius, event.minionId);
+          // Der Ring wächst bis zum Radius der Explosion (Textur `glow`: 64 px Durchmesser).
+          const size = Math.max(0.5, (Math.abs(edge.x - at.x) * 2) / GLOW_SIZE);
+          this.burst('down', PALETTE.gold, at, 24);
+          this.burst('death', teamColor(event.owner), at, 14);
+          this.ring(at, PALETTE.gold, size);
+          this.ring(at, PALETTE.white, size * 0.6);
           break;
         }
         case 'tower-damage':

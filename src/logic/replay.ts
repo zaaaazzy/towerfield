@@ -203,6 +203,7 @@ const ABORT_TEXT: Readonly<Record<ReplayAbortReason, string>> = {
   'max-level': 'Das Feld hat die Höchststufe.',
   'level-too-low': 'Das Lane-Level ist zu niedrig für eine Spezialisierung.',
   'already-specialized': 'Der Tower ist schon spezialisiert.',
+  'invalid-target': 'Der Ziel-Minion ist ungültig.',
 };
 
 /** Hinweistext zum Abbruch, z. B. „Replay abgebrochen bei Zug 7: Zu wenig Energie.“ */

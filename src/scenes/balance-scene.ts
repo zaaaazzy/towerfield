@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { buildReport, type BalanceReport, type MatchResult, simulateMatch, strategiesForSeed } from '../logic/balance-sim';
 import { getCardDef } from '../logic/cards';
+import { ROUND_EVENTS } from '../logic/round-events';
 import { VIEW } from './main-scene';
 import { addBackdrop } from './textures';
 import { drawBar, drawButton, FONTS, PALETTE, TEXT } from './theme';
@@ -151,6 +152,7 @@ export class BalanceScene extends Phaser.Scene {
       add(8, 64, `Runden Ø ${report.avgRounds.toFixed(2)} (min ${report.minRounds}, max ${report.maxRounds})`);
       add(8, 80, `Ende durch Tower: ${percent(report.towerKillShare)}   nach Rundengrenze: ${percent(report.roundLimitShare)}`);
       add(8, 96, `Basis-Siegquote (je Spieler): ${percent(report.baselineWinRate)}`);
+      add(8, 112, `Ereignisse: ${ROUND_EVENTS.map((def) => `${def.name} ${report.eventCounts[def.id]}`).join('   ')}`, 10, TEXT.dim);
 
       add(6, 144, 'Karte', 10, TEXT.dim);
       ['Mat.', 'Eins.', this.sortDescending ? 'Sieg ▼' : 'Sieg ▲', 'Rem.', 'Nied.', 'Δ'].forEach((label, index) =>

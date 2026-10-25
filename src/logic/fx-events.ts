@@ -8,6 +8,8 @@ export type FxEvent =
   | { kind: 'summon'; owner: number; minionId: number; line: number; position: number }
   | { kind: 'minion-damage'; owner: number; minionId: number; line: number; position: number; amount: number }
   | { kind: 'minion-death'; owner: number; minionId: number; line: number; position: number }
+  /** Ein Zerstörer ist im Kampf gestorben und explodiert; `radius` in Lane-Einheiten. */
+  | { kind: 'explosion'; owner: number; minionId: number; line: number; position: number; radius: number }
   | { kind: 'tower-damage'; owner: number; line: number; tower: number; amount: number }
   | { kind: 'tower-down'; owner: number; line: number; tower: number };
 
@@ -45,6 +47,16 @@ export function diffFx(prev: MatchState, next: MatchState): FxEvent[] {
       for (const minion of before.minions) {
         if (!afterIds.has(minion.id)) {
           events.push({ kind: 'minion-death', owner, minionId: minion.id, line: minion.line, position: minion.position });
+          if (minion.explodes) {
+            events.push({
+              kind: 'explosion',
+              owner,
+              minionId: minion.id,
+              line: minion.line,
+              position: minion.position,
+              radius: minion.explodes.radius,
+            });
+          }
         }
       }
     }

@@ -15,7 +15,10 @@ Level-Ausbau umgestellt; wo dieses Dokument „Line“, „3 Lines“ oder `MAX_
 | Mechabellum | Planungsphase: Einheiten platzieren, danach läuft der Kampf ohne Eingriff ab |
 
 Sieg: alle drei gegnerischen Tower zerstört, oder nach der letzten Runde mehr Tower-Lebenspunkte. Gleichstand =
-Unentschieden. Kein Zufall im Kampf; Zufall nur in der Deck-Reihenfolge (Seed).
+Unentschieden. Kein Zufall im Kampf; Zufall nur in der Deck-Reihenfolge und in den Runden-Ereignissen (beides über Seeds, siehe
+[Anwendung: Runden-Ereignisse](anwendung-rundenereignisse.md)). Jede dritte Runde (3 und 6) wirkt ein Ereignis für beide
+Spieler gleich: Energie +1, früherer Respawn der Überlebenden oder Tower-Schild. Es steht beim Rundenstart fest und ist
+in der Planung sichtbar.
 
 ## 2. Rundenablauf
 
@@ -61,11 +64,32 @@ flowchart LR
 | `line-upgrade` | Line +1 | Linien-Upgrade | 2 | Line-Stufe +1: Kapazität +1, ein Slot mehr | Line, Stufe < `MAX_LINE_LEVEL` (5) | 2 |
 | `tower-hp` | Tower Leben | Turm-Upgrade | 1 | Tower-Max-LP und -LP +30 | eigene Line | 2 |
 | `tower-damage` | Tower Schaden | Turm-Upgrade | 2 | Tower-Schaden +4/s | eigene Line | 1 |
+| `tower-lightning` | Blitz-Turm | Turm-Spezialisierung | 2 | Einmalig: der Tower trifft alle gegnerischen Minions der Lane in Reichweite (je 60 % Schaden) | eigene Lane ab Lane-Level 2, Tower noch nicht spezialisiert | 1 |
+| `tower-shield` | Schild-Turm | Turm-Spezialisierung | 2 | Einmalig: 50 % des Schadens, den Minions dem Tower zufügen, werfen sie auf sich selbst zurück | eigene Lane ab Lane-Level 2, Tower noch nicht spezialisiert | 1 |
 | `minion-upgrade-line` | Minions Line | Minion-Upgrade | 1 | Künftige Minions der Line: +10 LP, +2 Schaden | eigene Line | 2 |
 | `minion-upgrade-all` | Minions alle | Minion-Upgrade | 3 | Künftige Minions aller Lines: +5 LP, +1 Schaden | keins | 1 |
+| `buff-minion` | Minion stärken | Minion-Stärkung | 2 | Ein bestehender Minion: Max-LP, LP und Schaden +50 % (Math.round) | eigener lebender Minion | 1 |
 
-Minion-Upgrades wirken nur auf Beschwörungen **nach** dem Spielen (Bonus liegt an der Line). Upgrades sind nicht
-zurücknehmbar.
+Minion-Upgrades wirken nur auf Beschwörungen **nach** dem Spielen (Bonus liegt an der Line). „Minion stärken“ ist die
+Ausnahme: Sie wirkt sofort und nur auf den gewählten Minion, ändert `line.bonus` nicht und trifft später beschworene
+Minions nicht. Mehrere Stärkungen wirken nacheinander auf die jeweils aktuellen Werte; der Zuwachs ist
+`Math.round(Wert × 0,5)` (`buff.ts`, z. B. 5 → +3). Upgrades und Stärkungen sind nicht zurücknehmbar.
+
+### Synergien (temporär, pro Runde)
+
+Spielt ein Spieler in derselben Runde ein bestimmtes Kartenpaar, erhalten seine Minions bis zum Rundenende einen Bonus
+(`SYNERGY_DEFS` in `synergies.ts`, datengetrieben mit Karten-IDs, Bedingung `sameLine`/`anyLine` und Modifikator).
+
+| Synergie | Karten | Bedingung | Wirkung |
+|---|---|---|---|
+| Fernkampf-Ausbau (`archer-line-upgrade`) | Bogenschütze + Lane +1 | dieselbe Line | alle Minions dieser Line: Reichweite +2 (Bogenschütze 14 → 16) |
+
+- Die Reihenfolge der Karten ist egal. Der Bonus wirkt auch auf später beschworene und überlebende Minions der Line, nie auf
+  andere Lines oder den Gegner. Je Spieler, Line und Runde zählt jede Synergie höchstens einmal (kein Stapeln).
+- Lane +1 hat kein Lane-Ziel; es passt deshalb zu jeder Line mit Bogenschütze (die Synergie gilt für jede dieser Lines).
+- Der Bonus steht nicht in `LineState.bonus` oder in den Minion-Werten, sondern als `rangeBonus`; `startRound` löscht ihn
+  samt der gespielten Karten. Zurücknehmen oder Verschieben des Bogenschützen aktualisiert die Synergie. Die Szene zeigt sie
+  in grüner Schrift an der Lane.
 
 ### Soll-Änderungen an Konstanten
 
@@ -97,6 +121,7 @@ zurücknehmbar.
 | Tank | Brocken | 80 | 12 | 4 | 8 | vorhanden |
 | Fernkampf | Bogenschütze (`summon-archer`, Kosten 2, 2 Kopien) | 20 | 7 | 14 | 10 | vorhanden |
 | Heiler | Heiler (`summon-healer`, Kosten 2, 1 Kopie) | 20 | 5 (Heilung/s) | 10 | 10 | vorhanden, siehe [Heiler](anwendung-heiler.md) |
+| Zerstörer | Zerstörer (`summon-destroyer`, Kosten 2, 1 Kopie) | 40 | 8 (Explosion bei Tod: 15 im Radius 10) | 4 | 8 | vorhanden, siehe [Zerstörer](anwendung-zerstoerer.md) |
 
 ## 5. Platzierung (Mechabellum-Stil)
 
@@ -171,7 +196,8 @@ Ansicht `VIEW` = 360 × 640, `Scale.FIT`, zentriert. Wireframe (von oben nach un
 
 1. Soll die Ablage nachgemischt werden, wenn das Deck leer ist (derzeit reicht das Deck genau für 8 Runden)?
 2. Dürfen Spieler unterschiedliche Decks bauen (Deckbau), oder bleibt es beim gemeinsamen Seed-Deck?
-3. Bleibt „kein Zufall im Kampf“ endgültig, oder kommen später Fähigkeiten/Effekte?
+3. Bleibt „kein Zufall im Kampf“ endgültig, oder kommen später Fähigkeiten/Effekte? (Teilweise beantwortet: Zufall
+   wirkt nur zwischen den Runden über die seedbasierten Runden-Ereignisse; die Kampfberechnung bleibt zufallsfrei.)
 4. Soll die gegnerische Planung (Slots) vor dem Kampf sichtbar sein (Mechabellum zeigt sie nicht)?
 5. Pinch-Zoom: wirklich nötig, oder genügt ein fester Zoom plus Scrollen?
 6. Gewünschtes Format auf Desktop: Hochformat mit Rändern oder zusätzliches Querformat-Layout?

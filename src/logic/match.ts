@@ -1,24 +1,37 @@
 /**
  * Spielzustand und Regeln eines 1-gegen-1-Matches: Runden, Hand, Energie, Karten ausspielen, Sieg.
  * Ohne Phaser, DOM und Canvas. Alle Funktionen geben einen neuen Zustand zurück; der alte bleibt unverändert.
- * Die Planung wirkt nur auf den eigenen Spieler, deshalb ist die Reihenfolge der Spieler egal. Kein Zufall außer
- * der Deck-Reihenfolge, die der Seed einmal festlegt.
+ * Die Planung wirkt nur auf den eigenen Spieler, deshalb ist die Reihenfolge der Spieler egal. Zufall nur
+ * zwischen den Runden und über Seeds: die Deck-Reihenfolge und die Runden-Ereignisse (`round-events.ts`); der Kampf
+ * bleibt zufallsfrei.
  */
+import { applyMinionBuff } from './buff';
 import { buildDeck, getCardDef } from './cards';
 import {
   combatTick,
   type CombatPlayer,
+  LINE_LENGTH,
   type Minion,
   MINION_RANGE,
   MINION_SPEED,
   TICK_MS,
+  TICK_SECONDS,
   type Tower,
   totalTowerHp,
   towersAlive,
 } from './combat';
 import { createStats, type MatchStats, recordDamage, recordMove, recordSummon, recordUndo } from './match-stats';
+import {
+  deriveEventSeed,
+  EARLY_RESPAWN_TICKS,
+  EVENT_ENERGY_BONUS,
+  pickRoundEvent,
+  type RoundEventId,
+  TOWER_SHIELD,
+} from './round-events';
 import { isLaneUnlocked, LANE_COUNT, laneTowerOffsets, laneUnlockLevel, MAX_FIELD_LEVEL } from './lanes';
 import { firstFreeSlot, isSlotFree, isValidSlot, slotPosition } from './placement';
+import { type ActiveSynergy, activeSynergies, type PlayedCard, synergyBonus } from './synergies';
 
 /** Zahl der Lanes des voll ausgebauten Feldes (Lvl 3); `PlayerState.lines` hat immer so viele Einträge. */
 export const LINE_COUNT = LANE_COUNT;
@@ -62,6 +75,10 @@ export interface PlayerState extends CombatPlayer {
   nextMinionId: number;
   /** In dieser Planungsphase beschworene Minions samt Karte; nur sie lassen sich verschieben oder zurücknehmen. */
   placements: { minionId: number; cardId: string }[];
+  /** Alle in dieser Runde gespielten Karten mit Ziel-Lane; `startRound` leert die Liste. */
+  played: PlayedCard[];
+  /** Daraus folgende aktive Synergien (nur diese Runde, nur für die Minions dieses Spielers), siehe `synergies.ts`. */
+  synergies: ActiveSynergy[];
 }
 
 export interface MatchState {
@@ -79,6 +96,10 @@ export interface MatchState {
   outcome: Outcome | null;
   /** Statistik des eigenen Spielers (Spieler 0), siehe `match-stats.ts`. */
   stats: MatchStats;
+  /** Zustand des Event-Zufalls, getrennt vom Deck-Seed (siehe `round-events.ts`). */
+  eventSeed: number;
+  /** Ereignis der laufenden Runde für beide Spieler; `null` in Runden ohne Ereignis. */
+  event: RoundEventId | null;
 }
 
 export type PlayError =
@@ -93,7 +114,8 @@ export type PlayError =
   | 'line-full'
   | 'max-level'
   | 'level-too-low'
-  | 'already-specialized';
+  | 'already-specialized'
+  | 'invalid-target';
 
 export type PlayResult = { ok: true; state: MatchState } | { ok: false; state: MatchState; reason: PlayError };
 
@@ -132,6 +154,12 @@ export function energyForRound(round: number): number {
   return Math.min(MAX_ENERGY, BASE_ENERGY + (round - 1) * ENERGY_PER_ROUND);
 }
 
+/** Energie zu Beginn der Runde: `energyForRound` plus der Bonus des Ereignisses, höchstens `MAX_ENERGY`. */
+export function roundEnergy(round: number, event: RoundEventId | null): number {
+  const bonus = event === 'energy' ? EVENT_ENERGY_BONUS : 0;
+  return Math.min(MAX_ENERGY, energyForRound(round) + bonus);
+}
+
 function createPlayer(): PlayerState {
   return {
     level: 1,
@@ -139,6 +167,8 @@ function createPlayer(): PlayerState {
     hand: [],
     nextMinionId: 1,
     placements: [],
+    played: [],
+    synergies: [],
     minions: [],
     lines: Array.from({ length: LANE_COUNT }, (_, lane) => ({
       towers: isLaneUnlocked(1, lane) ? createLaneTowers(lane) : [],
@@ -171,6 +201,42 @@ export function respawnSurvivors(player: PlayerState): void {
   player.minions = alive.map((m) => ({ ...m, position: positions.get(m.id)! }));
 }
 
+/**
+ * „Früher Aufbruch“ (verändert `player`): Die überlebenden Minions (alle, die nicht in dieser Planung beschworen wurden)
+ * starten `EARLY_RESPAWN_TICKS` Ticks früher, also um die in dieser Zeit gelaufene Strecke weiter vorn. Gilt ab Beginn
+ * der Kampfphase, damit die Slots der Planung unberührt bleiben (siehe `respawnSurvivors`).
+ */
+export function applyEarlyRespawn(player: PlayerState): void {
+  const fresh = new Set(player.placements.map((p) => p.minionId));
+  for (const minion of player.minions) {
+    if (fresh.has(minion.id)) continue;
+    minion.position = Math.min(LINE_LENGTH, minion.position + minion.speed * EARLY_RESPAWN_TICKS * TICK_SECONDS);
+  }
+}
+
+/** Entfernt alle Tower-Schilde (verändert `player`); am Ende der Kampfphase. */
+function clearShields(player: PlayerState): void {
+  for (const line of player.lines) for (const tower of line.towers) delete tower.shield;
+}
+
+/** „Tower-Schild“: Schild auf allen lebenden Towern (verändert `player`). */
+function applyTowerShield(player: PlayerState): void {
+  for (const line of player.lines) for (const tower of line.towers) if (tower.hp > 0) tower.shield = TOWER_SHIELD;
+}
+
+/**
+ * Wertet die Synergien aus `player.played` neu aus (verändert `player`) und setzt den temporären Reichweitenbonus aller
+ * Minions nach ihrer aktuellen Lane. Ohne Bonus fehlt das Feld; `LineState.bonus` und Basiswerte bleiben unberührt.
+ */
+function refreshSynergies(player: PlayerState): void {
+  player.synergies = activeSynergies(player.played);
+  for (const minion of player.minions) {
+    const bonus = synergyBonus(player.synergies, minion.line, 'range');
+    if (bonus > 0) minion.rangeBonus = bonus;
+    else delete minion.rangeBonus;
+  }
+}
+
 /** Beginnt Runde `round` (verändert `state`): Energie setzen, dieselben Karten für beide ziehen, Planung öffnen. */
 function startRound(state: MatchState, round: number): void {
   const count = round === 1 ? START_HAND : DRAW_PER_ROUND;
@@ -181,10 +247,17 @@ function startRound(state: MatchState, round: number): void {
   state.ready = [false, false];
   state.accumulatorMs = 0;
   state.combatTicks = 0;
+  const pick = pickRoundEvent(state.eventSeed, round);
+  state.eventSeed = pick.seed;
+  state.event = pick.event;
   for (const player of state.players) {
-    player.energy = energyForRound(round);
+    clearShields(player);
+    if (state.event === 'tower-shield') applyTowerShield(player);
+    player.energy = roundEnergy(round, state.event);
     player.placements = [];
+    player.played = [];
     respawnSurvivors(player);
+    refreshSynergies(player);
     player.hand.push(...drawn);
     player.hand.length = Math.min(player.hand.length, HAND_LIMIT);
   }
@@ -203,6 +276,8 @@ export function createMatch(seed: number): MatchState {
     combatTicks: 0,
     outcome: null,
     stats: createStats(),
+    eventSeed: deriveEventSeed(seed),
+    event: null,
   };
   startRound(state, 1);
   return state;
@@ -215,6 +290,7 @@ function reject(state: MatchState, reason: PlayError): PlayResult {
 /**
  * Spielt die Handkarte `handIndex` für `playerIndex` aus, bei Bedarf auf `lineIndex`. Eine Beschwörung steht danach
  * auf Slot `slot` der Line (ohne Angabe: auf dem ersten freien Slot); bei anderen Karten wird `slot` ignoriert.
+ * Karten mit Ziel `minion` brauchen `targetMinionId`, einen eigenen lebenden Minion.
  * Bei einem Fehler kommt der unveränderte Zustand zurück.
  */
 export function playCard(
@@ -223,6 +299,7 @@ export function playCard(
   handIndex: number,
   lineIndex?: number,
   slot?: number,
+  targetMinionId?: number,
 ): PlayResult {
   if (state.phase !== 'planning') return reject(state, 'not-planning');
   if (state.ready[playerIndex]) return reject(state, 'already-ready');
@@ -248,6 +325,11 @@ export function playCard(
       }
     }
   }
+  if (def.target === 'minion') {
+    if (targetMinionId === undefined || !current.minions.some((m) => m.id === targetMinionId && m.hp > 0)) {
+      return reject(state, 'invalid-target');
+    }
+  }
   if (def.type === 'line-upgrade' && current.level >= MAX_FIELD_LEVEL) return reject(state, 'max-level');
   if (def.type === 'tower-specialize') {
     if (laneUnlockLevel(lineIndex!) < SPECIALIZE_MIN_LEVEL) return reject(state, 'level-too-low');
@@ -259,6 +341,9 @@ export function playCard(
   player.energy -= def.cost;
   player.hand.splice(handIndex, 1);
   const line = def.target === 'line' ? player.lines[lineIndex!]! : undefined;
+  const played: PlayedCard = { cardId };
+  if (def.target === 'line') played.line = lineIndex;
+  if (def.target === 'minion') played.line = player.minions.find((m) => m.id === targetMinionId)!.line;
   switch (def.type) {
     case 'line-upgrade':
       // Neue Ausbaustufe: die frisch freien Lanes (je eine oberhalb und unterhalb) bekommen ihre Tower.
@@ -288,10 +373,12 @@ export function playCard(
         speed: def.speed ?? MINION_SPEED,
         maxHp: def.hp + line!.bonus.hp,
         ...(def.role === 'healer' ? { heals: true } : {}),
+        ...(def.explodes ? { explodes: { ...def.explodes } } : {}),
       };
       player.nextMinionId += 1;
       player.minions.push(minion);
       player.placements.push({ minionId: minion.id, cardId });
+      played.minionId = minion.id;
       if (playerIndex === STATS_PLAYER) recordSummon(next.stats, minion.id, cardId, minion.line);
       break;
     }
@@ -301,7 +388,12 @@ export function playCard(
         target.bonus.damage += def.damage;
       }
       break;
+    case 'minion-buff':
+      applyMinionBuff(player.minions.find((m) => m.id === targetMinionId)!);
+      break;
   }
+  player.played.push(played);
+  refreshSynergies(player);
   return { ok: true, state: next };
 }
 
@@ -333,6 +425,10 @@ export function moveMinion(
   if (playerIndex === STATS_PLAYER) recordMove(next.stats, minionId, moved.line, lineIndex);
   moved.line = lineIndex;
   moved.position = slotPosition(slot);
+  const owner = next.players[playerIndex];
+  // Jede Platzierung dieser Runde hat einen Eintrag in `played` (beide entstehen in `playCard`).
+  owner.played.find((p) => p.minionId === minionId)!.line = lineIndex;
+  refreshSynergies(owner);
   return { ok: true, state: next };
 }
 
@@ -352,6 +448,8 @@ export function undoSummon(state: MatchState, playerIndex: PlayerIndex, minionId
   }
   player.minions = player.minions.filter((m) => m.id !== minionId);
   player.placements = player.placements.filter((p) => p.minionId !== minionId);
+  player.played = player.played.filter((p) => p.minionId !== minionId);
+  refreshSynergies(player);
   player.energy += getCardDef(placement.cardId).cost;
   player.hand.push(placement.cardId);
   return { ok: true, state: next };
@@ -366,6 +464,7 @@ export function setReady(state: MatchState, playerIndex: PlayerIndex): MatchStat
     next.phase = 'combat';
     next.accumulatorMs = 0;
     next.combatTicks = 0;
+    if (next.event === 'early-respawn') for (const player of next.players) applyEarlyRespawn(player);
   }
   return next;
 }
@@ -391,6 +490,7 @@ export function hpOutcome(state: MatchState): Outcome {
 function finish(state: MatchState, outcome: Outcome): void {
   state.phase = 'over';
   state.outcome = outcome;
+  for (const player of state.players) clearShields(player);
   state.accumulatorMs = 0;
 }
 

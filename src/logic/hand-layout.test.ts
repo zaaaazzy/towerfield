@@ -29,6 +29,16 @@ describe('sortHand', () => {
     ]);
   });
 
+  it('legt „Minion stärken“ hinter die Minion-Upgrades und vor die Tower-Upgrades', () => {
+    const types: CardType[] = ['tower-upgrade', 'minion-buff', 'minion-upgrade', 'summon'];
+    expect(sortHand(types).map((index) => types[index])).toEqual([
+      'summon',
+      'minion-upgrade',
+      'minion-buff',
+      'tower-upgrade',
+    ]);
+  });
+
   it('erhält die Reihenfolge innerhalb eines Typs', () => {
     const types: CardType[] = ['summon', 'tower-upgrade', 'summon', 'tower-upgrade', 'summon'];
     expect(sortHand(types)).toEqual([0, 2, 4, 1, 3]);

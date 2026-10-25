@@ -39,6 +39,36 @@ describe('diffFx', () => {
     expect(diffFx(prev, next)).toEqual([{ kind: 'minion-death', owner: 0, minionId: 1, line: 0, position: 10 }]);
   });
 
+  it('meldet für einen gestorbenen Zerstörer zusätzlich eine Explosion mit Radius, andere nicht', () => {
+    const prev = withMinion();
+    prev.phase = 'combat';
+    prev.players[0].minions.push({
+      id: 2,
+      line: 1,
+      position: 30,
+      hp: 5,
+      damage: 8,
+      range: 4,
+      speed: 8,
+      explodes: { radius: 10, damage: 15 },
+    });
+    const next = structuredClone(prev);
+    next.players[0].minions = [];
+    expect(diffFx(prev, next)).toEqual([
+      { kind: 'minion-death', owner: 0, minionId: 1, line: 0, position: 10 },
+      { kind: 'minion-death', owner: 0, minionId: 2, line: 1, position: 30 },
+      { kind: 'explosion', owner: 0, minionId: 2, line: 1, position: 30, radius: 10 },
+    ]);
+  });
+
+  it('meldet keine Explosion, wenn der Zerstörer in der Planung zurückgenommen wird', () => {
+    const prev = withMinion();
+    prev.players[0].minions[0]!.explodes = { radius: 10, damage: 15 };
+    const next = structuredClone(prev);
+    next.players[0].minions = [];
+    expect(diffFx(prev, next)).toEqual([]);
+  });
+
   it('meldet im Kampf keinen Tod für Minions, die noch leben', () => {
     const prev = withMinion();
     prev.phase = 'combat';
