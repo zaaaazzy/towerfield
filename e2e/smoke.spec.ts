@@ -287,3 +287,77 @@ test('ein beschworener Minion lässt sich in der Planung ziehen, danach nicht me
 
   expect(errors).toEqual([]);
 });
+
+/** Was der Filter-Test von der Szene liest und setzt (Felder sind zur Laufzeit erreichbar). */
+interface FilterSceneView {
+  state: { players: { hand: string[]; energy: number }[] };
+  handFilter: string;
+  selected: number | null;
+}
+
+test('Kartenfilter: Tasten-Reihenfolge, Abwahl, nicht passende Karten tot, echter Hand-Index', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
+  page.on('pageerror', (error) => errors.push(error.message));
+
+  await page.goto('/');
+  const canvas = page.locator('#game canvas');
+  await expect(canvas).toBeVisible();
+  await page.waitForFunction(() => window.game?.scene.isActive('main') && window.game.loop.frame > 10);
+  const box = (await canvas.boundingBox())!;
+  const at = (x: number, y: number) => ({ x: box.x + (x / 360) * box.width, y: box.y + (y / 640) * box.height });
+  const click = (point: { x: number; y: number }) => page.mouse.click(point.x, point.y);
+  const cardPoint = (index: number) => at(7 + (index % 5) * 70 + 33, 440 + Math.floor(index / 5) * 66 + 31);
+  const filterButton = at(173, 612);
+  const read = () =>
+    page.evaluate(() => {
+      const scene = window.game!.scene.getScene('main') as unknown as FilterSceneView;
+      return { filter: scene.handFilter, selected: scene.selected, hand: [...scene.state.players[0]!.hand] };
+    });
+
+  // Start: Filter „Alle“.
+  expect((await read()).filter).toBe('all');
+
+  // Feste Hand und genug Energie, damit das Ergebnis nicht vom Zufall abhängt.
+  await page.evaluate(() => {
+    const scene = window.game!.scene.getScene('main') as unknown as FilterSceneView;
+    const human = scene.state.players[0]!;
+    human.hand = ['tower-hp', 'summon-minion', 'line-upgrade', 'summon-brute'];
+    human.energy = 10;
+  });
+
+  // Minion wählen, auf „Beschwörung“ schalten: Auswahl bleibt, Karte ist sichtbar.
+  await click(cardPoint(1));
+  expect((await read()).selected).toBe(1);
+  await click(filterButton);
+  expect(await read()).toMatchObject({ filter: 'summon', selected: 1 });
+
+  // „Upgrade“: Minion wird ausgeblendet, Auswahl ist null.
+  await click(filterButton);
+  expect(await read()).toMatchObject({ filter: 'upgrade', selected: null });
+
+  // Abgedunkelte Karte (Tower Leben, Index 0) reagiert nicht, Upgrade-Karte (Index 2) schon.
+  await click(cardPoint(0));
+  expect((await read()).selected).toBeNull();
+  await click(cardPoint(2));
+  expect((await read()).selected).toBe(2);
+
+  // Tower → Alle → Beschwörung.
+  await click(filterButton);
+  expect((await read()).filter).toBe('tower');
+  await click(filterButton);
+  expect((await read()).filter).toBe('all');
+  await click(filterButton);
+  expect((await read()).filter).toBe('summon');
+
+  // Bei „Beschwörung“ wird der Brocken mit dem echten Hand-Index 3 gespielt.
+  await click(cardPoint(3));
+  await click(at(60, 300));
+  const after = await read();
+  expect(after.hand).toEqual(['tower-hp', 'summon-minion', 'line-upgrade']);
+  expect(after.selected).toBeNull();
+
+  expect(errors).toEqual([]);
+});
