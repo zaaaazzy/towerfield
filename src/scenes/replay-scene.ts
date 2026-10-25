@@ -14,8 +14,9 @@ import {
 } from '../logic/replay';
 import { parseReplayMoves, parseReplaySeed } from '../logic/seed';
 import { diffFx } from '../logic/fx-events';
+import { updateFlashes } from '../logic/minion-look';
 import { Effects } from './effects';
-import { drawBoard, drawMinions } from './field-view';
+import { drawBoard, drawMinions, type MinionAnim } from './field-view';
 import { type LabelFn, LabelPool } from './labels';
 import { BACKDROP_FIELD, FX_LOCATOR, VIEW } from './main-scene';
 import { shareUrl, shareUrlLines } from './share';
@@ -42,6 +43,8 @@ export class ReplayScene extends Phaser.Scene {
   private graphics!: Phaser.GameObjects.Graphics;
   private pool!: LabelPool;
   private effects!: Effects;
+  /** Szenenzeit und Trefferblitze der Minions (aus `delta` fortgeschrieben, nur Darstellung). */
+  private minionAnim: MinionAnim = { timeMs: 0, flashes: new Map() };
 
   constructor() {
     super('replay');
@@ -67,6 +70,7 @@ export class ReplayScene extends Phaser.Scene {
         : this.record
           ? createRecordedReplay(this.record)
           : createInvalidReplay(this.seed);
+    this.minionAnim = { timeMs: 0, flashes: new Map() };
     addBackdrop(this, VIEW.width, VIEW.height, BACKDROP_FIELD);
     this.pool = new LabelPool(this);
     this.effects = new Effects(this, FX_LOCATOR);
@@ -83,8 +87,13 @@ export class ReplayScene extends Phaser.Scene {
   update(_time: number, deltaMs: number): void {
     const previous = this.replay.match;
     this.replay = stepReplay(this.replay, deltaMs);
-    this.effects.play(diffFx(previous, this.replay.match));
+    const events = diffFx(previous, this.replay.match);
+    this.effects.play(events);
     this.effects.update(deltaMs);
+    this.minionAnim = {
+      timeMs: this.minionAnim.timeMs + deltaMs,
+      flashes: updateFlashes(this.minionAnim.flashes, events, deltaMs),
+    };
     this.render();
   }
 
@@ -96,7 +105,7 @@ export class ReplayScene extends Phaser.Scene {
     this.pool.reset();
 
     drawBoard(g, label, match);
-    drawMinions(g, match);
+    drawMinions(g, match, undefined, this.minionAnim);
 
     const phaseText = match.phase === 'planning' ? 'Planung' : match.phase === 'combat' ? 'Kampf (Zeitlupe)' : 'Ende';
     drawPanel(g, 20, 3, 320, 26, { metal: 'gold', radius: 10 });
