@@ -207,6 +207,7 @@ export function playCard(
         position: slotPosition(summonSlot),
         hp: def.hp + line!.bonus.hp,
         damage: def.damage + line!.bonus.damage,
+        speed: def.speed,
       };
       player.nextMinionId += 1;
       player.minions.push(minion);

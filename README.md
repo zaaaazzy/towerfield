@@ -25,7 +25,8 @@ Slot-Platzierung beschreibt [`docs/anwendung-iso-platzierung.md`](docs/anwendung
 von Minions [`docs/anwendung-minion-drag-and-drop.md`](docs/anwendung-minion-drag-and-drop.md) und die Handlimit-Regel
 mit ihren Tests [`docs/anwendung-handlimit.md`](docs/anwendung-handlimit.md). Die Tests der Bot-Strategie beschreibt
 [`docs/anwendung-bot-tests.md`](docs/anwendung-bot-tests.md). Die Tower-Reichweite (20) beschreibt
-[`docs/anwendung-tower-reichweite.md`](docs/anwendung-tower-reichweite.md).
+[`docs/anwendung-tower-reichweite.md`](docs/anwendung-tower-reichweite.md). Das Minion-Tempo (`speed`, Brocken 8)
+beschreibt [`docs/anwendung-minion-tempo.md`](docs/anwendung-minion-tempo.md).
 
 ## Befehle
 
