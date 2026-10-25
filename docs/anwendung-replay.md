@@ -32,4 +32,19 @@ Konsolenfehler.
 | `src/scenes/replay-scene.ts` | Szene `replay`: ruft `stepReplay`, zeichnet Feld und Kommentare |
 | `src/scenes/main-scene.ts` | Gemeinsame Zeichenhelfer: `LabelPool`, `drawBoard`, `drawMinions`, `drawTower` |
 
-Tests: `src/logic/replay.test.ts`, `src/logic/seed.test.ts`, Smoke-Test in `e2e/smoke.spec.ts`.
+Tests: `src/logic/replay.test.ts`, `src/logic/seed.test.ts`, `src/logic/bot.test.ts`, Smoke-Test in
+`e2e/smoke.spec.ts`.
+
+`src/main.ts` startet die Replay-Szene als erste Szene, sobald `parseReplaySeed` einen gültigen Wert liefert (Dev und
+Produktion). Ohne gültigen Parameter bleibt alles beim Alten (`MainScene`, `?seed=`, `?scene=balance`).
+
+## Worauf zu achten ist
+
+- **Dauer:** Ein Replay über alle Runden dauert in echter Zeit lange (bis etwa 450 s), weil die Kampfphase mit Faktor
+  0,35 läuft. Eine Geschwindigkeitswahl oder Pause gibt es bewusst nicht.
+- **Refactoring über den Auftrag hinaus:** `botPlan` ruft jetzt `botStep` in einer Schleife auf (Verhalten
+  unverändert). Die Zeichenhelfer `LabelPool`, `drawBoard`, `drawMinions` und `drawTower` sind aus `main-scene.ts`
+  exportiert und werden von `MainScene` und `ReplayScene` gemeinsam genutzt. Bei Änderungen daran beide Szenen prüfen.
+- **Keine neuen Regeln:** `MatchState` und die Spielregeln sind unverändert; das Replay nutzt `createMatch`, `playCard`,
+  `setReady` und `advance`.
+- **Teilen-URL:** Sie wird aus `window.location.origin` und `pathname` plus `?replay=<seed>` gebaut.
