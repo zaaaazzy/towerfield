@@ -5,7 +5,18 @@
 import { getCardDef } from './cards';
 import { laneUnlockLevel, unlockedLanes } from './lanes';
 import type { Minion } from './combat';
-import { lineCapacity, type MatchState, type PlayerIndex, playCard, setReady, specializeTarget, SPECIALIZE_MIN_LEVEL } from './match';
+import {
+  DISCARD_ENERGY,
+  discardCard,
+  MAX_ENERGY,
+  type MatchState,
+  type PlayerIndex,
+  playCard,
+  setReady,
+  specializeTarget,
+  SPECIALIZE_MIN_LEVEL,
+} from './match';
+import { firstFreeSlot } from './placement';
 
 /** Reihenfolge, in der der Bot Karten bevorzugt. */
 const PRIORITY = [
@@ -13,14 +24,21 @@ const PRIORITY = [
   'summon-archer',
   'summon-healer',
   'summon-destroyer',
+  'summon-scout',
   'tower-hp',
   'line-upgrade',
   'minion-upgrade-line',
   'summon-brute',
+  'summon-mage',
+  'lane-buff',
   'buff-minion',
   'tower-damage',
+  'summon-guard',
+  'lane-shield',
+  'tower-armor',
   'tower-lightning',
   'tower-shield',
+  'minion-upgrade-elite',
   'minion-upgrade-all',
 ];
 
@@ -49,8 +67,14 @@ function chooseLine(state: MatchState, playerIndex: PlayerIndex, cardId: string)
   switch (def.type) {
     case 'summon':
       return pick(
-        lines.filter((line) => minions(line) < lineCapacity(player.level)),
+        lines.filter((line) => firstFreeSlot(player.minions, line, player.lines[line]!.towers) !== undefined),
         minions,
+      );
+    case 'lane-card':
+      // Nur Lanes mit eigenen Minions und freiem Lane-Slot; die mit den meisten Minions, bei Gleichstand die niedrigste.
+      return pick(
+        lines.filter((line) => minions(line) > 0 && player.lines[line]!.laneEffect === undefined),
+        (line) => -minions(line),
       );
     case 'tower-upgrade':
       return pick(lines, (line) => player.lines[line]!.towers.reduce((sum, tower) => sum + tower.hp, 0));
@@ -68,33 +92,73 @@ function chooseLine(state: MatchState, playerIndex: PlayerIndex, cardId: string)
   }
 }
 
-/** Ein einzelner Zug des Bots: gespielte Karte, Zielline und Ziel-Minion (`undefined` ohne Ziel) und der Zustand danach. */
+/**
+ * Ein einzelner Zug des Bots: gespielte Karte, Zielline und Ziel-Minion (`undefined` ohne Ziel) und der Zustand danach.
+ * Mit `discard` hat der Bot die Karte abgeworfen statt gespielt (`line` ist dann `undefined`).
+ */
 export interface BotMove {
   cardId: string;
   line: number | undefined;
   minionId?: number;
+  discard?: true;
   state: MatchState;
 }
 
-/** Spielt die nächste Karte des Bots nach `priority`, oder `null`, wenn er nichts mehr spielen kann. */
+/** Spielt die Handkarte `id`, falls der Bot sie jetzt legal spielen kann; sonst `null`. */
+function tryPlay(state: MatchState, playerIndex: PlayerIndex, id: string): BotMove | null {
+  const handIndex = state.players[playerIndex].hand.indexOf(id);
+  if (handIndex < 0) return null;
+  const def = getCardDef(id);
+  const line = def.target === 'line' ? chooseLine(state, playerIndex, id) : undefined;
+  if (def.target === 'line' && line === undefined) return null;
+  const minionId = def.target === 'minion' ? chooseMinion(state, playerIndex) : undefined;
+  if (def.target === 'minion' && minionId === undefined) return null;
+  const result = playCard(state, playerIndex, handIndex, line, undefined, minionId);
+  return result.ok ? { cardId: id, line, ...(minionId === undefined ? {} : { minionId }), state: result.state } : null;
+}
+
+/** Kopie des Zustands, in der `playerIndex` die Energie `energy` (höchstens `MAX_ENERGY`) hat. */
+function withEnergy(state: MatchState, playerIndex: PlayerIndex, energy: number): MatchState {
+  const copy = structuredClone(state);
+  copy.players[playerIndex].energy = Math.min(MAX_ENERGY, energy);
+  return copy;
+}
+
+/**
+ * Wirft eine nutzlose Karte ab, wenn die dafür erhaltene Energie eine bevorzugte Karte spielbar macht, die jetzt knapp
+ * nicht bezahlbar ist. Nutzlos ist eine Karte, die nicht in `priority` steht oder auch mit voller Energie kein Ziel hat.
+ * Sonst `null`.
+ */
+function discardStep(state: MatchState, playerIndex: PlayerIndex, priority: readonly string[]): BotMove | null {
+  const player = state.players[playerIndex];
+  if (player.energy >= MAX_ENERGY) return null;
+  const boosted = withEnergy(state, playerIndex, player.energy + DISCARD_ENERGY);
+  const wanted = priority.find((id) => player.hand.includes(id) && tryPlay(boosted, playerIndex, id) !== null);
+  if (wanted === undefined) return null;
+  const full = withEnergy(state, playerIndex, MAX_ENERGY);
+  const handIndex = player.hand.findIndex(
+    (id) => id !== wanted && (!priority.includes(id) || tryPlay(full, playerIndex, id) === null),
+  );
+  if (handIndex < 0) return null;
+  // Die Karte steht auf der Hand und der Bot plant noch (sonst wäre `wanted` nicht spielbar): das Abwerfen gelingt immer.
+  const { state: next } = discardCard(state, playerIndex, handIndex);
+  return { cardId: player.hand[handIndex]!, line: undefined, discard: true, state: next };
+}
+
+/**
+ * Spielt die nächste Karte des Bots nach `priority`; geht das nicht, wirft er gegebenenfalls eine nutzlose Karte ab
+ * (siehe `discardStep`). `null`, wenn er nichts mehr tun kann.
+ */
 export function botStep(
   state: MatchState,
   playerIndex: PlayerIndex,
   priority: readonly string[] = PRIORITY,
 ): BotMove | null {
-  const player = state.players[playerIndex];
   for (const id of priority) {
-    const handIndex = player.hand.indexOf(id);
-    if (handIndex < 0) continue;
-    const def = getCardDef(id);
-    const line = def.target === 'line' ? chooseLine(state, playerIndex, id) : undefined;
-    if (def.target === 'line' && line === undefined) continue;
-    const minionId = def.target === 'minion' ? chooseMinion(state, playerIndex) : undefined;
-    if (def.target === 'minion' && minionId === undefined) continue;
-    const result = playCard(state, playerIndex, handIndex, line, undefined, minionId);
-    if (result.ok) return { cardId: id, line, ...(minionId === undefined ? {} : { minionId }), state: result.state };
+    const move = tryPlay(state, playerIndex, id);
+    if (move) return move;
   }
-  return null;
+  return discardStep(state, playerIndex, priority);
 }
 
 /**

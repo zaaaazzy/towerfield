@@ -125,6 +125,10 @@ Spielt ein Spieler in derselben Runde ein bestimmtes Kartenpaar, erhalten seine 
 
 ## 5. Platzierung (Mechabellum-Stil)
 
+> **Überholt seit Version 6:** Statt fester Positionen gibt es zwei Slots je Tower (oben, unten), Verschieben kostet
+> 1 Energie, und es gibt Lane-Karten und Abwerfen. Maßgeblich ist [Turm-Slots](anwendung-turm-slots.md); die folgende
+> Beschreibung gilt nur noch als Hintergrund.
+
 Platzierung bestimmt **Line und Slot** (Position innerhalb der Line). Slots sind feste Punkte, kein freies Pixel:
 
 - Slot `n` liegt auf Position `2 + 4 × n` (`slotPosition`, `SLOT_START = 2`, `SLOT_SPACING = 4`). Slot 0 ist am eigenen

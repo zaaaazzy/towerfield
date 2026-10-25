@@ -210,7 +210,33 @@ describe('Replay einer Aufzeichnung', () => {
     const replay = runReplay(7).replay;
     expect(replay.script).toBeNull();
     expect(replay.aborted).toBeNull();
-    expect(replay.events.every((event) => event.action === undefined)).toBe(true);
+    // Beim Abwerfen des Bots steht `discard`, sonst nichts.
+    expect(replay.events.every((event) => event.action === undefined || event.action === 'discard')).toBe(true);
+  });
+
+  it('spielt das Abwerfen des Bots im Bot-Replay als Ereignis ab', () => {
+    const replay = createReplay(3);
+    replay.match.players[0].hand = ['buff-minion', 'summon-brute'];
+    replay.match.players[0].energy = 1;
+    const next = stepReplay(replay, PLAY_PAUSE_MS);
+    expect(next.events[0]).toMatchObject({ player: 0, cardId: 'buff-minion', action: 'discard', line: null });
+    expect(next.match.players[0].energy).toBe(2);
+    expect(describeEvent(next.events[0]!)).toBe('Runde 1 · Blau wirft Minion stärken ab');
+  });
+
+  it('spielt Abwerfen und Spielen auf einem gewählten Turm-Slot aus der Aufzeichnung ab', () => {
+    const actions: RecordedAction[] = [
+      { type: 'discard', round: 1, player: 0, cardId: 'buff-minion' },
+      { type: 'play', round: 1, player: 0, cardId: 'summon-brute', line: 0, slot: 5 },
+    ];
+    const state = createRecordedReplay({ ...createRecord(3), actions });
+    state.match.players[0].hand = ['buff-minion', 'summon-brute'];
+    state.match.players[0].energy = 1;
+    const replay = stepReplay(state, PLAY_PAUSE_MS * 2);
+    expect(replay.aborted).toBeNull();
+    expect(replay.events.map((e) => e.action)).toEqual(['discard', undefined]);
+    expect(replay.match.players[0].minions[0]).toMatchObject({ slot: 5, position: 16 });
+    expect(replay.match.players[0].energy).toBe(0);
   });
 });
 
@@ -219,10 +245,28 @@ describe('describeEvent für Aufzeichnungen', () => {
 
   it('beschreibt Verschieben, Zurücknehmen und Bereit mit Spieler und Runde', () => {
     const move = describeEvent({ ...base, action: 'move', cardId: 'summon-archer', line: 1, slot: 2 });
-    expect(move).toBe('Runde 3 · Blau verschiebt Bogenschütze auf Lvl 2 oben, Platz 3');
+    expect(move).toBe('Runde 3 · Blau verschiebt Bogenschütze auf Lvl 2 oben, Turm 2 oben');
+    expect(describeEvent({ ...base, action: 'discard', cardId: 'summon-minion', line: null })).toBe(
+      'Runde 3 · Blau wirft Minion ab',
+    );
     const undo = describeEvent({ ...base, player: 1, action: 'undo', cardId: 'summon-minion', line: null });
     expect(undo).toBe('Runde 3 · Orange nimmt Minion zurück');
     expect(describeEvent({ ...base, action: 'ready', cardId: '', line: null })).toBe('Runde 3 · Blau ist bereit');
+  });
+
+  it('beschreibt das Verschieben eines Überlebenden früherer Runden ohne Karte als „Einheit“', () => {
+    const state = createRecordedReplay({
+      ...createRecord(3),
+      actions: [{ type: 'move', round: 1, player: 0, minionId: 50, line: 0, slot: 3 }],
+    });
+    state.match.players[0].minions.push({ id: 50, line: 0, slot: 0, position: 0, hp: 5, damage: 1, range: 4, speed: 10 });
+    const replay = stepReplay(state, PLAY_PAUSE_MS);
+    expect(replay.aborted).toBeNull();
+    expect(replay.events[0]).toMatchObject({ action: 'move', cardId: '', slot: 3 });
+    expect(describeEvent(replay.events[0]!)).toBe('Runde 1 · Blau verschiebt Einheit auf Start-Lane, Turm 2 unten');
+    expect(describeEvent({ round: 1, player: 0, action: 'move', cardId: '', line: 0 })).toBe(
+      'Runde 1 · Blau verschiebt Einheit auf Start-Lane',
+    );
   });
 
   it('gibt für jeden Abbruchgrund einen Hinweis aus', () => {
@@ -243,6 +287,8 @@ describe('describeEvent für Aufzeichnungen', () => {
       'max-level',
       'level-too-low',
       'already-specialized',
+      'invalid-target',
+      'lane-slot-taken',
     ];
     for (const reason of reasons) expect(describeAbort({ reason, index: 4 }).length).toBeGreaterThan(10);
   });

@@ -86,6 +86,28 @@ function drawSymbol(g: Phaser.GameObjects.Graphics, symbol: CardSymbol, cx: numb
       g.lineBetween(cx - r * 0.6, cy - r * 0.1, cx, cy - r * 0.8);
       g.lineBetween(cx + r * 0.6, cy - r * 0.1, cx, cy - r * 0.8);
       break;
+    case 'shield':
+      g.fillStyle(dark, 0.85).fillPoints(
+        [
+          new Phaser.Geom.Point(cx - r * 0.85, cy - r * 0.8),
+          new Phaser.Geom.Point(cx + r * 0.85, cy - r * 0.8),
+          new Phaser.Geom.Point(cx + r * 0.75, cy + r * 0.2),
+          new Phaser.Geom.Point(cx, cy + r),
+          new Phaser.Geom.Point(cx - r * 0.75, cy + r * 0.2),
+        ],
+        true,
+      );
+      g.fillStyle(PALETTE.white, 0.9).fillPoints(
+        [
+          new Phaser.Geom.Point(cx - r * 0.6, cy - r * 0.6),
+          new Phaser.Geom.Point(cx + r * 0.6, cy - r * 0.6),
+          new Phaser.Geom.Point(cx + r * 0.5, cy + r * 0.1),
+          new Phaser.Geom.Point(cx, cy + r * 0.7),
+          new Phaser.Geom.Point(cx - r * 0.5, cy + r * 0.1),
+        ],
+        true,
+      );
+      break;
   }
 }
 
