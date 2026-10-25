@@ -119,6 +119,77 @@ test('Produktions-Build: die Szene balance ist nicht registriert und startet nic
   expect(state.balanceActive).toBeFalsy();
 });
 
+/** Was der Replay-Test von der Szene liest. */
+interface ReplaySceneView {
+  comments: string[];
+  current: { match: { phase: string; round: number }; events: unknown[] };
+  children: { list: { type: string; visible: boolean; text?: string }[] };
+}
+
+test('?replay=<seed>: die Replay-Szene startet ohne Eingabe, zeigt Spielfeld und Kommentare, ohne Konsolenfehler', async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
+  page.on('pageerror', (error) => errors.push(error.message));
+
+  await page.goto('/?replay=42');
+  await expect(page.locator('#game canvas')).toBeVisible();
+  await page.waitForFunction(() => window.game?.scene.isActive('replay') && window.game.loop.frame > 10);
+  expect(await page.evaluate(() => window.game!.scene.isActive('main'))).toBeFalsy();
+
+  const scene = () =>
+    page.evaluate(() => {
+      const view = window.game!.scene.getScene('replay') as unknown as ReplaySceneView;
+      const texts = view.children.list.filter((c) => c.type === 'Text' && c.visible).map((c) => c.text ?? '');
+      return { comments: view.comments, phase: view.current.match.phase, texts };
+    });
+
+  // Nach einigen Sekunden steht mindestens ein Kommentar im Band, und das Spielfeld ist gezeichnet.
+  await expect.poll(async () => (await scene()).comments.length, { timeout: 10_000 }).toBeGreaterThan(0);
+  const state = await scene();
+  expect(state.texts.some((text) => text.includes('spielt'))).toBe(true);
+  expect(state.texts).toContain('Line 1 · Stufe 1');
+
+  const colors = await page.evaluate(
+    () =>
+      new Promise<number>((resolve) => {
+        window.game!.renderer.snapshot((image) => {
+          const source = image as HTMLImageElement;
+          const canvas = document.createElement('canvas');
+          canvas.width = source.width;
+          canvas.height = source.height;
+          const context = canvas.getContext('2d')!;
+          context.drawImage(source, 0, 0);
+          const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+          const seen = new Set<number>();
+          for (let index = 0; index < data.length; index += 4 * 97) {
+            seen.add((data[index]! << 16) | (data[index + 1]! << 8) | data[index + 2]!);
+          }
+          resolve(seen.size);
+        });
+      }),
+  );
+  expect(colors).toBeGreaterThan(3);
+
+  expect(errors).toEqual([]);
+});
+
+test('?replay mit ungültigem Wert fällt auf die MainScene zurück, ohne Konsolenfehler', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
+  page.on('pageerror', (error) => errors.push(error.message));
+
+  await page.goto('/?replay=abc');
+  await page.waitForFunction(() => window.game?.scene.isActive('main') && window.game.loop.frame > 5);
+  expect(await page.evaluate(() => window.game!.scene.scenes.map((scene) => scene.scene.key))).toEqual(['main']);
+  expect(errors).toEqual([]);
+});
+
 /** Was der Drag-Test von der Szene liest. */
 interface DragSceneView {
   current: { players: { minions: { id: number; line: number; position: number }[] }[] };

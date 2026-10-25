@@ -46,6 +46,32 @@ function chooseLine(state: MatchState, playerIndex: PlayerIndex, cardId: string)
   }
 }
 
+/** Ein einzelner Zug des Bots: gespielte Karte, Zielline (`undefined` ohne Ziel) und der Zustand danach. */
+export interface BotMove {
+  cardId: string;
+  line: number | undefined;
+  state: MatchState;
+}
+
+/** Spielt die nächste Karte des Bots nach `priority`, oder `null`, wenn er nichts mehr spielen kann. */
+export function botStep(
+  state: MatchState,
+  playerIndex: PlayerIndex,
+  priority: readonly string[] = PRIORITY,
+): BotMove | null {
+  const player = state.players[playerIndex];
+  for (const id of priority) {
+    const handIndex = player.hand.indexOf(id);
+    if (handIndex < 0) continue;
+    const def = getCardDef(id);
+    const line = def.target === 'line' ? chooseLine(state, playerIndex, id) : undefined;
+    if (def.target === 'line' && line === undefined) continue;
+    const result = playCard(state, playerIndex, handIndex, line);
+    if (result.ok) return { cardId: id, line, state: result.state };
+  }
+  return null;
+}
+
 /**
  * Spielt die Karten des Bots für diese Runde und meldet ihn bereit. `priority` ist die Kartenreihenfolge
  * (Standard: `PRIORITY`); Karten, die darin fehlen, spielt der Bot nicht.
@@ -56,23 +82,8 @@ export function botPlan(
   priority: readonly string[] = PRIORITY,
 ): MatchState {
   let current = state;
-  for (;;) {
-    const player = current.players[playerIndex];
-    let played = false;
-    for (const id of priority) {
-      const handIndex = player.hand.indexOf(id);
-      if (handIndex < 0) continue;
-      const def = getCardDef(id);
-      const line = def.target === 'line' ? chooseLine(current, playerIndex, id) : undefined;
-      if (def.target === 'line' && line === undefined) continue;
-      const result = playCard(current, playerIndex, handIndex, line);
-      if (result.ok) {
-        current = result.state;
-        played = true;
-        break;
-      }
-    }
-    if (!played) break;
+  for (let move = botStep(current, playerIndex, priority); move; move = botStep(current, playerIndex, priority)) {
+    current = move.state;
   }
   return setReady(current, playerIndex);
 }

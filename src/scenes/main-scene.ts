@@ -39,7 +39,7 @@ const LAYOUT = {
 const STATS_PANEL = { x: 20, y: 60, width: 320, height: 500 };
 const STATS_CLOSE = { x: 120, y: 504, width: 120, height: 40 };
 
-const COLORS = {
+export const COLORS = {
   human: 0x4fc3f7,
   bot: 0xff7043,
   line: 0x1d2333,
@@ -104,6 +104,102 @@ function lineY(owner: number, position: number): number {
   return LAYOUT.enemyTowerY + (position / LINE_LENGTH) * span;
 }
 
+export interface LabelOptions {
+  size?: number;
+  color?: string;
+  origin?: number;
+  width?: number;
+}
+
+/** Wiederverwendete Textobjekte: pro Bild `reset()`, dann `label()` je Text, am Ende `hideUnused()`. */
+export class LabelPool {
+  private texts: Phaser.GameObjects.Text[] = [];
+  private cursor = 0;
+
+  constructor(private readonly scene: Phaser.Scene) {}
+
+  reset(): void {
+    this.cursor = 0;
+  }
+
+  label(text: string, x: number, y: number, options: LabelOptions = {}): void {
+    let object = this.texts[this.cursor];
+    if (!object) {
+      object = this.scene.add.text(0, 0, '', { fontFamily: 'sans-serif', align: 'center' });
+      this.texts.push(object);
+    }
+    this.cursor += 1;
+    object
+      .setText(text)
+      .setPosition(x, y)
+      .setFontSize(options.size ?? 12)
+      .setColor(options.color ?? '#ffffff')
+      .setOrigin(options.origin ?? 0.5, 0.5)
+      .setWordWrapWidth(options.width ?? 0)
+      .setVisible(true);
+  }
+
+  hideUnused(): void {
+    for (let index = this.cursor; index < this.texts.length; index += 1) this.texts[index]!.setVisible(false);
+  }
+}
+
+export type LabelFn = LabelPool['label'];
+
+/** Tower einer Line samt Lebensbalken; `direction` 1 = Balken unter dem Tower, -1 = darüber. */
+export function drawTower(
+  g: Phaser.GameObjects.Graphics,
+  label: LabelFn,
+  x: number,
+  y: number,
+  line: { tower: { hp: number; maxHp: number } },
+  color: number,
+  direction: 1 | -1,
+): void {
+  const { hp, maxHp } = line.tower;
+  const top = y - 12;
+  g.fillStyle(hp > 0 ? color : 0x444b5e, 1).fillRect(x - 28, top, 56, 24);
+  g.fillStyle(0x000000, 0.5).fillRect(x - 28, top + (direction === 1 ? 26 : -8), 56, 5);
+  g.fillStyle(0x66bb6a, 1).fillRect(x - 28, top + (direction === 1 ? 26 : -8), 56 * (hp / maxHp), 5);
+  label(`${Math.ceil(hp)}`, x, y, { size: 12, color: '#10141f' });
+}
+
+/** Hintergrund, Lines, beide Tower und die Line-Stufen des Spielers unten. `highlight` rahmt die Lines gelb. */
+export function drawBoard(g: Phaser.GameObjects.Graphics, label: LabelFn, state: MatchState, highlight = false): void {
+  const human = state.players[HUMAN];
+  const bot = state.players[BOT];
+  g.fillStyle(0x10141f, 1).fillRect(0, 0, VIEW.width, VIEW.height);
+  for (let line = 0; line < LINE_COUNT; line += 1) {
+    const center = LAYOUT.lineCenters[line]!;
+    g.fillStyle(COLORS.line, 1).fillRect(center - 14, LAYOUT.enemyTowerY, 28, LAYOUT.ownTowerY - LAYOUT.enemyTowerY);
+    if (highlight) {
+      g.lineStyle(2, COLORS.selected, 0.6).strokeRect(
+        center - LAYOUT.lineHalfWidth,
+        LAYOUT.enemyTowerY - 30,
+        LAYOUT.lineHalfWidth * 2,
+        LAYOUT.ownTowerY - LAYOUT.enemyTowerY + 60,
+      );
+    }
+    drawTower(g, label, center, LAYOUT.enemyTowerY, bot.lines[line]!, COLORS.bot, -1);
+    drawTower(g, label, center, LAYOUT.ownTowerY, human.lines[line]!, COLORS.human, 1);
+    label(`Line ${line + 1} · Stufe ${human.lines[line]!.level}`, center, LAYOUT.ownTowerY + 38, {
+      size: 10,
+      color: '#9aa4bf',
+    });
+  }
+}
+
+/** Alle Minions beider Spieler; `skipHumanId` lässt einen eigenen Minion aus (der gerade gezogen wird). */
+export function drawMinions(g: Phaser.GameObjects.Graphics, state: MatchState, skipHumanId?: number): void {
+  for (const owner of [BOT, HUMAN]) {
+    for (const minion of state.players[owner]!.minions) {
+      if (owner === HUMAN && skipHumanId === minion.id) continue;
+      const point = minionPoint(owner, minion);
+      g.fillStyle(owner === HUMAN ? COLORS.human : COLORS.bot, 1).fillCircle(point.x, point.y, MINION_RADIUS);
+    }
+  }
+}
+
 /**
  * Spielbare Basis-Szene: liest Touch/Maus, ruft die Match-Logik auf und zeichnet das Ergebnis.
  * Spieler 0 (unten) ist der Mensch, Spieler 1 (oben) der lokale Bot.
@@ -111,8 +207,7 @@ function lineY(owner: number, position: number): number {
 export class MainScene extends Phaser.Scene {
   private state: MatchState = createMatch(1);
   private graphics!: Phaser.GameObjects.Graphics;
-  private texts: Phaser.GameObjects.Text[] = [];
-  private textCursor = 0;
+  private pool!: LabelPool;
   /** Index der angetippten Karte, die auf eine Line wartet. */
   private selected: number | null = null;
   private message = '';
@@ -136,12 +231,12 @@ export class MainScene extends Phaser.Scene {
 
   create(): void {
     this.state = createMatch(parseSeed(window.location.search) ?? Date.now() >>> 0);
-    this.texts = [];
+    this.pool = new LabelPool(this);
     this.selected = null;
     this.message = '';
     this.drag = null;
     this.statsClosed = false;
-    this.graphics =this.add.graphics();
+    this.graphics = this.add.graphics();
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => this.onPointerDown(pointer.worldX, pointer.worldY));
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => this.onPointerMove(pointer.worldX, pointer.worldY));
     this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => this.onPointerUp(pointer.worldX, pointer.worldY));
@@ -290,66 +385,22 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
-  private label(
-    text: string,
-    x: number,
-    y: number,
-    options: { size?: number; color?: string; origin?: number; width?: number } = {},
-  ): void {
-    let object = this.texts[this.textCursor];
-    if (!object) {
-      object = this.add.text(0, 0, '', { fontFamily: 'sans-serif', align: 'center' });
-      this.texts.push(object);
-    }
-    this.textCursor += 1;
-    object
-      .setText(text)
-      .setPosition(x, y)
-      .setFontSize(options.size ?? 12)
-      .setColor(options.color ?? '#ffffff')
-      .setOrigin(options.origin ?? 0.5, 0.5)
-      .setWordWrapWidth(options.width ?? 0)
-      .setVisible(true);
-  }
+  private label: LabelFn = (text, x, y, options) => this.pool.label(text, x, y, options);
 
   private render(): void {
     const g = this.graphics;
     g.clear();
-    this.textCursor = 0;
+    this.pool.reset();
     const state = this.state;
     const human = state.players[HUMAN];
     const bot = state.players[BOT];
 
-    g.fillStyle(0x10141f, 1).fillRect(0, 0, VIEW.width, VIEW.height);
+    drawBoard(g, this.label, state, this.selected !== null);
 
     const phaseText =
       state.phase === 'planning' ? 'Planung' : state.phase === 'combat' ? 'Kampf' : 'Ende';
     this.label(`Runde ${state.round}/${MAX_ROUNDS} · ${phaseText}`, VIEW.width / 2, 16, { size: 14 });
     this.label(`Gegner: ${bot.hand.length} Karten`, VIEW.width / 2, 40, { size: 11, color: '#9aa4bf' });
-
-    for (let line = 0; line < LINE_COUNT; line += 1) {
-      const center = LAYOUT.lineCenters[line]!;
-      g.fillStyle(COLORS.line, 1).fillRect(
-        center - 14,
-        LAYOUT.enemyTowerY,
-        28,
-        LAYOUT.ownTowerY - LAYOUT.enemyTowerY,
-      );
-      if (this.selected !== null) {
-        g.lineStyle(2, COLORS.selected, 0.6).strokeRect(
-          center - LAYOUT.lineHalfWidth,
-          LAYOUT.enemyTowerY - 30,
-          LAYOUT.lineHalfWidth * 2,
-          LAYOUT.ownTowerY - LAYOUT.enemyTowerY + 60,
-        );
-      }
-      this.drawTower(center, LAYOUT.enemyTowerY, bot.lines[line]!, COLORS.bot, -1);
-      this.drawTower(center, LAYOUT.ownTowerY, human.lines[line]!, COLORS.human, 1);
-      this.label(`Line ${line + 1} · Stufe ${human.lines[line]!.level}`, center, LAYOUT.ownTowerY + 38, {
-        size: 10,
-        color: '#9aa4bf',
-      });
-    }
 
     const drag = this.drag?.dragging ? this.drag : null;
     if (drag?.target) {
@@ -367,13 +418,7 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
-    for (const owner of [BOT, HUMAN]) {
-      for (const minion of state.players[owner]!.minions) {
-        if (owner === HUMAN && drag?.minionId === minion.id) continue;
-        const point = minionPoint(owner, minion);
-        g.fillStyle(owner === HUMAN ? COLORS.human : COLORS.bot, 1).fillCircle(point.x, point.y, MINION_RADIUS);
-      }
-    }
+    drawMinions(g, state, drag?.minionId);
     if (drag) g.fillStyle(COLORS.human, 0.85).fillCircle(drag.x, drag.y, MINION_RADIUS + 2);
 
     // Handkarten
@@ -412,7 +457,7 @@ export class MainScene extends Phaser.Scene {
       this.label('Tippen für ein neues Spiel', VIEW.width / 2, 320, { size: 13, color: '#9aa4bf' });
     }
 
-    for (let index = this.textCursor; index < this.texts.length; index += 1) this.texts[index]!.setVisible(false);
+    this.pool.hideUnused();
   }
 
   /** Overlay nach Match-Ende: Ergebnis, Karten pro Line und Schaden je Minion-Typ (liest nur `state.stats`). */
@@ -454,21 +499,5 @@ export class MainScene extends Phaser.Scene {
     const button = STATS_CLOSE;
     g.fillStyle(0x2e7d32, 1).fillRoundedRect(button.x, button.y, button.width, button.height, 8);
     this.label('Schließen', button.x + button.width / 2, button.y + button.height / 2, { size: 14 });
-  }
-
-  private drawTower(
-    x: number,
-    y: number,
-    line: { tower: { hp: number; maxHp: number } },
-    color: number,
-    direction: 1 | -1,
-  ): void {
-    const g = this.graphics;
-    const { hp, maxHp } = line.tower;
-    const top = y - 12;
-    g.fillStyle(hp > 0 ? color : 0x444b5e, 1).fillRect(x - 28, top, 56, 24);
-    g.fillStyle(0x000000, 0.5).fillRect(x - 28, top + (direction === 1 ? 26 : -8), 56, 5);
-    g.fillStyle(0x66bb6a, 1).fillRect(x - 28, top + (direction === 1 ? 26 : -8), 56 * (hp / maxHp), 5);
-    this.label(`${Math.ceil(hp)}`, x, y, { size: 12, color: '#10141f' });
   }
 }

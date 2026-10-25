@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
+import { parseReplaySeed } from './logic/seed';
 import { MainScene, VIEW } from './scenes/main-scene';
+import { ReplayScene } from './scenes/replay-scene';
 
 function startGame(scenes: Phaser.Types.Scenes.SceneType[]): Phaser.Game {
   return new Phaser.Game({
@@ -20,13 +22,21 @@ declare global {
   }
 }
 
+// Mit gültigem `?replay=<seed>` startet die Replay-Szene zuerst (Dev und Produktion); sonst bleibt alles wie bisher.
+const replay = parseReplaySeed(window.location.search) !== null;
+
 if (import.meta.env.DEV) {
   // Dev-Szene: nur im Entwicklungsserver registriert (im Produktions-Build entfällt der Zweig samt Import).
   void import('./scenes/balance-scene').then(({ BalanceScene }) => {
     const balance = new URLSearchParams(window.location.search).get('scene') === 'balance';
     // Die erste Szene der Liste startet automatisch.
-    window.game = startGame(balance ? [BalanceScene, MainScene] : [MainScene, BalanceScene]);
+    const scenes = replay
+      ? [ReplayScene, MainScene, BalanceScene]
+      : balance
+        ? [BalanceScene, MainScene]
+        : [MainScene, BalanceScene];
+    window.game = startGame(scenes);
   });
 } else {
-  window.game = startGame([MainScene]);
+  window.game = startGame(replay ? [ReplayScene, MainScene] : [MainScene]);
 }
