@@ -34,7 +34,9 @@ flowchart LR
    (`moveMinion`) oder zurücknehmen (`undoSummon`). „Bereit“ (`setReady`) ist endgültig für diese Runde.
 3. **Kampf** (`'combat'`): `advance(state, delta)` in festen Ticks à 50 ms, `COMBAT_TICKS = 400` (20 s). Kein Eingriff.
 4. **Auswertung**: nach jedem Tick `destroyedOutcome`; nach 400 Ticks entweder nächste Runde oder – nach `MAX_ROUNDS` –
-   `hpOutcome`. Überlebende Minions bleiben in der nächsten Runde auf ihrer Position.
+   `hpOutcome`. Überlebende Minions werden in `startRound` (`respawnSurvivors`)
+   nach `id` aufsteigend auf die niedrigsten freien Slots ihrer Line zurückgesetzt (HP, Werte und Line bleiben; sie
+   zählen nicht zu `placements`). Gezeichnet wird jeder Minion mittig auf seiner Lane.
 
 ## 3. Kartenhandling
 

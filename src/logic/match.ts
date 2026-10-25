@@ -114,6 +114,30 @@ function createPlayer(): PlayerState {
   };
 }
 
+/**
+ * Setzt die überlebenden Minions eines Spielers auf Slots ihrer Line zurück (verändert `player`): nach `id`
+ * aufsteigend auf die niedrigsten freien Slots, Line und Werte bleiben. Tote Minions entfallen. Gibt es mehr
+ * Überlebende als gültige Slots (in der Praxis unmöglich, Kapazität ≤ Zonen-Slots), stehen die übrigen auf dem
+ * letzten gültigen Slot, damit keiner entfernt wird und keiner über `PLACEMENT_ZONE_END` hinausragt.
+ */
+export function respawnSurvivors(player: PlayerState): void {
+  const alive = player.minions.filter((m) => m.hp > 0);
+  const placed: Minion[] = [];
+  const positions = new Map<number, number>();
+  for (const minion of [...alive].sort((a, b) => a.id - b.id)) {
+    const slotCount = Math.max(lineCapacity(player.lines[minion.line]!.level), alive.length);
+    let slot = firstFreeSlot(placed, minion.line, slotCount);
+    if (slot === undefined) {
+      slot = slotCount - 1;
+      while (slot > 0 && !isValidSlot(slot, slotCount)) slot -= 1;
+    }
+    const position = slotPosition(slot);
+    positions.set(minion.id, position);
+    placed.push({ ...minion, position });
+  }
+  player.minions = alive.map((m) => ({ ...m, position: positions.get(m.id)! }));
+}
+
 /** Beginnt Runde `round` (verändert `state`): Energie setzen, dieselben Karten für beide ziehen, Planung öffnen. */
 function startRound(state: MatchState, round: number): void {
   const count = round === 1 ? START_HAND : DRAW_PER_ROUND;
@@ -127,6 +151,7 @@ function startRound(state: MatchState, round: number): void {
   for (const player of state.players) {
     player.energy = energyForRound(round);
     player.placements = [];
+    respawnSurvivors(player);
     player.hand.push(...drawn);
     player.hand.length = Math.min(player.hand.length, HAND_LIMIT);
   }

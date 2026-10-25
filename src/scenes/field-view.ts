@@ -49,7 +49,7 @@ export function lineY(owner: number, position: number): number {
 /** Mittelpunkt, an dem ein Minion gezeichnet wird. */
 export function minionPoint(owner: number, minion: { id: number; line: number; position: number }): Point {
   return {
-    x: FIELD.lineCenters[minion.line]! + (minion.id % 2 === 0 ? 8 : -8),
+    x: FIELD.lineCenters[minion.line]!,
     y: lineY(owner, minion.position),
   };
 }
