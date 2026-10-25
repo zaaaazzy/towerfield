@@ -29,7 +29,7 @@ import {
 function setup(): MatchState {
   const state = createMatch(1);
   state.players[0].hand = ['summon-minion', 'summon-minion', 'summon-minion', 'summon-minion', 'summon-brute'];
-  state.players[0].energy = 10;
+  state.players[0].energy = 8;
   return state;
 }
 
