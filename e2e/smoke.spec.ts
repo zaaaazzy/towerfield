@@ -357,6 +357,66 @@ test('Nach Spielende zeigt die MainScene eine Teilen-URL, die dasselbe Match als
 
 // Das Verschieben von Minions per Drag-and-Drop prüfen die deterministischen Tests „Drag: …“ in gameplay.spec.ts.
 
+/** Was die Audio-Tests von der Szene lesen. */
+interface AudioSceneView {
+  audioSettings: { music: number; effects: number; muted: boolean };
+}
+
+const audioSettings = (page: Page) =>
+  page.evaluate(() => (window.game!.scene.getScene('main') as unknown as AudioSceneView).audioSettings);
+
+test('Audio: Stumm-Schalter und getrennte Regler wirken sofort und überleben ein Neuladen, ohne Konsolenfehler', async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await openGame(page, 7);
+  expect(await audioSettings(page)).toEqual({ music: 0.5, effects: 0.8, muted: false });
+
+  // Stumm-Schalter oben links.
+  await tap(page, 39, 16);
+  expect((await audioSettings(page)).muted).toBe(true);
+
+  // Regler oben rechts: Schiene von x = 312 (0) bis 352 (1); Musik in der Mitte, Effekte ganz rechts.
+  await tap(page, 332, 9);
+  await tap(page, 352, 23);
+  let settings = await audioSettings(page);
+  expect(settings.music).toBeCloseTo(0.5, 1);
+  expect(settings).toMatchObject({ effects: 1, muted: true });
+  await tap(page, 312, 9);
+  settings = await audioSettings(page);
+  expect(settings.music).toBeCloseTo(0, 1);
+  expect(settings.effects).toBe(1);
+  await tap(page, 39, 16);
+  expect((await audioSettings(page)).muted).toBe(false);
+  await tap(page, 39, 16);
+
+  await openGame(page, 7);
+  expect(await audioSettings(page)).toEqual({ ...settings, muted: true });
+  expect(errors).toEqual([]);
+});
+
+test('Audio: fehlende oder nicht dekodierbare Dateien führen zu keinem Konsolenfehler, das Spiel läuft weiter', async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.route('**/assets/audio/**', (route) =>
+    route.fulfill({ status: 200, contentType: 'audio/wav', body: 'kein Ton' }),
+  );
+  await openGame(page, 7);
+  await tapReady(page);
+  await expect.poll(async () => (await readState(page)).phase).toBe('combat');
+  await fastForwardCombat(page);
+  await page.waitForFunction(() => window.game!.loop.frame > 30);
+  expect(errors).toEqual([]);
+});
+
+test('Audio: das Replay lädt die Audioschicht und spielt ohne Konsolenfehler', async ({ page }) => {
+  const errors = collectErrors(page);
+  await page.goto('/?replay=42');
+  await page.waitForFunction(() => window.game?.scene.isActive('replay') && window.game.loop.frame > 30);
+  expect(errors).toEqual([]);
+});
+
 /** Was der Filter-Test von der Szene liest und setzt (Felder sind zur Laufzeit erreichbar). */
 interface FilterSceneView {
   state: { players: { hand: string[]; energy: number }[] };

@@ -18,6 +18,8 @@ import { HAND_FILTER_NAMES, type HandFilter, isCardVisible, nextHandFilter } fro
 import { updateFlashes } from '../logic/minion-look';
 import { parseSeed } from '../logic/seed';
 import { type DropTarget, dropTargetAt, slotPosition } from '../logic/placement';
+import type { AudioEvent } from '../logic/audio-events';
+import { AudioLayer, audioControlAt, drawAudioControls, sliderValueAt } from './audio';
 import { CardView } from './card-view';
 import { Effects, type Locator } from './effects';
 import {
@@ -111,6 +113,11 @@ export class MainScene extends Phaser.Scene {
   private graphics!: Phaser.GameObjects.Graphics;
   private pool!: LabelPool;
   private effects!: Effects;
+  private audio!: AudioLayer;
+  /** Regler, der gerade gezogen wird (nur Eingabezustand). */
+  private slider: 'music' | 'effects' | null = null;
+  /** Töne zu Aktionen ohne Zustandsunterschied (Karte gespielt), bis zum nächsten Bild. */
+  private pendingAudio: AudioEvent[] = [];
   /** Zustand des letzten Bilds; der Vergleich mit dem aktuellen liefert die Effekte. */
   private fxState: MatchState = this.state;
   /** Szenenzeit und Trefferblitze der Minions (aus `delta` fortgeschrieben, nur Darstellung). */
@@ -136,6 +143,12 @@ export class MainScene extends Phaser.Scene {
 
   preload(): void {
     for (const id of CARD_ART_IDS) this.load.svg(`card-art-${id}`, `assets/cards/${id}.svg`, { width: 268, height: 144 });
+    AudioLayer.preload(this);
+  }
+
+  /** Audio-Einstellungen (nur lesen, z. B. für den Smoke-Test). */
+  get audioSettings(): { music: number; effects: number; muted: boolean } {
+    return this.audio.current;
   }
 
   /** Aktueller Spielzustand (nur lesen), z. B. für den Smoke-Test. */
@@ -161,6 +174,9 @@ export class MainScene extends Phaser.Scene {
     addBackdrop(this, VIEW.width, VIEW.height, BACKDROP_FIELD);
     this.pool = new LabelPool(this);
     this.effects = new Effects(this, FX_LOCATOR);
+    this.audio = new AudioLayer(this, this.state.seed);
+    this.slider = null;
+    this.pendingAudio = [];
     this.selected = null;
     this.hovered = null;
     this.lifts = [];
@@ -175,6 +191,7 @@ export class MainScene extends Phaser.Scene {
     this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => this.onPointerUp(pointer.worldX, pointer.worldY));
     this.input.on('pointerupoutside', () => {
       this.drag = null;
+      this.slider = null;
     });
     this.input.on('gameout', () => {
       this.hovered = null;
@@ -218,6 +235,8 @@ export class MainScene extends Phaser.Scene {
     const events = deltaMs <= FX_MAX_DELTA_MS ? diffFx(previous, this.state) : [];
     this.effects.play(events);
     this.effects.update(deltaMs);
+    this.audio.play([...this.pendingAudio, ...events], deltaMs);
+    this.pendingAudio = [];
     this.minionAnim = {
       timeMs: this.minionAnim.timeMs + deltaMs,
       flashes: updateFlashes(this.minionAnim.flashes, events, deltaMs),
@@ -289,6 +308,16 @@ export class MainScene extends Phaser.Scene {
   }
 
   private onPointerDown(x: number, y: number): void {
+    const control = audioControlAt(x, y);
+    if (control === 'mute') {
+      this.audio.toggleMute();
+      return;
+    }
+    if (control) {
+      this.slider = control;
+      this.setSlider(control, x);
+      return;
+    }
     // Ist eine Karte mit Ziel-Minion gewählt, trifft das Antippen eines eigenen Minions (kein Ziehen).
     if (this.state.phase === 'planning' && this.selectedNeedsMinion()) {
       const targetId = this.ownMinionAt(x, y);
@@ -307,7 +336,17 @@ export class MainScene extends Phaser.Scene {
     this.drag = { minionId, startX: x, startY: y, x, y, dragging: false, target: null, valid: false };
   }
 
+  private setSlider(control: 'music' | 'effects', x: number): void {
+    const value = sliderValueAt(control, x);
+    if (control === 'music') this.audio.setMusic(value);
+    else this.audio.setEffects(value);
+  }
+
   private onPointerMove(x: number, y: number): void {
+    if (this.slider) {
+      this.setSlider(this.slider, x);
+      return;
+    }
     this.hovered = this.cardIndexAt(x, y);
     const drag = this.drag;
     if (!drag) return;
@@ -323,6 +362,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   private onPointerUp(x: number, y: number): void {
+    this.slider = null;
     const drag = this.drag;
     if (!drag) return;
     this.drag = null;
@@ -419,6 +459,7 @@ export class MainScene extends Phaser.Scene {
     this.selected = null;
     this.message = result.ok ? '' : this.explain(result.reason);
     if (result.ok) {
+      this.pendingAudio.push({ kind: 'card-play' });
       const def = getCardDef(cardId);
       if (pose) {
         const { cardWidth: width, cardHeight: height } = HAND_FAN;
@@ -473,6 +514,7 @@ export class MainScene extends Phaser.Scene {
       font: 'heading',
       bold: true,
     });
+    drawAudioControls(g, this.label, this.audio.current);
     this.label(`Gegner: ${bot.hand.length} Karten`, VIEW.width / 2, 40, { size: 11, color: TEXT.dim });
     if (state.event && state.phase !== 'over') {
       const event = getRoundEventDef(state.event);

@@ -301,9 +301,13 @@ src/
     seed.ts        parseSeed, parseReplaySeed, parseReplayMoves
     card-style.ts  Kartentyp → Farbe, Symbol, Banner; describeCard (Darstellung, rein)
     fx-events.ts   diffFx: Effekt-Ereignisse aus zwei Spielzuständen (rein)
+    audio-events.ts   Ereignis → Sound-Schlüssel, Drosselung, Seed-Variation (rein)
+    audio-settings.ts Lautstärken, Stumm, localStorage-Text (rein)
     placement.ts, iso.ts, bot.ts, balance-sim.ts
   scenes/  main-scene.ts (Spiel), replay-scene.ts (Replay), balance-scene.ts (Dev), share.ts (Teilen-URL)
            theme.ts, textures.ts, card-view.ts, field-view.ts, effects.ts, labels.ts (Phaser-Code, nicht in logic/)
+           audio.ts (Phaser-Ton: Laden, Musikschleife, Abspielen, Regler)
+tools/     generate-sfx.mjs (erzeugt die Soundeffekte unter public/assets/audio/)
   main.ts  wählt die Start-Szene
 e2e/       smoke.spec.ts, gameplay.spec.ts, grafik.spec.ts (Playwright)
 docs/      designkonzept.md, grafik-stil.md, anwendung-*.md, handbuch.md
@@ -317,6 +321,17 @@ Grundsätze (aus `AGENTS.md`):
 - Zeit nur über `delta`, Zufall nur über den Seed (`nextRandom` in `game-state.ts`).
 - Assets unter `public/assets/`, im `preload()` ohne führendes `public/` laden.
 - Keine `console.error` für erwartete Fälle (der Smoke-Test wertet sie als Fehler).
+
+### Ton (`audio-events.ts`, `audio-settings.ts`, `scenes/audio.ts`)
+
+`diffFx` liefert zusätzlich Heilung, Schild-Block, Rundenstart, Rundenende und Spielende; `minion-damage` trägt die
+Quelle (Nahkampf, Pfeil, Blitz). `planSounds` ordnet jedes Ereignis genau einem Sound-Schlüssel zu, drosselt (250 ms
+Fenster, 6 Töne gesamt, 2 je Schlüssel, über `delta`) und variiert Tonhöhe und Lautstärke über `nextRandom`. Die
+Einstellungen (Musik, Effekte, Stumm) validiert `audio-settings.ts` und speichert sie im `localStorage`
+(`towerfield.audio`). Die Szene lädt fehlertolerant (fehlende Datei = Stille, kein `console.error`) und startet die
+Musik erst nach der ersten Eingabe. Bedienung, Schlüsseltabelle, Quellen und Lizenzen der Dateien:
+[`anwendung-audio.md`](anwendung-audio.md). Offen: Die Tavernen-Musikdatei fehlt noch (Auftrag schließt eigene
+Komposition aus); die Effekte entstehen mit `npm run audio:sfx`.
 
 ### Replay (`?replay=<seed>`)
 
