@@ -9,9 +9,12 @@ import {
   LINE_COUNT,
   type MatchState,
   MAX_ROUNDS,
+  lineCapacity,
+  moveMinion,
   playCard,
   setReady,
 } from '../logic/match';
+import { type DropTarget, dropTargetAt, type LineGeometry, positionToY, slotPosition } from '../logic/placement';
 
 /** Spielfläche im Hochformat; Phaser skaliert sie per `Scale.FIT` auf den Bildschirm. */
 export const VIEW = { width: 360, height: 640 };
@@ -32,7 +35,48 @@ const LAYOUT = {
   button: { x: 230, y: 592, width: 120, height: 40 },
 };
 
-const COLORS = { human: 0x4fc3f7, bot: 0xff7043, line: 0x1d2333, card: 0x2a3350, selected: 0xffd54a };
+const COLORS = {
+  human: 0x4fc3f7,
+  bot: 0xff7043,
+  line: 0x1d2333,
+  card: 0x2a3350,
+  selected: 0xffd54a,
+  valid: 0x66bb6a,
+  invalid: 0xef5350,
+};
+
+const MINION_RADIUS = 7;
+/** Trefferradius zum Greifen eines Minions; größer als die gezeichnete Fläche, damit Touch trifft. */
+const GRAB_RADIUS = 18;
+/** Bewegung in Spielpixeln, ab der aus einem Antippen ein Ziehen wird. */
+const DRAG_THRESHOLD = 8;
+
+const GEOMETRY: LineGeometry = {
+  lineCenters: LAYOUT.lineCenters,
+  lineHalfWidth: LAYOUT.lineHalfWidth,
+  ownTowerY: LAYOUT.ownTowerY,
+  enemyTowerY: LAYOUT.enemyTowerY,
+};
+
+/** Zeigerzustand: gedrückt auf einem Minion (noch ein Tippen) oder schon am Ziehen. */
+interface DragState {
+  minionId: number;
+  startX: number;
+  startY: number;
+  x: number;
+  y: number;
+  dragging: boolean;
+  target: DropTarget | null;
+  valid: boolean;
+}
+
+/** Mittelpunkt, an dem ein Minion gezeichnet wird. */
+function minionPoint(owner: number, minion: { id: number; line: number; position: number }): { x: number; y: number } {
+  return {
+    x: LAYOUT.lineCenters[minion.line]! + (minion.id % 2 === 0 ? 8 : -8),
+    y: lineY(owner, minion.position),
+  };
+}
 
 function cardRect(index: number): { x: number; y: number; width: number; height: number } {
   const column = index % LAYOUT.cardsPerRow;
@@ -51,9 +95,9 @@ function inside(rect: { x: number; y: number; width: number; height: number }, x
 
 /** Y-Koordinate einer Position (0 bis `LINE_LENGTH`) vom Tower des jeweiligen Spielers aus. */
 function lineY(owner: number, position: number): number {
+  if (owner === HUMAN) return positionToY(position, GEOMETRY);
   const span = LAYOUT.ownTowerY - LAYOUT.enemyTowerY;
-  const fraction = position / LINE_LENGTH;
-  return owner === HUMAN ? LAYOUT.ownTowerY - fraction * span : LAYOUT.enemyTowerY + fraction * span;
+  return LAYOUT.enemyTowerY + (position / LINE_LENGTH) * span;
 }
 
 /**
@@ -68,6 +112,7 @@ export class MainScene extends Phaser.Scene {
   /** Index der angetippten Karte, die auf eine Line wartet. */
   private selected: number | null = null;
   private message = '';
+  private drag: DragState | null = null;
 
   constructor() {
     super('main');
@@ -83,8 +128,14 @@ export class MainScene extends Phaser.Scene {
     this.texts = [];
     this.selected = null;
     this.message = '';
+    this.drag = null;
     this.graphics = this.add.graphics();
-    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => this.handleTap(pointer.worldX, pointer.worldY));
+    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => this.onPointerDown(pointer.worldX, pointer.worldY));
+    this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => this.onPointerMove(pointer.worldX, pointer.worldY));
+    this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => this.onPointerUp(pointer.worldX, pointer.worldY));
+    this.input.on('pointerupoutside', () => {
+      this.drag = null;
+    });
     this.render();
   }
 
@@ -94,7 +145,79 @@ export class MainScene extends Phaser.Scene {
     }
     this.state = advance(this.state, deltaMs);
     if (this.state.phase !== 'planning') this.selected = null;
+    if (this.state.phase !== 'planning' || this.state.ready[HUMAN]) this.drag = null;
     this.render();
+  }
+
+  /** Id des eigenen, verschiebbaren Minions unter dem Punkt, sonst `null`. */
+  private grabbableMinionAt(x: number, y: number): number | null {
+    if (this.state.phase !== 'planning' || this.state.ready[HUMAN]) return null;
+    const player = this.state.players[HUMAN];
+    let best: number | null = null;
+    let bestDistance = GRAB_RADIUS;
+    for (const placement of player.placements) {
+      const minion = player.minions.find((m) => m.id === placement.minionId);
+      if (!minion) continue;
+      const point = minionPoint(HUMAN, minion);
+      const distance = Math.hypot(point.x - x, point.y - y);
+      if (distance <= bestDistance) {
+        best = minion.id;
+        bestDistance = distance;
+      }
+    }
+    return best;
+  }
+
+  private onPointerDown(x: number, y: number): void {
+    const minionId = this.grabbableMinionAt(x, y);
+    if (minionId === null) {
+      this.drag = null;
+      this.handleTap(x, y);
+      return;
+    }
+    this.drag = { minionId, startX: x, startY: y, x, y, dragging: false, target: null, valid: false };
+  }
+
+  private onPointerMove(x: number, y: number): void {
+    const drag = this.drag;
+    if (!drag) return;
+    drag.x = x;
+    drag.y = y;
+    if (!drag.dragging && Math.hypot(x - drag.startX, y - drag.startY) < DRAG_THRESHOLD) return;
+    drag.dragging = true;
+    drag.target = this.targetAt(x, y);
+    drag.valid =
+      drag.target !== null &&
+      drag.target.slot !== null &&
+      moveMinion(this.state, HUMAN, drag.minionId, drag.target.line, drag.target.slot).ok;
+  }
+
+  private onPointerUp(x: number, y: number): void {
+    const drag = this.drag;
+    if (!drag) return;
+    this.drag = null;
+    if (!drag.dragging) {
+      // Kurzes Antippen ohne Ziehen: wie bisher behandeln.
+      this.handleTap(drag.startX, drag.startY);
+      return;
+    }
+    const target = this.targetAt(x, y);
+    if (!target) {
+      this.message = '';
+      return;
+    }
+    const result = moveMinion(this.state, HUMAN, drag.minionId, target.line, target.slot ?? -1);
+    if (result.ok) {
+      this.state = result.state;
+      this.message = '';
+    } else {
+      this.message = this.explain(result.reason);
+    }
+  }
+
+  private targetAt(x: number, y: number): DropTarget | null {
+    const counts = this.state.players[HUMAN].lines.map((line) => lineCapacity(line.level));
+    return dropTargetAt(x, y, GEOMETRY, counts);
   }
 
   private handleTap(x: number, y: number): void {
@@ -141,6 +264,11 @@ export class MainScene extends Phaser.Scene {
         return 'Line ist voll';
       case 'max-level':
         return 'Line ist auf Höchststufe';
+      case 'slot-taken':
+        return 'Platz ist belegt';
+      case 'invalid-slot':
+      case 'invalid-line':
+        return 'Hier ist kein Platz';
       default:
         return '';
     }
@@ -207,12 +335,30 @@ export class MainScene extends Phaser.Scene {
       });
     }
 
-    for (const owner of [BOT, HUMAN]) {
-      for (const minion of state.players[owner]!.minions) {
-        const x = LAYOUT.lineCenters[minion.line]! + (minion.id % 2 === 0 ? 8 : -8);
-        g.fillStyle(owner === HUMAN ? COLORS.human : COLORS.bot, 1).fillCircle(x, lineY(owner, minion.position), 7);
+    const drag = this.drag?.dragging ? this.drag : null;
+    if (drag?.target) {
+      const color = drag.valid ? COLORS.valid : COLORS.invalid;
+      const center = LAYOUT.lineCenters[drag.target.line]!;
+      g.lineStyle(2, color, 0.8).strokeRect(
+        center - LAYOUT.lineHalfWidth,
+        LAYOUT.enemyTowerY - 30,
+        LAYOUT.lineHalfWidth * 2,
+        LAYOUT.ownTowerY - LAYOUT.enemyTowerY + 42,
+      );
+      if (drag.target.slot !== null) {
+        const slotY = lineY(HUMAN, slotPosition(drag.target.slot));
+        g.fillStyle(color, 0.5).fillCircle(center, slotY, GRAB_RADIUS);
       }
     }
+
+    for (const owner of [BOT, HUMAN]) {
+      for (const minion of state.players[owner]!.minions) {
+        if (owner === HUMAN && drag?.minionId === minion.id) continue;
+        const point = minionPoint(owner, minion);
+        g.fillStyle(owner === HUMAN ? COLORS.human : COLORS.bot, 1).fillCircle(point.x, point.y, MINION_RADIUS);
+      }
+    }
+    if (drag) g.fillStyle(COLORS.human, 0.85).fillCircle(drag.x, drag.y, MINION_RADIUS + 2);
 
     // Handkarten
     human.hand.slice(0, HAND_LIMIT).forEach((id, index) => {
