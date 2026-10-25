@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { applyMinionBuff } from './buff';
 import {
   combatTick,
   type CombatPlayer,
@@ -612,5 +613,38 @@ describe('Zerstörer', () => {
     combatTick(plain, 1);
     combatTick(counted, 1, () => {});
     expect(counted).toEqual(plain);
+  });
+});
+
+describe('Kampf mit gestärkten Minions', () => {
+  /** Zwei Minions auf Lane 0 gegen einen Gegner; `buffs` Mal gestärkt wird der erste. */
+  function fight(buffs: number, ticks: number): [CombatPlayer, CombatPlayer] {
+    const players: [CombatPlayer, CombatPlayer] = [player(), player()];
+    const own = { ...minion(1, 0, 50), maxHp: 30 };
+    for (let count = 0; count < buffs; count += 1) applyMinionBuff(own);
+    players[0].minions = [own, { ...minion(2, 1, 50), maxHp: 30 }];
+    players[1].minions = [{ ...minion(10, 0, 50, 60, 6), maxHp: 60 }];
+    for (let tick = 0; tick < ticks; tick += 1) combatTick(players, 1);
+    return players;
+  }
+
+  it('liefert mit mehreren Buffs und gleichem Ausgangszustand zwei identische Endzustände', () => {
+    expect(fight(3, 200)).toEqual(fight(3, 200));
+    expect(fight(2, 80)).toEqual(fight(2, 80));
+  });
+
+  it('gibt dem gestärkten Minion mehr Leben und Schaden als dem ungestärkten', () => {
+    const [plain, once, twice] = [0, 1, 2].map((buffs) => {
+      const own = { ...minion(1, 0, 50), maxHp: 30 };
+      for (let count = 0; count < buffs; count += 1) applyMinionBuff(own);
+      return own;
+    });
+    expect(once!.damage).toBeGreaterThan(plain!.damage);
+    expect(twice!.damage).toBeGreaterThan(once!.damage);
+    expect(twice!.maxHp).toBeGreaterThan(once!.maxHp!);
+    // Nach einem Tick gegen denselben Gegner: der gestärkte Minion hat mehr LP und der Gegner weniger.
+    const hp = (buffs: number, id: number, side: 0 | 1) => fight(buffs, 1)[side].minions.find((m) => m.id === id)!.hp;
+    expect(hp(2, 1, 0)).toBeGreaterThan(hp(0, 1, 0));
+    expect(hp(2, 10, 1)).toBeLessThan(hp(0, 10, 1));
   });
 });

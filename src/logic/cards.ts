@@ -5,21 +5,22 @@
 import { type Explosion, MINION_SPEED } from './combat';
 import { nextRandom } from './game-state';
 
-export type CardType = 'line-upgrade' | 'tower-upgrade' | 'summon' | 'minion-upgrade';
+export type CardType = 'line-upgrade' | 'tower-upgrade' | 'summon' | 'minion-upgrade' | 'minion-buff';
 
 interface CardBase {
   id: string;
   name: string;
   cost: number;
-  /** `line`: die Karte braucht eine gewählte Lane, `none`: sie wirkt ohne Ziel. */
-  target: 'line' | 'none';
+  /** `line`: die Karte braucht eine gewählte Lane, `minion`: einen eigenen lebenden Minion, `none`: sie wirkt ohne Ziel. */
+  target: 'line' | 'minion' | 'none';
 }
 
 export type CardDef =
   | (CardBase & { type: 'line-upgrade' })
   | (CardBase & { type: 'tower-upgrade'; hp: number; damage: number })
   | (CardBase & { type: 'summon'; hp: number; damage: number; range?: number; speed?: number; role?: 'healer' | 'destroyer'; explodes?: Explosion })
-  | (CardBase & { type: 'minion-upgrade'; hp: number; damage: number; scope: 'line' | 'all' });
+  | (CardBase & { type: 'minion-upgrade'; hp: number; damage: number; scope: 'line' | 'all' })
+  | (CardBase & { type: 'minion-buff' });
 
 export const CARD_DEFS: readonly CardDef[] = [
   { id: 'summon-minion', name: 'Minion', type: 'summon', cost: 1, target: 'line', hp: 30, damage: 6, speed: MINION_SPEED },
@@ -61,6 +62,8 @@ export const CARD_DEFS: readonly CardDef[] = [
     damage: 1,
     scope: 'all',
   },
+  // Muss am Ende der Liste stehen: `match-record.ts` kodiert Karten über ihre Position.
+  { id: 'buff-minion', name: 'Minion stärken', type: 'minion-buff', cost: 2, target: 'minion' },
 ];
 
 /** Wie oft jede Karte in einem Durchgang des Decks vorkommt. */
@@ -75,6 +78,7 @@ const COPIES: Readonly<Record<string, number>> = {
   'tower-damage': 1,
   'minion-upgrade-line': 2,
   'minion-upgrade-all': 1,
+  'buff-minion': 1,
 };
 
 export function getCardDef(id: string): CardDef {

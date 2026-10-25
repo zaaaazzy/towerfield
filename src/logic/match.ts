@@ -4,6 +4,7 @@
  * Die Planung wirkt nur auf den eigenen Spieler, deshalb ist die Reihenfolge der Spieler egal. Kein Zufall außer
  * der Deck-Reihenfolge, die der Seed einmal festlegt.
  */
+import { applyMinionBuff } from './buff';
 import { buildDeck, getCardDef } from './cards';
 import {
   combatTick,
@@ -89,7 +90,8 @@ export type PlayError =
   | 'slot-taken'
   | 'no-such-minion'
   | 'line-full'
-  | 'max-level';
+  | 'max-level'
+  | 'invalid-target';
 
 export type PlayResult = { ok: true; state: MatchState } | { ok: false; state: MatchState; reason: PlayError };
 
@@ -201,6 +203,7 @@ function reject(state: MatchState, reason: PlayError): PlayResult {
 /**
  * Spielt die Handkarte `handIndex` für `playerIndex` aus, bei Bedarf auf `lineIndex`. Eine Beschwörung steht danach
  * auf Slot `slot` der Line (ohne Angabe: auf dem ersten freien Slot); bei anderen Karten wird `slot` ignoriert.
+ * Karten mit Ziel `minion` brauchen `targetMinionId`, einen eigenen lebenden Minion.
  * Bei einem Fehler kommt der unveränderte Zustand zurück.
  */
 export function playCard(
@@ -209,6 +212,7 @@ export function playCard(
   handIndex: number,
   lineIndex?: number,
   slot?: number,
+  targetMinionId?: number,
 ): PlayResult {
   if (state.phase !== 'planning') return reject(state, 'not-planning');
   if (state.ready[playerIndex]) return reject(state, 'already-ready');
@@ -232,6 +236,11 @@ export function playCard(
         if (!isSlotFree(current.minions, lineIndex, slot)) return reject(state, 'slot-taken');
         summonSlot = slot;
       }
+    }
+  }
+  if (def.target === 'minion') {
+    if (targetMinionId === undefined || !current.minions.some((m) => m.id === targetMinionId && m.hp > 0)) {
+      return reject(state, 'invalid-target');
     }
   }
   if (def.type === 'line-upgrade' && current.level >= MAX_FIELD_LEVEL) return reject(state, 'max-level');
@@ -280,6 +289,9 @@ export function playCard(
         target.bonus.hp += def.hp;
         target.bonus.damage += def.damage;
       }
+      break;
+    case 'minion-buff':
+      applyMinionBuff(player.minions.find((m) => m.id === targetMinionId)!);
       break;
   }
   return { ok: true, state: next };

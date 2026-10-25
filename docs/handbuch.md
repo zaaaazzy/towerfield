@@ -187,8 +187,16 @@ Bogenschütze 4, Heiler 1, Zerstörer 1, die übrigen Karten wie in der Tabelle.
 | `tower-damage` | Tower Schaden | 2 | +4 Schaden/s | – | – | 1 |
 | `minion-upgrade-line` | Minions Line | 1 | +10 LP, +2 Schaden für künftige Minions der Line | – | – | 2 |
 | `minion-upgrade-all` | Minions alle | 3 | +5 LP, +1 Schaden für künftige Minions aller Lines | – | – | 1 |
+| `buff-minion` | Minion stärken | 2 | +50 % `maxHp`, `hp` und `damage` eines eigenen lebenden Minions (Ziel `minion`, Rundung `Math.round`) | – | – | 1 |
 
 Upgrades ändern nur `hp` und `damage`, wirken nur auf später beschworene Minions und sind nicht rücknehmbar.
+`buff-minion` wirkt dagegen sofort auf einen Minion: `playCard(state, player, handIndex, line?, slot?, targetMinionId?)`
+prüft Phase, Bereit-Status, Karte, Energie und Ziel (eigener Minion mit `hp > 0`, sonst `invalid-target`). Der Zuwachs
+ist `buffGain(Wert) = Math.round(Wert × BUFF_RATIO)` aus `buff.ts`; mehrere Buffs wirken nacheinander auf die aktuellen
+Werte. `line.bonus` bleibt unberührt, `respawnSurvivors` behält die Werte. Der Bot stärkt den lebenden Minion mit dem
+größten `maxHp` oder spielt die Karte nicht. In der Aufzeichnung steht die Ziel-ID anstelle der Lane (`p<R><P>-10-<Id>`,
+Format Version 4; ältere Links sind ungültig, weil das Deck sich ändert). In der UI wählt der Spieler die Karte und tippt
+dann einen eigenen Minion (grüner Ring).
 Eine abgelehnte Karte lässt den Zustand unverändert (`PlayResult.ok === false`, mit `reason`).
 
 Rollen (Werte aus `CARD_DEFS`; ohne eigenes `range` gilt `MINION_RANGE = 4`, ohne `speed` `MINION_SPEED = 10`):
@@ -247,7 +255,7 @@ Kartenwerte, Reichweiten und Tempo stimmen sonst mit dem Designkonzept überein.
   `hp = min(maxHp, hp − Schaden + Heilung)`. Wer im selben Tick auf `hp <= 1e-9` fällt, wird entfernt; Heilung belebt
   nicht wieder. Das Ergebnis hängt nicht von der Spielerreihenfolge ab.
 - Minion-Upgrades wirken nur über den Line-Bonus beim Beschwören; bereits stehende Minions und ihr `maxHp` ändern sich
-  nicht.
+  nicht. Einzige Ausnahme ist `buff-minion`, der `maxHp`, `hp` und `damage` eines Minions sofort anhebt.
 - Heilung erscheint nicht in `DamageCollector` und `match-stats.ts`. Eine Heilstatistik wäre eine eigene Änderung.
 - Mehrere Heiler wirken gleichzeitig aus demselben Vorzustand und können dasselbe Ziel gemeinsam heilen.
 - Das Deck hat eine Karte mehr im Pool, die Kartenreihenfolge je Seed ändert sich (bleibt deterministisch).
@@ -462,7 +470,7 @@ Reine Darstellungs- und Eingabehilfe für die Hand des Menschen (Handlimit 10). 
 | `nextHandFilter(filter)` | nächster Filter, nach Tower wieder Alle |
 | `isCardVisible(type, filter)` | ist eine Karte dieses `CardType` beim Filter sichtbar |
 
-Zuordnung: `summon` → Beschwörung; `line-upgrade` und `minion-upgrade` → Upgrade; `tower-upgrade` → Tower.
+Zuordnung: `summon` → Beschwörung; `line-upgrade`, `minion-upgrade` und `minion-buff` → Upgrade; `tower-upgrade` → Tower.
 
 **Szene (`main-scene.ts`):**
 - `LAYOUT.filterButton`: x 122, y 592, 102 × 40, links neben der Taste bei 230/592 und unter den Handkarten (bis ca.

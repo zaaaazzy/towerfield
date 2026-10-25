@@ -209,41 +209,44 @@ describe('encodeMatch / decodeMatch', () => {
     const valid = encodeMatch(record);
     const bad = [
       '',
-      'v3.',
-      'v3..r10',
+      'v4.',
+      'v4..r10',
       'v0.r10',
       'v1.r10',
       'v2.r10',
-      'v4.r10',
+      'v3.r10',
+      'v5.r10',
       '2.r10',
       'V2.r10',
-      'v3.x10',
-      'v3.r90',
-      'v3.r00',
-      'v3.r12',
-      'v3.r10-1',
-      'v3.r10-',
-      'v3.p10',
-      'v3.p10-',
-      'v3.p10-99',
-      'v3.p10-01',
-      'v3.p10--1',
-      'v3.p10-0-5',
-      'v3.p10-0-1-2',
-      'v3.p10-1.5',
-      'v3.m10-1-1',
-      'v3.m10-1-5-0',
-      'v3.m10-1-1-0-0',
-      'v3.u10',
-      'v3.u10-1-1',
-      'v3.p10-9999999',
-      'v3.p10-0%20',
+      'v4.x10',
+      'v4.r90',
+      'v4.r00',
+      'v4.r12',
+      'v4.r10-1',
+      'v4.r10-',
+      'v4.p10',
+      'v4.p10-',
+      'v4.p10-99',
+      'v4.p10-01',
+      'v4.p10--1',
+      'v4.p10-0-5',
+      'v4.p10-0-1-2',
+      'v4.p10-1.5',
+      'v4.p10-10',
+      'v4.p10-10-1-2',
+      'v4.m10-1-1',
+      'v4.m10-1-5-0',
+      'v4.m10-1-1-0-0',
+      'v4.u10',
+      'v4.u10-1-1',
+      'v4.p10-9999999',
+      'v4.p10-0%20',
       '<script>',
-      'v3.r10 ',
+      'v4.r10 ',
       `${valid}.`,
       `${valid}.zz`,
-      'v3'.padEnd(MAX_MOVES_LENGTH + 1, '.'),
-      `v3${'.r10'.repeat(MAX_MOVES_LENGTH)}`,
+      'v4'.padEnd(MAX_MOVES_LENGTH + 1, '.'),
+      `v4${'.r10'.repeat(MAX_MOVES_LENGTH)}`,
     ];
     for (const text of bad) expect(decodeMatch(1, text), text).toBeNull();
     expect(decodeMatch(1, undefined as unknown as string)).toBeNull();
@@ -251,19 +254,46 @@ describe('encodeMatch / decodeMatch', () => {
   });
 
   it('lehnt Links aus der Version 1 (vertikales Layout) ab, nimmt aber alle fünf Lane-Indizes an', () => {
-    expect(RECORD_VERSION).toBe(3);
+    expect(RECORD_VERSION).toBe(4);
     expect(decodeMatch(1, 'v1.p10-0-0.r10')).toBeNull();
-    // Version 2 kennt den Zerstörer nicht: Kartenindizes und Deck wären andere.
+    // Version 2 kennt den Zerstörer nicht, Version 3 nicht die Karte „Minion stärken“: Kartenindizes und Deck wären andere.
     expect(decodeMatch(1, 'v2.p10-0-0.r10')).toBeNull();
+    expect(decodeMatch(1, 'v3.p10-0-0.r10')).toBeNull();
     for (const lane of [0, 1, 2, 3, 4]) {
-      expect(decodeMatch(1, `v3.p10-0-${lane}`)?.actions).toEqual([
+      expect(decodeMatch(1, `v4.p10-0-${lane}`)?.actions).toEqual([
         { type: 'play', round: 1, player: 0, cardId: 'summon-minion', line: lane },
       ]);
-      expect(decodeMatch(1, `v3.m10-1-${lane}-0`)?.actions).toEqual([
+      expect(decodeMatch(1, `v4.m10-1-${lane}-0`)?.actions).toEqual([
         { type: 'move', round: 1, player: 0, minionId: 1, line: lane, slot: 0 },
       ]);
     }
-    expect(decodeMatch(1, 'v3.p10-0-5')).toBeNull();
+    expect(decodeMatch(1, 'v4.p10-0-5')).toBeNull();
+  });
+
+  it('kodiert die Ziel-Minion-ID der Karte „Minion stärken“ und liest sie zurück', () => {
+    const actions: RecordedAction[] = [
+      { type: 'play', round: 2, player: 0, cardId: 'buff-minion', line: null, minionId: 7 },
+      { type: 'play', round: 3, player: 1, cardId: 'buff-minion', line: null, minionId: 0 },
+    ];
+    const record: RecordedMatch = { ...createRecord(9), actions };
+    const text = encodeMatch(record);
+    expect(text).toBe('v4.p20-10-7.p31-10-0');
+    expect(decodeMatch(9, text)).toEqual(record);
+  });
+
+  it('bricht das Nachspielen von „Minion stärken“ ohne gültiges Ziel mit invalid-target ab', () => {
+    const seed = 3;
+    const cardId = 'buff-minion';
+    const state = createMatch(seed);
+    state.players[0].hand = [cardId];
+    expect(applyAction(state, { type: 'play', round: 1, player: 0, cardId, line: null })).toMatchObject({
+      ok: false,
+      reason: 'invalid-target',
+    });
+    expect(applyAction(state, { type: 'play', round: 1, player: 0, cardId, line: 1, minionId: 1 })).toMatchObject({
+      ok: false,
+      reason: 'invalid-line',
+    });
   });
 
   it('bricht das Nachspielen ab, wenn eine Aktion eine noch gesperrte Lane nutzt', () => {
@@ -292,13 +322,13 @@ describe('encodeMatch / decodeMatch', () => {
 
   it('lehnt einen unzulässigen Seed ab', () => {
     for (const seed of [-1, 1.5, 2 ** 32, Number.NaN, Number.POSITIVE_INFINITY]) {
-      expect(decodeMatch(seed, 'v3')).toBeNull();
+      expect(decodeMatch(seed, 'v4')).toBeNull();
     }
-    expect(decodeMatch(0, 'v3')).toEqual({ ...createRecord(0) });
+    expect(decodeMatch(0, 'v4')).toEqual({ ...createRecord(0) });
   });
 
   it('manipulierte, aber lesbare Daten bricht erst das Nachspielen ab', () => {
-    const text = encodeMatch(playScriptedMatch(5).record).replace(/^v3\./, 'v3.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0.');
+    const text = encodeMatch(playScriptedMatch(5).record).replace(/^v4\./, 'v4.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0.');
     const decoded = decodeMatch(5, text);
     expect(decoded).not.toBeNull();
     const result = replayRecorded(decoded!);
@@ -317,8 +347,9 @@ describe('encodeMatch / decodeMatch', () => {
       'tower-damage',
       'minion-upgrade-line',
       'minion-upgrade-all',
+      'buff-minion',
     ]);
-    expect(RECORD_VERSION).toBe(3);
+    expect(RECORD_VERSION).toBe(4);
   });
 });
 

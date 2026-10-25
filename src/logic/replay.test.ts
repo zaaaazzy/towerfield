@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { simulateMatch, strategiesForSeed } from './balance-sim';
 import { CARD_DEFS } from './cards';
 import { advance } from './match';
-import { decodeMatch, encodeMatch, type RecordedAction, type RecordedMatch } from './match-record';
+import { createRecord, decodeMatch, encodeMatch, type RecordedAction, type RecordedMatch } from './match-record';
 import { playScriptedMatch } from './match-record-fixture';
 import {
   combatDelta,
@@ -144,6 +144,23 @@ describe('Replay einer Aufzeichnung', () => {
     }
   });
 
+  it('spielt Partien mit „Minion stärken“ samt Ziel-Id bis zum gleichen Endstand nach', () => {
+    let withBuff = 0;
+    for (let seed = 1; seed <= 25 && withBuff < 3; seed += 1) {
+      const original = playScriptedMatch(seed);
+      const buffs = original.record.actions.filter((a) => a.type === 'play' && a.cardId === 'buff-minion');
+      if (buffs.length === 0) continue;
+      withBuff += 1;
+      expect(buffs.every((a) => a.type === 'play' && a.minionId !== undefined && a.line === null)).toBe(true);
+      const decoded = decodeMatch(seed, encodeMatch(original.record))!;
+      expect(decoded.actions).toEqual(original.record.actions);
+      const replay = runRecorded(decoded);
+      expect(replay.aborted).toBeNull();
+      expect(replay.match).toEqual(original.state);
+    }
+    expect(withBuff).toBeGreaterThan(0);
+  }, 30_000);
+
   it('führt höchstens eine Aktion pro Pause aus und bleibt reproduzierbar', () => {
     const { record } = playScriptedMatch(5);
     const start = createRecordedReplay(record);
@@ -177,6 +194,16 @@ describe('Replay einer Aufzeichnung', () => {
     expect(replay.aborted).toEqual({ reason: 'invalid-data', index: 0 });
     expect(stepReplay(replay, 5000)).toBe(replay);
     expect(describeAbort(replay.aborted!)).toContain('ungültig');
+  });
+
+  it('bricht „Minion stärken“ ohne gültiges Ziel mit invalid-target ab und beschreibt den Grund', () => {
+    const action: RecordedAction = { type: 'play', round: 1, player: 0, cardId: 'buff-minion', line: null, minionId: 99 };
+    const state = createRecordedReplay({ ...createRecord(3), actions: [action] });
+    state.match.players[0].hand = ['buff-minion'];
+    state.match.players[0].energy = 5;
+    const replay = stepReplay(state, PLAY_PAUSE_MS);
+    expect(replay.aborted).toEqual({ reason: 'invalid-target', index: 0 });
+    expect(describeAbort(replay.aborted!)).toContain('Ziel-Minion');
   });
 
   it('lässt das Bot-Replay unverändert: kein Skript, kein Abbruch', () => {

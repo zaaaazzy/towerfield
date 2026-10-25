@@ -265,7 +265,38 @@ export class MainScene extends Phaser.Scene {
     return slot === null ? null : order[slot]!;
   }
 
+  /** Wartet die gewählte Karte auf einen eigenen Minion als Ziel? */
+  private selectedNeedsMinion(): boolean {
+    const id = this.selected === null ? undefined : this.state.players[HUMAN].hand[this.selected];
+    return id !== undefined && getCardDef(id).target === 'minion';
+  }
+
+  /** Id des eigenen lebenden Minions unter dem Punkt (der nächste im Greifradius), sonst `null`. */
+  private ownMinionAt(x: number, y: number): number | null {
+    let best: number | null = null;
+    let bestDistance = GRAB_RADIUS;
+    for (const minion of this.state.players[HUMAN].minions) {
+      if (minion.hp <= 0) continue;
+      const point = minionPoint(HUMAN, minion);
+      const distance = Math.hypot(point.x - x, point.y - y);
+      if (distance <= bestDistance) {
+        best = minion.id;
+        bestDistance = distance;
+      }
+    }
+    return best;
+  }
+
   private onPointerDown(x: number, y: number): void {
+    // Ist eine Karte mit Ziel-Minion gewählt, trifft das Antippen eines eigenen Minions (kein Ziehen).
+    if (this.state.phase === 'planning' && this.selectedNeedsMinion()) {
+      const targetId = this.ownMinionAt(x, y);
+      if (targetId !== null) {
+        this.drag = null;
+        this.play(this.selected!, undefined, targetId);
+        return;
+      }
+    }
     const minionId = this.grabbableMinionAt(x, y);
     if (minionId === null) {
       this.drag = null;
@@ -358,7 +389,7 @@ export class MainScene extends Phaser.Scene {
       }
       return;
     }
-    if (this.selected === null) return;
+    if (this.selected === null || this.selectedNeedsMinion()) return;
     const target = this.targetAt(x, y);
     if (target && y <= LAYOUT.handTop - 4) this.play(this.selected, target.line);
   }
@@ -369,13 +400,18 @@ export class MainScene extends Phaser.Scene {
     return id !== undefined && isCardVisible(getCardDef(id).type, this.handFilter);
   }
 
-  private play(handIndex: number, line?: number): void {
+  private play(handIndex: number, line?: number, minionId?: number): void {
     const cardId = this.state.players[HUMAN].hand[handIndex];
     if (cardId === undefined) return;
     // Lage vor dem Spielen merken: danach ist die Karte aus der Hand und die Hand ordnet sich neu.
     const { order, poses } = this.handLayout(false);
     const pose = poses[order.indexOf(handIndex)];
-    const done = performAction(this.state, this.record, HUMAN, { type: 'play', cardId, line: line ?? null });
+    const done = performAction(this.state, this.record, HUMAN, {
+      type: 'play',
+      cardId,
+      line: line ?? null,
+      ...(minionId === undefined ? {} : { minionId }),
+    });
     const result = done.result;
     this.state = result.state;
     this.record = done.record;
@@ -401,6 +437,8 @@ export class MainScene extends Phaser.Scene {
         return 'Feld ist auf Höchststufe';
       case 'slot-taken':
         return 'Platz ist belegt';
+      case 'invalid-target':
+        return 'Wähle einen eigenen Minion';
       case 'invalid-slot':
       case 'invalid-line':
         return 'Hier ist kein Platz';
@@ -419,7 +457,8 @@ export class MainScene extends Phaser.Scene {
     const human = state.players[HUMAN];
     const bot = state.players[BOT];
 
-    drawBoard(g, this.label, state, this.selected !== null);
+    const needsMinion = this.selectedNeedsMinion();
+    drawBoard(g, this.label, state, this.selected !== null && !needsMinion);
 
     const phaseText =
       state.phase === 'planning' ? 'Planung' : state.phase === 'combat' ? 'Kampf' : 'Ende';
@@ -451,6 +490,14 @@ export class MainScene extends Phaser.Scene {
 
     drawMinions(g, state, drag?.minionId, this.minionAnim);
     if (drag) drawMinionBody(g, drag.x, drag.y, HUMAN, undefined, 0.85);
+    if (needsMinion) {
+      // Mögliche Ziele der gewählten Karte: alle eigenen lebenden Minions mit grünem Ring.
+      for (const minion of human.minions) {
+        if (minion.hp <= 0) continue;
+        const point = minionPoint(HUMAN, minion);
+        g.lineStyle(2, PALETTE.good, 0.9).strokeCircle(point.x, point.y, GRAB_RADIUS * 0.7);
+      }
+    }
 
     // Handkarten als Fächer in Typ-Reihenfolge; Stapelhöhe und Anhebung stehen in der Pose.
     const cards = human.hand.map((id, index) => ({ def: getCardDef(id), index }));
