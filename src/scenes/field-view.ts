@@ -5,10 +5,10 @@
  */
 import Phaser from 'phaser';
 import { type Explosion, LINE_LENGTH } from '../logic/combat';
-import { isLaneUnlocked, LANE_COUNT, laneName, laneRow, laneTowerOffsets, laneUnlockLevel } from '../logic/lanes';
+import { LANE_COUNT, laneName, laneRow, laneTowerOffsets, laneUnlockLevel } from '../logic/lanes';
 import { getCardDef } from '../logic/cards';
 import { cardTypeStyle } from '../logic/card-style';
-import type { MatchState, PlayerState } from '../logic/match';
+import { isLaneOpen, LANE_COST, type MatchState, type PlayerState } from '../logic/match';
 import {
   bobOffset,
   facing,
@@ -346,8 +346,8 @@ export function drawSlotDots(g: Phaser.GameObjects.Graphics, dots: readonly Slot
 }
 
 /**
- * Lanes, Bauplätze, beide Tower-Gruppen und die Ausbaustufe. Lanes, die der Mensch noch nicht freigeschaltet hat,
- * liegen abgedunkelt mit ihrer Freischalt-Stufe da. `highlight` rahmt die freien Lanes golden.
+ * Lanes, Bauplätze und beide Tower-Gruppen. Lanes, die der Mensch noch nicht gekauft hat, liegen abgedunkelt mit
+ * Preis oder nötiger Feldstufe da. `highlight` rahmt die gekauften Lanes golden.
  */
 export function drawBoard(g: Phaser.GameObjects.Graphics, label: LabelFn, state: MatchState, highlight = false): void {
   const human = state.players[HUMAN];
@@ -358,9 +358,17 @@ export function drawBoard(g: Phaser.GameObjects.Graphics, label: LabelFn, state:
     const center = FIELD.laneCenters[line]!;
     const top = center - FIELD.pathHalfHeight;
     const height = FIELD.pathHalfHeight * 2;
-    if (!isLaneUnlocked(human.level, line)) {
+    if (!isLaneOpen(human, line)) {
       g.fillStyle(PALETTE.black, 0.62).fillRect(left, top, width, height);
-      label(`${laneName(line)} · mit Lane +1 (Lvl ${laneUnlockLevel(line)})`, 180, center, { size: 10, color: TEXT.dim });
+      const buyable = human.level >= laneUnlockLevel(line);
+      label(
+        buyable
+          ? `${laneName(line)} · tippen zum Kaufen (${LANE_COST} Energie)`
+          : `${laneName(line)} · ab Feld Lvl ${laneUnlockLevel(line)} kaufbar`,
+        180,
+        center,
+        { size: 10, color: buyable ? TEXT.gold : TEXT.dim },
+      );
       for (const tower of bot.lines[line]!.towers) drawTower(g, label, lineX(BOT, tower.offset ?? 0), center, tower, BOT);
       continue;
     }
@@ -380,7 +388,6 @@ export function drawBoard(g: Phaser.GameObjects.Graphics, label: LabelFn, state:
       .filter((synergy) => synergy.line === null || synergy.line === line)
       .forEach((synergy, row) => label(describeSynergy(synergy), 268, center - 30 + row * 9, { size: 8, color: TEXT.good }));
   }
-  label(`Feld Lvl ${human.level}`, 330, 58, { size: 10, color: TEXT.gold });
 }
 
 /**

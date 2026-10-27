@@ -4,16 +4,22 @@ import { getCardDef } from './cards';
 import {
   advance,
   BASE_ENERGY,
+  boughtLaneCount,
+  buyLane,
   COMBAT_TICKS,
   createMatch,
   destroyedOutcome,
   DISCARD_ENERGY,
   discardCard,
+  DRAW_COST,
   DRAW_PER_ROUND,
+  drawCard,
   energyForRound,
   HAND_LIMIT,
   hpOutcome,
+  incomeForRound,
   createLaneTowers,
+  LANE_COST,
   laneSlotCounts,
   LINE_COUNT,
   MAX_ENERGY,
@@ -28,9 +34,10 @@ import {
   SPECIALIZE_MIN_LEVEL,
   specializeTarget,
   START_HAND,
-  TOWER_DAMAGE,
   TOWER_HP,
   undoSummon,
+  UPGRADE_COST,
+  upgradeField,
 } from './match';
 import {
   effectiveRange,
@@ -43,7 +50,7 @@ import {
   towersAlive,
 } from './combat';
 import { deriveEventSeed, EARLY_RESPAWN_TICKS, pickRoundEvent, type RoundEventId, TOWER_SHIELD } from './round-events';
-import { isLaneUnlocked, MAX_FIELD_LEVEL, unlockedLanes } from './lanes';
+import { isLaneBuyable, LANE_COUNT, MAX_FIELD_LEVEL } from './lanes';
 import { isSlotFree, validSlots } from './placement';
 
 /** Minion, der steht und nichts trifft: hält die Kampfphase am Leben, ohne den Ausgang zu ändern. */
@@ -194,9 +201,12 @@ describe('Runden-Ereignisse', () => {
     const state = toRound(seedWith('energy'), 3);
     expect(state.event).toBe('energy');
     for (const player of state.players) expect(player.energy).toBe(energyForRound(3) + 1);
-    expect(roundEnergy(3, null)).toBe(energyForRound(3));
-    expect(roundEnergy(6, 'energy')).toBe(MAX_ENERGY);
-    expect(roundEnergy(7, 'energy')).toBe(MAX_ENERGY);
+    const player = createMatch(1).players[0];
+    expect(roundEnergy(player, 3, null)).toBe(energyForRound(3));
+    expect(roundEnergy(player, 3, 'energy')).toBe(energyForRound(3) + 1);
+    // Auch mit Ereignis und vollem Ausbau bleibt die Energie höchstens MAX_ENERGY.
+    const grown = withLevel(createMatch(1), MAX_FIELD_LEVEL).players[0];
+    expect(roundEnergy(grown, MAX_ROUNDS, 'energy')).toBe(MAX_ENERGY);
   });
 
   it('Runden ohne Ereignis verhalten sich wie bisher', () => {
@@ -292,7 +302,10 @@ function withLevel(state: MatchState, level: number): MatchState {
   for (const player of copy.players) {
     player.level = level;
     player.lines.forEach((lane, index) => {
-      if (isLaneUnlocked(level, index) && lane.towers.length === 0) lane.towers = createLaneTowers(index);
+      if (isLaneBuyable(level, index) && lane.towers.length === 0) {
+        lane.bought = true;
+        lane.towers = createLaneTowers(index);
+      }
     });
   }
   return copy;
@@ -459,11 +472,16 @@ describe('Runden und Ziehen', () => {
     expect(state.players[1].hand).toHaveLength(HAND_LIMIT);
   });
 
-  it('begrenzt die Energie auf 8', () => {
-    expect(MAX_ENERGY).toBe(8);
+  it('wächst das Einkommen je Runde um 1, ohne Deckel', () => {
     expect([1, 2, 3, 4, 5, 6].map(energyForRound)).toEqual([3, 4, 5, 6, 7, 8]);
-    expect(energyForRound(7)).toBe(8);
-    expect(energyForRound(100)).toBe(8);
+    expect(energyForRound(100)).toBe(102);
+  });
+
+  it('legt MAX_ENERGY so, dass es das höchste Einkommen nicht abschneidet', () => {
+    // Letzte Runde, voll ausgebaut (Feldstufe und alle Lanes) plus Energieschub: 3 + 7 + 2 + 4 + 1.
+    expect(MAX_ENERGY).toBe(17);
+    const income = incomeForRound(MAX_ROUNDS, MAX_FIELD_LEVEL, LANE_COUNT);
+    expect(income + 1).toBe(MAX_ENERGY);
   });
 
   it('gibt in keiner Runde eines Matches mehr als MAX_ENERGY Energie', () => {
@@ -604,37 +622,16 @@ describe('Karten ausspielen', () => {
     expect(playCard(state, 0, 0, 0)).toMatchObject({ ok: false, reason: 'already-ready' });
   });
 
-  it('schaltet mit „Lane ausbauen“ (Lvl 2) je eine Lane oberhalb und unterhalb frei und verbraucht die Karte', () => {
+  it('hebt mit der Karte „Lane ausbauen“ nur die Feldstufe, Lanes kauft man mit buyLane', () => {
     const state = withHand(createMatch(1), ['line-upgrade', 'summon-minion']);
     const result = playCard(state, 0, 0);
     expect(result.ok).toBe(true);
     const player = result.state.players[0];
     expect(player.level).toBe(2);
-    expect(unlockedLanes(player.level)).toEqual([1, 0, 2]);
-    expect(player.lines.map((line) => line.towers.length)).toEqual([3, 1, 1, 0, 0]);
-    for (const tower of [...player.lines[1]!.towers, ...player.lines[2]!.towers]) {
-      expect(tower).toEqual({ offset: 0, hp: TOWER_HP, maxHp: TOWER_HP, damage: TOWER_DAMAGE });
-    }
+    expect(player.lines.map((line) => line.towers.length)).toEqual([3, 0, 0, 0, 0]);
     expect(player.hand).toEqual(['summon-minion']);
     expect(player.energy).toBe(MAX_ENERGY - getCardDef('line-upgrade').cost);
-    // Gegner und Ausgangszustand bleiben unberührt.
-    expect(result.state.players[1].level).toBe(1);
-    expect(result.state.players[1].lines.map((line) => line.towers.length)).toEqual([3, 0, 0, 0, 0]);
     expect(state.players[0].level).toBe(1);
-  });
-
-  it('schaltet mit der zweiten Ausbaustufe (Lvl 3) je eine weitere Lane oben und unten frei und stoppt dort', () => {
-    let state = withHand(createMatch(1), Array(MAX_FIELD_LEVEL + 1).fill('line-upgrade'), 100);
-    for (let level = 1; level < MAX_FIELD_LEVEL; level += 1) {
-      const result = playCard(state, 0, 0);
-      if (!result.ok) throw new Error(result.reason);
-      state = result.state;
-    }
-    const player = state.players[0];
-    expect(player.level).toBe(MAX_FIELD_LEVEL);
-    expect(unlockedLanes(player.level)).toEqual([3, 1, 0, 2, 4]);
-    expect(player.lines.map((line) => line.towers.length)).toEqual([3, 1, 1, 1, 1]);
-    expect(playCard(state, 0, 0)).toMatchObject({ ok: false, reason: 'max-level' });
   });
 
   it('ignoriert bei „Lane ausbauen“ eine mitgegebene Lane, denn die Karte hat kein Ziel', () => {
@@ -820,7 +817,7 @@ describe('Karten ausspielen', () => {
   });
 
   it('löst gleichzeitige Züge unabhängig von der Spielerreihenfolge auf', () => {
-    const base = withHand(createMatch(1), ['summon-minion', 'line-upgrade', 'tower-hp']);
+    const base = withLevel(withHand(createMatch(1), ['summon-minion', 'line-upgrade', 'tower-hp']), 2);
     const run = (order: PlayerIndex[]) => {
       let state = base;
       for (const player of order) {
@@ -1408,41 +1405,189 @@ describe('Lane-Karten', () => {
   });
 });
 
+/** Hebt das Feld von `player` auf Stufe 2 und kauft die obere und die untere Lane (Lane 1 und 2); wirft bei Fehlern. */
+function buyBoth(state: MatchState, player: PlayerIndex): MatchState {
+  let current = state;
+  for (const step of [
+    () => upgradeField(current, player),
+    () => buyLane(current, player, 1),
+    () => buyLane(current, player, 2),
+  ]) {
+    const result = step();
+    if (!result.ok) throw new Error(result.reason);
+    current = result.state;
+  }
+  return current;
+}
+
 describe('Lanes je Spieler', () => {
   it('lässt dem Gegner seine Lanes, wenn der Spieler eine neue Lane kauft', () => {
-    const state = withHand(createMatch(1), ['line-upgrade'], MAX_ENERGY);
-    const bought = playCard(state, 0, 0);
-    if (!bought.ok) throw new Error(bought.reason);
-    expect(bought.state.players[0].level).toBe(2);
-    expect(bought.state.players[0].lines.map((line) => line.towers.length)).toEqual([3, 1, 1, 0, 0]);
-    expect(bought.state.players[1].level).toBe(1);
-    expect(bought.state.players[1].lines.map((line) => line.towers.length)).toEqual([3, 0, 0, 0, 0]);
-    expect(laneSlotCounts(bought.state.players[1])).toEqual([6, 0, 0, 0, 0]);
+    const bought = buyBoth(withHand(createMatch(1), [], MAX_ENERGY), 0);
+    expect(bought.players[0].level).toBe(2);
+    expect(bought.players[0].lines.map((line) => line.towers.length)).toEqual([3, 1, 1, 0, 0]);
+    expect(bought.players[1].level).toBe(1);
+    expect(bought.players[1].lines.map((line) => line.towers.length)).toEqual([3, 0, 0, 0, 0]);
+    expect(laneSlotCounts(bought.players[1])).toEqual([6, 0, 0, 0, 0]);
     // Der Gegner kann dort weder beschwören noch eine Lane-Karte legen.
-    const enemy = withHand(bought.state, ['summon-minion', 'lane-buff'], MAX_ENERGY);
+    const enemy = withHand(bought, ['summon-minion', 'lane-buff'], MAX_ENERGY);
     expect(playCard(enemy, 1, 0, 1)).toMatchObject({ ok: false, reason: 'invalid-line' });
     expect(playCard(enemy, 1, 1, 1)).toMatchObject({ ok: false, reason: 'invalid-line' });
   });
 
-  it('schaltet die Lanes des Gegners erst mit seiner eigenen Karte frei', () => {
-    let state = withHand(createMatch(1), ['line-upgrade'], MAX_ENERGY);
-    state = playCard(state, 0, 0).state;
-    state.players[1].hand = ['line-upgrade', 'summon-minion'];
-    state.players[1].energy = MAX_ENERGY;
-    const bought = playCard(state, 1, 0);
-    if (!bought.ok) throw new Error(bought.reason);
-    expect(bought.state.players[1].level).toBe(2);
-    expect(bought.state.players[1].lines.map((line) => line.towers.length)).toEqual([3, 1, 1, 0, 0]);
-    expect(bought.state.players[0].level).toBe(2);
-    expect(playCard(bought.state, 1, 0, 1).ok).toBe(true);
+  it('schaltet die Lanes des Gegners erst mit seinem eigenen Kauf frei', () => {
+    const state = buyBoth(buyBoth(withHand(createMatch(1), [], 100), 0), 1);
+    expect(state.players[1].level).toBe(2);
+    expect(state.players[1].lines.map((line) => line.towers.length)).toEqual([3, 1, 1, 0, 0]);
+    expect(state.players[0].level).toBe(2);
+    expect(playCard(withHand(state, ['summon-minion'], MAX_ENERGY), 1, 0, 1).ok).toBe(true);
   });
 
-  it('übersteht Runden: die Lane-Freischaltung beider Spieler bleibt getrennt', () => {
-    let state = withHand(createMatch(1), ['line-upgrade'], MAX_ENERGY);
-    state = playCard(state, 0, 0).state;
+  it('übersteht Runden: gekaufte Lanes und Feldstufe beider Spieler bleiben getrennt', () => {
+    let state = buyBoth(withHand(createMatch(1), [], MAX_ENERGY), 0);
     state = advance(setReady(setReady(state, 0), 1), COMBAT_TICKS * TICK_MS);
     expect(state.players.map((p) => p.level)).toEqual([2, 1]);
+    expect(state.players.map(boughtLaneCount)).toEqual([3, 1]);
     expect(state.players[1].lines.map((line) => line.towers.length)).toEqual([3, 0, 0, 0, 0]);
+  });
+});
+
+describe('Wirtschaft', () => {
+  const energyOf = (state: MatchState, player: PlayerIndex = 0) => state.players[player].energy;
+
+  it('startet beide Spieler auf Feldstufe 1 mit einem Turm-Satz und genau einer Lane', () => {
+    const state = createMatch(1);
+    for (const player of state.players) {
+      expect(player.level).toBe(1);
+      expect(boughtLaneCount(player)).toBe(1);
+      expect(player.lines.map((line) => line.bought)).toEqual([true, false, false, false, false]);
+      expect(player.lines.map((line) => line.towers.length)).toEqual([3, 0, 0, 0, 0]);
+      expect(player.energy).toBe(3);
+    }
+  });
+
+  it('berechnet das Einkommen als 3 + (Runde − 1) + Festungen + Lanes', () => {
+    expect(incomeForRound(1, 1, 1)).toBe(3);
+    expect(incomeForRound(2, 1, 1)).toBe(4);
+    expect(incomeForRound(2, 2, 1)).toBe(5);
+    expect(incomeForRound(2, 2, 2)).toBe(6);
+    expect(incomeForRound(5, 3, 5)).toBe(3 + 4 + 2 + 4);
+  });
+
+  it('bringt ein Upgrade in Runde 1 ab Runde 2 mit +1 Einkommen', () => {
+    const upgraded = upgradeField(createMatch(1), 0);
+    if (!upgraded.ok) throw new Error(upgraded.reason);
+    expect(energyOf(upgraded.state)).toBe(3 - UPGRADE_COST);
+    const next = advance(setReady(setReady(upgraded.state, 0), 1), COMBAT_TICKS * TICK_MS);
+    expect(next.round).toBe(2);
+    expect(energyOf(next, 0)).toBe(energyForRound(2) + 1);
+    expect(energyOf(next, 1)).toBe(energyForRound(2));
+  });
+
+  it('zählt gekaufte Lanes mit +1 je Lane zum Einkommen', () => {
+    const state = buyBoth(withHand(createMatch(1), [], MAX_ENERGY), 0);
+    const next = advance(setReady(setReady(state, 0), 1), COMBAT_TICKS * TICK_MS);
+    expect(energyOf(next, 0)).toBe(incomeForRound(2, 2, 3));
+    expect(energyOf(next, 0)).toBe(energyForRound(2) + 1 + 2);
+  });
+
+  it('erlaubt das Upgrade in jeder Planungsphase bis zur höchsten Feldstufe, danach max-level', () => {
+    let state = withHand(createMatch(1), [], 100);
+    for (let level = 1; level < MAX_FIELD_LEVEL; level += 1) {
+      const result = upgradeField(state, 0);
+      if (!result.ok) throw new Error(result.reason);
+      state = result.state;
+    }
+    expect(state.players[0].level).toBe(MAX_FIELD_LEVEL);
+    expect(upgradeField(state, 0)).toMatchObject({ ok: false, reason: 'max-level' });
+  });
+
+  it('lehnt ein Upgrade ohne Energie, im Kampf und nach „Bereit“ ab und lässt den Zustand unberührt', () => {
+    const poor = withHand(createMatch(1), [], UPGRADE_COST - 1);
+    const before = structuredClone(poor);
+    expect(upgradeField(poor, 0)).toMatchObject({ ok: false, reason: 'not-enough-energy' });
+    expect(poor).toEqual(before);
+    expect(upgradeField(setReady(poor, 0), 0)).toMatchObject({ ok: false, reason: 'already-ready' });
+    const combat = setReady(setReady(withHand(createMatch(1), [], 9), 0), 1);
+    expect(upgradeField(combat, 0)).toMatchObject({ ok: false, reason: 'not-planning' });
+  });
+
+  it('wertet das Upgrade für Synergien wie die Karte „Lane ausbauen“', () => {
+    const archer = playCard(withHand(createMatch(1), ['summon-archer'], 9), 0, 0, 0);
+    if (!archer.ok) throw new Error(archer.reason);
+    const upgraded = upgradeField(archer.state, 0);
+    if (!upgraded.ok) throw new Error(upgraded.reason);
+    expect(upgraded.state.players[0].synergies.map((s) => s.id)).toEqual(['archer-line-upgrade']);
+  });
+
+  it('lehnt den Lane-Kauf auf Feldstufe 1 mit level-too-low ab', () => {
+    const state = withHand(createMatch(1), [], 100);
+    expect(buyLane(state, 0, 1)).toMatchObject({ ok: false, reason: 'level-too-low' });
+    expect(buyLane(state, 0, 2)).toMatchObject({ ok: false, reason: 'level-too-low' });
+  });
+
+  it('kauft auf Feldstufe 2 die obere und die untere Lane je für 5 Energie, einzeln und beide', () => {
+    const upgraded = upgradeField(withHand(createMatch(1), [], 100), 0);
+    if (!upgraded.ok) throw new Error(upgraded.reason);
+    const base = upgraded.state;
+    const upper = buyLane(base, 0, 1);
+    if (!upper.ok) throw new Error(upper.reason);
+    expect(upper.state.players[0].lines.map((line) => line.bought)).toEqual([true, true, false, false, false]);
+    expect(energyOf(upper.state)).toBe(energyOf(base) - LANE_COST);
+    expect(upper.state.players[0].lines[1]!.towers).toHaveLength(1);
+    const lower = buyLane(base, 0, 2);
+    if (!lower.ok) throw new Error(lower.reason);
+    expect(lower.state.players[0].lines.map((line) => line.bought)).toEqual([true, false, true, false, false]);
+    const both = buyLane(upper.state, 0, 2);
+    if (!both.ok) throw new Error(both.reason);
+    expect(boughtLaneCount(both.state.players[0])).toBe(3);
+    expect(energyOf(both.state)).toBe(energyOf(base) - 2 * LANE_COST);
+  });
+
+  it('lehnt Lane-Käufe ohne Energie, doppelt, mit ungültiger Lane und nach „Bereit“ ab', () => {
+    const rich = buyBoth(withHand(createMatch(1), [], 100), 0);
+    expect(buyLane(rich, 0, 1)).toMatchObject({ ok: false, reason: 'lane-owned' });
+    expect(buyLane(rich, 0, 0)).toMatchObject({ ok: false, reason: 'lane-owned' });
+    expect(buyLane(rich, 0, 9)).toMatchObject({ ok: false, reason: 'invalid-line' });
+    expect(buyLane(rich, 0, -1)).toMatchObject({ ok: false, reason: 'invalid-line' });
+    expect(buyLane(rich, 0, 1.5)).toMatchObject({ ok: false, reason: 'invalid-line' });
+    const upgraded = upgradeField(withHand(createMatch(1), [], 100), 0);
+    if (!upgraded.ok) throw new Error(upgraded.reason);
+    const poor = withHand(upgraded.state, [], LANE_COST - 1);
+    expect(buyLane(poor, 0, 1)).toMatchObject({ ok: false, reason: 'not-enough-energy' });
+    expect(buyLane(setReady(poor, 0), 0, 1)).toMatchObject({ ok: false, reason: 'already-ready' });
+  });
+
+  it('zieht für 1 Energie eine Karte, beide Spieler sehen dieselbe Karte', () => {
+    const state = withHand(createMatch(1), ['summon-minion'], 3);
+    const first = drawCard(state, 0);
+    if (!first.ok) throw new Error(first.reason);
+    expect(first.state.players[0].hand).toHaveLength(2);
+    expect(energyOf(first.state)).toBe(3 - DRAW_COST);
+    const second = drawCard(first.state, 0);
+    if (!second.ok) throw new Error(second.reason);
+    expect(second.state.players[0].hand).toHaveLength(3);
+    const other = drawCard(state, 1);
+    if (!other.ok) throw new Error(other.reason);
+    expect(other.state.players[1].hand[1]).toBe(first.state.players[0].hand[1]);
+  });
+
+  it('lehnt das Ziehen bei 0 Energie, bei vollem Handlimit und nach „Bereit“ ab', () => {
+    expect(drawCard(withHand(createMatch(1), [], 0), 0)).toMatchObject({ ok: false, reason: 'not-enough-energy' });
+    const full = withHand(createMatch(1), Array(HAND_LIMIT).fill('summon-minion'), 3);
+    expect(drawCard(full, 0)).toMatchObject({ ok: false, reason: 'hand-full' });
+    expect(drawCard(setReady(withHand(createMatch(1), [], 3), 0), 0)).toMatchObject({ ok: false, reason: 'already-ready' });
+  });
+
+  it('erlaubt in Runde 1 mit den 3 Startenergie drei Stufe-1-Zauber', () => {
+    expect(getCardDef('tower-hp').cost).toBe(1);
+    expect(energyOf(createMatch(1))).toBe(3);
+    let state = withHand(createMatch(1), ['tower-hp', 'tower-hp', 'tower-hp'], 3);
+    for (let index = 0; index < 3; index += 1) {
+      const result = playCard(state, 0, 0, 0);
+      if (!result.ok) throw new Error(result.reason);
+      state = result.state;
+    }
+    expect(energyOf(state)).toBe(0);
   });
 });
 
@@ -1474,7 +1619,8 @@ describe('Spielende bei zerstörten Türmen', () => {
 describe('Synergien', () => {
   const archerDef = getCardDef('summon-archer');
   const ARCHER_RANGE = archerDef.type === 'summon' ? (archerDef.range ?? MINION_RANGE) : MINION_RANGE;
-  const start = () => withHand(createMatch(5), ['summon-archer', 'line-upgrade', 'summon-archer', 'summon-minion', 'summon-minion']);
+  const start = () =>
+    withLevel(withHand(createMatch(5), ['summon-archer', 'line-upgrade', 'summon-archer', 'summon-minion', 'summon-minion']), 2);
 
   /** Spielt die Handkarten mit den IDs der Reihe nach (Ziel-Line nur für Beschwörungen); wirft bei Fehlern. */
   function playAll(state: MatchState, plays: [string, number?][], player: PlayerIndex = 0): MatchState {

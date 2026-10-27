@@ -102,7 +102,8 @@ const COPIES: Readonly<Record<string, number>> = {
   'summon-archer': 2,
   'summon-healer': 1,
   'summon-destroyer': 1,
-  'line-upgrade': 2,
+  // Das Upgrade ist eine Aktion (`upgradeField`), keine Karte im Deck mehr; die Kartendefinition bleibt für Synergien.
+  'line-upgrade': 0,
   'tower-hp': 2,
   'tower-damage': 1,
   'tower-lightning': 1,

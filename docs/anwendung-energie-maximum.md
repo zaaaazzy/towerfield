@@ -1,5 +1,8 @@
 # Anwendung: Energie-Maximum von 10 auf 8 senken
 
+> **Überholt:** `MAX_ENERGY` ist seit dem neuen Wirtschaftskonzept 17 und `energyForRound` hat keinen Deckel mehr. Maßgeblich
+> ist [Wirtschaft](anwendung-wirtschaft.md).
+
 Diese Seite beschreibt, was der Auftrag „Energie-Maximum von 10 auf 8 senken“ umgesetzt hat und worauf zu achten ist. Die
 Regel steht im [Designkonzept](designkonzept.md).
 

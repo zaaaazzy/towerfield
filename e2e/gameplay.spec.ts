@@ -44,6 +44,8 @@ import {
   setHand,
   slotPoint,
   tap,
+  UPGRADE_TAP,
+  DRAW_TAP,
   unlockField,
   tapCard,
   tapLine,
@@ -141,7 +143,7 @@ test('Spezialisierungskarte auf der Start-Lane wird mit Hinweis abgelehnt, auf e
 
   await tapCard(page, 0);
   await tapLine(page, 0);
-  await expect.poll(() => hasVisibleText(page, 'Lane-Level zu niedrig')).toBe(true);
+  await expect.poll(() => hasVisibleText(page, 'Feldstufe zu niedrig')).toBe(true);
   const rejected = await readState(page);
   expect(rejected.players[0].hand).toEqual(before.players[0].hand);
   expect(rejected.players[0].energy).toBe(energy);
@@ -262,32 +264,70 @@ test('Schild-Turm: nach dem Ausspielen per Tippen erleidet der angreifende Minio
   expect(errors).toEqual([]);
 });
 
-test('das Feld startet mit einer Lane;„Lane +1“ schaltet je eine Lane oben und unten frei (Lvl 2, dann Lvl 3)', async ({
+test('Wirtschaft: Start mit einer Lane, „Upgrade“ hebt die Feldstufe, gesperrte Lanes lassen sich per Tippen kaufen, „Ziehen“ kostet 1', async ({
   page,
 }) => {
   const errors = collectErrors(page);
   await openGame(page);
-  const towerCounts = async () => (await readState(page)).players[0].lines.map((line) => line.towers.length);
-  expect(await towerCounts()).toEqual([3, 0, 0, 0, 0]);
-  expect(await hasVisibleText(page, 'Start-Lane')).toBe(true);
-  expect(await hasVisibleText(page, 'Lvl 2 oben · mit Lane +1 (Lvl 2)')).toBe(true);
-  expect(await hasVisibleText(page, 'Lvl 2 oben')).toBe(false);
+  const player = async () => (await readState(page)).players[0];
+  const towerCounts = async () => (await player()).lines.map((line) => line.towers.length);
+  const setEnergy = (energy: number) =>
+    page.evaluate((value) => {
+      const scene = window.game!.scene.getScene('main') as unknown as { state: { players: { energy: number }[] } };
+      scene.state.players[0]!.energy = value;
+    }, energy);
 
-  for (const [level, towers, shown] of [
-    [2, [3, 1, 1, 0, 0], 'Lvl 2 unten'],
-    [3, [3, 1, 1, 1, 1], 'Lvl 3 oben'],
-  ] as const) {
-    await page.evaluate(() => {
-      const scene = window.game!.scene.getScene('main') as unknown as { state: { players: { hand: string[]; energy: number }[] } };
-      scene.state.players[0]!.hand = ['line-upgrade'];
-      scene.state.players[0]!.energy = 10;
-    });
-    await tapCard(page, 0);
-    await expect.poll(async () => (await readState(page)).players[0].level).toBe(level);
-    expect(await towerCounts()).toEqual(towers);
-    await expect.poll(() => hasVisibleText(page, shown)).toBe(true);
-  }
-  expect((await readState(page)).players[1].level).toBe(1);
+  // Start: eine Lane, 3 Energie, Einkommen 3 (nächste Runde 4); die anderen Lanes nennen ihre Bedingung.
+  expect(await towerCounts()).toEqual([3, 0, 0, 0, 0]);
+  expect((await player()).energy).toBe(3);
+  expect(await hasVisibleText(page, 'Start-Lane')).toBe(true);
+  expect(await hasVisibleText(page, 'Feld Lvl 1 · Einkommen 3, nächste Runde 4')).toBe(true);
+  expect(await hasVisibleText(page, 'Lvl 2 oben · ab Feld Lvl 2 kaufbar')).toBe(true);
+  expect(await hasVisibleText(page, 'Upgrade -2')).toBe(true);
+  expect(await hasVisibleText(page, 'Ziehen -1')).toBe(true);
+
+  // Auf Feldstufe 1 lehnt der Lane-Kauf ab.
+  await setEnergy(20);
+  await tapLine(page, 1);
+  await expect.poll(() => hasVisibleText(page, 'Feldstufe zu niedrig')).toBe(true);
+  expect(await towerCounts()).toEqual([3, 0, 0, 0, 0]);
+
+  // Upgrade: Feldstufe 2, 2 Energie weniger, Einkommen +1; die Lanes zeigen jetzt ihren Preis.
+  await tap(page, UPGRADE_TAP.x, UPGRADE_TAP.y);
+  await expect.poll(async () => (await player()).level).toBe(2);
+  expect((await player()).energy).toBe(18);
+  await expect.poll(() => hasVisibleText(page, 'Feld Lvl 2 · Einkommen 4, nächste Runde 5')).toBe(true);
+  await expect.poll(() => hasVisibleText(page, 'Lvl 2 oben · tippen zum Kaufen (5 Energie)')).toBe(true);
+
+  // Obere und untere Lane einzeln kaufen: je 5 Energie, +1 Einkommen.
+  await tapLine(page, 1);
+  await expect.poll(towerCounts).toEqual([3, 1, 0, 0, 0]);
+  expect((await player()).energy).toBe(13);
+  await tapLine(page, 2);
+  await expect.poll(towerCounts).toEqual([3, 1, 1, 0, 0]);
+  expect((await player()).energy).toBe(8);
+  await expect.poll(() => hasVisibleText(page, 'Feld Lvl 2 · Einkommen 6, nächste Runde 7')).toBe(true);
+
+  // Zweite Ausbaustufe: Lane 3 und 4 werden kaufbar.
+  await tap(page, UPGRADE_TAP.x, UPGRADE_TAP.y);
+  await expect.poll(async () => (await player()).level).toBe(3);
+  await expect.poll(() => hasVisibleText(page, 'Lvl 3 oben · tippen zum Kaufen (5 Energie)')).toBe(true);
+  await tapLine(page, 3);
+  await expect.poll(towerCounts).toEqual([3, 1, 1, 1, 0]);
+
+  // Ziehen kostet 1 Energie und bringt eine Karte; bei 0 Energie lehnt es ab.
+  await setEnergy(1);
+  const handSize = (await player()).hand.length;
+  await tap(page, DRAW_TAP.x, DRAW_TAP.y);
+  await expect.poll(async () => (await player()).hand.length).toBe(handSize + 1);
+  expect((await player()).energy).toBe(0);
+  await tap(page, DRAW_TAP.x, DRAW_TAP.y);
+  await expect.poll(() => hasVisibleText(page, 'Nicht genug Energie')).toBe(true);
+  expect((await player()).hand).toHaveLength(handSize + 1);
+
+  // Der Gegner (Bot) hat seine eigene Wirtschaft: mit 3 Startenergie reicht es für das Upgrade, nicht für eine Lane.
+  const enemy = (await readState(page)).players[1];
+  expect(enemy.lines.map((line) => line.bought)).toEqual([true, false, false, false, false]);
   expect(errors).toEqual([]);
 });
 
@@ -563,13 +603,14 @@ test('Drag: belegte Turm-Slots sind kein Ziel, ausserhalb der Reichweite bleibt 
   expect(errors).toEqual([]);
 });
 
-/** Gibt der Lane `line` des Menschen im Szenenzustand einen Tower (wie nach dem Ausbau durch „Lane +1“). */
+/** Gibt der Lane `line` des Menschen im Szenenzustand einen Tower (wie nach dem Kauf der Lane). */
 async function ensureTower(page: Page, line: number): Promise<void> {
   await page.evaluate((index) => {
     const scene = window.game!.scene.getScene('main') as unknown as {
-      state: { players: { lines: { towers: object[] }[] }[] };
+      state: { players: { lines: { bought: boolean; towers: object[] }[] }[] };
     };
     const lane = scene.state.players[0]!.lines[index]!;
+    lane.bought = true;
     if (lane.towers.length === 0) lane.towers = [{ offset: 0, hp: 100, maxHp: 100, damage: 8 }];
   }, line);
 }

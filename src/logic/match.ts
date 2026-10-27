@@ -30,7 +30,7 @@ import {
   type RoundEventId,
   TOWER_SHIELD,
 } from './round-events';
-import { isLaneUnlocked, LANE_COUNT, laneTowerOffsets, laneUnlockLevel, MAX_FIELD_LEVEL } from './lanes';
+import { LANE_COUNT, laneTowerOffsets, laneUnlockLevel, MAX_FIELD_LEVEL } from './lanes';
 import { firstFreeSlot, freeSlots, isSlotFree, isValidSlot, slotPosition, validSlots } from './placement';
 import { type ActiveSynergy, activeSynergies, type PlayedCard, synergyBonus } from './synergies';
 
@@ -41,9 +41,35 @@ export const DRAW_PER_ROUND = 3;
 /** Handlimit (bestätigt, siehe docs/designkonzept.md): Karten über dem Limit verfallen am Ende der Hand. */
 export const HAND_LIMIT = 10;
 export const MAX_ROUNDS = 8;
+
+// Wirtschaft (siehe docs/anwendung-wirtschaft.md): Energie ist die einzige Währung. Das Rundeneinkommen setzt sich
+// aus diesen Konstanten zusammen; zum Anpassen der Zählweise genügt es, sie oder die Start-Werte zu ändern.
+/** Einkommen in Runde 1 ohne Ausbau; die Start-Festung und die Start-Lane stecken schon darin. */
 export const BASE_ENERGY = 3;
+/** Einkommen, das mit jeder Runde dazukommt. */
 export const ENERGY_PER_ROUND = 1;
-export const MAX_ENERGY = 8;
+/** Einkommen je Festung (Feldstufe) und je gekaufter Lane über den Start-Wert hinaus. */
+export const INCOME_PER_FORTRESS = 1;
+export const INCOME_PER_LANE = 1;
+/** Festungen (= Feldstufe) und Lanes zu Spielbeginn; sie bringen kein Zusatzeinkommen. */
+export const START_FORTRESSES = 1;
+export const START_LANES = 1;
+/** Energie für ein Upgrade der Feldstufe (bringt ab der nächsten Runde `INCOME_PER_FORTRESS` mehr). */
+export const UPGRADE_COST = 2;
+/** Energie für den Kauf einer Lane (ab der Feldstufe, die `laneUnlockLevel` verlangt). */
+export const LANE_COST = 5;
+/** Energie für das Ziehen einer zusätzlichen Karte. */
+export const DRAW_COST = 1;
+/**
+ * Höchstes Rundeneinkommen (letzte Runde, voll ausgebautes Feld) plus Energieschub-Ereignis. Die Obergrenze liegt
+ * genau dort, damit sie das Einkommen nie abschneidet; sie begrenzt nur die Energie aus dem Abwerfen.
+ */
+export const MAX_ENERGY =
+  BASE_ENERGY +
+  (MAX_ROUNDS - 1) * ENERGY_PER_ROUND +
+  (MAX_FIELD_LEVEL - START_FORTRESSES) * INCOME_PER_FORTRESS +
+  (LANE_COUNT - START_LANES) * INCOME_PER_LANE +
+  EVENT_ENERGY_BONUS;
 /** Energie, die das Verschieben eines Minions auf einen anderen Turm-Slot kostet. */
 export const MOVE_COST = 1;
 /** Energie, die das Abwerfen einer Handkarte bringt; über `MAX_ENERGY` verfällt sie. */
@@ -62,8 +88,10 @@ export type Phase = 'planning' | 'combat' | 'over';
 export type Outcome = 'player0' | 'player1' | 'draw';
 export type PlayerIndex = 0 | 1;
 
-/** Eine Lane (siehe `lanes.ts`). Ist sie noch nicht frei, hat sie keine Tower. */
+/** Eine Lane (siehe `lanes.ts`). Ist sie noch nicht gekauft, hat sie keine Tower. */
 export interface LineState {
+  /** Gekauft (frei)? Die Start-Lane ist von Beginn an gekauft, die anderen kauft `buyLane` ab der nötigen Feldstufe. */
+  bought: boolean;
   towers: Tower[];
   /** Dauerhafter Bonus für künftig beschworene Minions dieser Lane. */
   bonus: { hp: number; damage: number };
@@ -74,9 +102,11 @@ export interface LineState {
 }
 
 export interface PlayerState extends CombatPlayer {
-  /** Ausbaustufe des Feldes (1 bis `MAX_FIELD_LEVEL`); bestimmt, welche Lanes frei sind. Gilt je Spieler. */
+  /** Ausbaustufe des Feldes (1 bis `MAX_FIELD_LEVEL`); bestimmt, welche Lanes sich kaufen lassen. Gilt je Spieler. */
   level: number;
   energy: number;
+  /** Zusätzlich gezogene Karten (`drawCard`); bestimmt die nächste Karte aus dem Deck. */
+  extraDrawn: number;
   /** Karten-IDs in der Reihenfolge, in der sie auf die Hand kamen. */
   hand: string[];
   lines: LineState[];
@@ -122,6 +152,8 @@ export type PlayError =
   | 'line-full'
   | 'max-level'
   | 'level-too-low'
+  | 'lane-owned'
+  | 'hand-full'
   | 'already-specialized'
   | 'invalid-target'
   | 'lane-slot-taken';
@@ -154,28 +186,59 @@ export function specializeTarget(towers: Tower[]): Tower | undefined {
     .reduce<Tower | undefined>((best, tower) => (!best || (tower.offset ?? 0) > (best.offset ?? 0) ? tower : best), undefined);
 }
 
+/** Einkommen allein aus der Runde: `BASE_ENERGY` in Runde 1, danach `ENERGY_PER_ROUND` mehr je Runde. */
 export function energyForRound(round: number): number {
-  return Math.min(MAX_ENERGY, BASE_ENERGY + (round - 1) * ENERGY_PER_ROUND);
+  return BASE_ENERGY + (round - 1) * ENERGY_PER_ROUND;
 }
 
-/** Energie zu Beginn der Runde: `energyForRound` plus der Bonus des Ereignisses, höchstens `MAX_ENERGY`. */
-export function roundEnergy(round: number, event: RoundEventId | null): number {
+/** Zahl der gekauften Lanes (die Start-Lane zählt mit). */
+export function boughtLaneCount(player: PlayerState): number {
+  return player.lines.filter((line) => line.bought).length;
+}
+
+/**
+ * Rundeneinkommen: `3 + (Runde − 1) + Festungen + Lanes`, wobei Festungen die Upgrades über die Start-Festung hinaus
+ * und Lanes die gekauften Lanes über die Start-Lane hinaus sind (Start-Festung und Start-Lane stecken in den 3).
+ */
+export function incomeForRound(round: number, level: number, lanes: number): number {
+  return (
+    energyForRound(round) +
+    Math.max(0, level - START_FORTRESSES) * INCOME_PER_FORTRESS +
+    Math.max(0, lanes - START_LANES) * INCOME_PER_LANE
+  );
+}
+
+/** Energie zu Beginn der Runde: Einkommen des Spielers plus der Bonus des Ereignisses, höchstens `MAX_ENERGY`. */
+export function roundEnergy(player: PlayerState, round: number, event: RoundEventId | null): number {
   const bonus = event === 'energy' ? EVENT_ENERGY_BONUS : 0;
-  return Math.min(MAX_ENERGY, energyForRound(round) + bonus);
+  return Math.min(MAX_ENERGY, incomeForRound(round, player.level, boughtLaneCount(player)) + bonus);
+}
+
+/** Ist die Lane gekauft (frei)? Ungültige Lane-Indizes sind nie frei. */
+export function isLaneOpen(player: PlayerState, lane: number): boolean {
+  return player.lines[lane]?.bought === true;
+}
+
+/** Gekaufte Lanes des Spielers, aufsteigend nach Index. */
+export function openLanes(player: PlayerState): number[] {
+  return player.lines.flatMap((line, lane) => (line.bought ? [lane] : []));
 }
 
 function createPlayer(): PlayerState {
   return {
-    level: 1,
+    level: START_FORTRESSES,
     energy: 0,
+    extraDrawn: 0,
     hand: [],
     nextMinionId: 1,
     placements: [],
     played: [],
     synergies: [],
     minions: [],
+    // Nur die Start-Lane (Index 0) ist von Beginn an gekauft.
     lines: Array.from({ length: LANE_COUNT }, (_, lane) => ({
-      towers: isLaneUnlocked(1, lane) ? createLaneTowers(lane) : [],
+      bought: lane === 0,
+      towers: lane === 0 ? createLaneTowers(lane) : [],
       bonus: { hp: 0, damage: 0 },
     })),
   };
@@ -257,7 +320,7 @@ function startRound(state: MatchState, round: number): void {
   for (const player of state.players) {
     clearShields(player);
     if (state.event === 'tower-shield') applyTowerShield(player);
-    player.energy = roundEnergy(round, state.event);
+    player.energy = roundEnergy(player, round, state.event);
     player.placements = [];
     player.played = [];
     for (const line of player.lines) {
@@ -318,7 +381,7 @@ export function playCard(
   if (current.energy < def.cost) return reject(state, 'not-enough-energy');
   let summonSlots: number[] = [];
   if (def.target === 'line') {
-    if (lineIndex === undefined || !isLaneUnlocked(current.level, lineIndex)) return reject(state, 'invalid-line');
+    if (lineIndex === undefined || !isLaneOpen(current, lineIndex)) return reject(state, 'invalid-line');
     const towers = current.lines[lineIndex]!.towers;
     if (def.type === 'summon') {
       const count = summonCount(cardId, state.round);
@@ -358,11 +421,7 @@ export function playCard(
   if (def.target === 'minion') played.line = player.minions.find((m) => m.id === targetMinionId)!.line;
   switch (def.type) {
     case 'line-upgrade':
-      // Neue Ausbaustufe: die frisch freien Lanes (je eine oberhalb und unterhalb) bekommen ihre Tower.
       player.level += 1;
-      player.lines.forEach((lane, index) => {
-        if (isLaneUnlocked(player.level, index) && lane.towers.length === 0) lane.towers = createLaneTowers(index);
-      });
       break;
     case 'tower-upgrade': {
       const tower = upgradeTarget(line!.towers);
@@ -432,7 +491,7 @@ export function moveMinion(
   if (state.ready[playerIndex]) return reject(state, 'already-ready');
   const current = state.players[playerIndex];
   if (!current.minions.some((m) => m.id === minionId && m.hp > 0)) return reject(state, 'no-such-minion');
-  if (!isLaneUnlocked(current.level, lineIndex)) return reject(state, 'invalid-line');
+  if (!isLaneOpen(current, lineIndex)) return reject(state, 'invalid-line');
   const towers = current.lines[lineIndex]!.towers;
   if (!isValidSlot(towers, slot)) return reject(state, 'invalid-slot');
   if (!isSlotFree(current.minions, lineIndex, slot)) return reject(state, 'slot-taken');
@@ -464,6 +523,72 @@ export function discardCard(state: MatchState, playerIndex: PlayerIndex, handInd
   const player = next.players[playerIndex];
   player.hand.splice(handIndex, 1);
   player.energy = Math.min(MAX_ENERGY, player.energy + DISCARD_ENERGY);
+  return { ok: true, state: next };
+}
+
+/** Prüft Phase und Bereitschaft für eine Wirtschaftsaktion; `null`, wenn der Spieler jetzt handeln darf. */
+function planningError(state: MatchState, playerIndex: PlayerIndex): PlayError | null {
+  if (state.phase !== 'planning') return 'not-planning';
+  if (state.ready[playerIndex]) return 'already-ready';
+  return null;
+}
+
+/**
+ * Upgrade der Feldstufe für `UPGRADE_COST` Energie, in jeder Planungsphase bis `MAX_FIELD_LEVEL`. Es bringt ab der
+ * nächsten Runde `INCOME_PER_FORTRESS` mehr Einkommen und schaltet den Lane-Kauf der nächsten Stufe frei (Lanes
+ * kauft man mit `buyLane`). Für die Synergien zählt es wie die Karte `line-upgrade`.
+ */
+export function upgradeField(state: MatchState, playerIndex: PlayerIndex): PlayResult {
+  const error = planningError(state, playerIndex);
+  if (error) return reject(state, error);
+  const current = state.players[playerIndex];
+  if (current.level >= MAX_FIELD_LEVEL) return reject(state, 'max-level');
+  if (current.energy < UPGRADE_COST) return reject(state, 'not-enough-energy');
+  const next = structuredClone(state);
+  const player = next.players[playerIndex];
+  player.energy -= UPGRADE_COST;
+  player.level += 1;
+  player.played.push({ cardId: 'line-upgrade' });
+  refreshSynergies(player);
+  return { ok: true, state: next };
+}
+
+/**
+ * Kauft die Lane `lineIndex` für `LANE_COST` Energie. Die Feldstufe muss `laneUnlockLevel` erreicht haben (Stufe 2 für
+ * die obere und die untere Lane); jede Lane lässt sich einzeln kaufen. Die neue Lane bekommt ihre Tower.
+ */
+export function buyLane(state: MatchState, playerIndex: PlayerIndex, lineIndex: number): PlayResult {
+  const error = planningError(state, playerIndex);
+  if (error) return reject(state, error);
+  const current = state.players[playerIndex];
+  if (!Number.isInteger(lineIndex) || lineIndex < 0 || lineIndex >= LANE_COUNT) return reject(state, 'invalid-line');
+  if (current.lines[lineIndex]!.bought) return reject(state, 'lane-owned');
+  if (current.level < laneUnlockLevel(lineIndex)) return reject(state, 'level-too-low');
+  if (current.energy < LANE_COST) return reject(state, 'not-enough-energy');
+  const next = structuredClone(state);
+  const player = next.players[playerIndex];
+  player.energy -= LANE_COST;
+  const lane = player.lines[lineIndex]!;
+  lane.bought = true;
+  lane.towers = createLaneTowers(lineIndex);
+  return { ok: true, state: next };
+}
+
+/**
+ * Zieht für `DRAW_COST` Energie eine zusätzliche Karte aus dem Deck (gleiche Reihenfolge wie beim Rundenzug, für beide
+ * Spieler dieselbe Karte, damit das Match symmetrisch bleibt). Bei vollem Handlimit wird abgelehnt.
+ */
+export function drawCard(state: MatchState, playerIndex: PlayerIndex): PlayResult {
+  const error = planningError(state, playerIndex);
+  if (error) return reject(state, error);
+  const current = state.players[playerIndex];
+  if (current.hand.length >= HAND_LIMIT) return reject(state, 'hand-full');
+  if (current.energy < DRAW_COST) return reject(state, 'not-enough-energy');
+  const next = structuredClone(state);
+  const player = next.players[playerIndex];
+  player.energy -= DRAW_COST;
+  player.hand.push(next.deck[(next.drawn + player.extraDrawn) % next.deck.length]!);
+  player.extraDrawn += 1;
   return { ok: true, state: next };
 }
 
