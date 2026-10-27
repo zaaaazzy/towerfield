@@ -10,14 +10,23 @@ import { getCardDef } from '../logic/cards';
 import { cardTypeStyle } from '../logic/card-style';
 import { isLaneOpen, LANE_COST, type MatchState, type PlayerState } from '../logic/match';
 import {
+  attackProgress,
   bobOffset,
+  deathAlpha,
+  deathAngle,
+  deathProgress,
   facing,
   flashKey,
   flashStrength,
   laneStagger,
+  type MinionAnim,
+  type MinionGhost,
+  minionPhase,
   minionRadius,
   type MinionShape,
   minionShape,
+  strideSwing,
+  walkCycle,
 } from '../logic/minion-look';
 import {
   LANE_SLOT_GAP,
@@ -32,6 +41,7 @@ import {
 import { describeSynergy } from '../logic/synergies';
 import type { Point } from './effects';
 import type { LabelFn } from './labels';
+import { drawFigure } from './minion-figure';
 import { drawBar, healthFill, lerpColor, PALETTE, TEXT } from './theme';
 
 export const HUMAN = 0;
@@ -67,9 +77,6 @@ const TEAM = {
   [HUMAN]: { main: PALETTE.human, dark: PALETTE.humanDark, light: lerpColor(PALETTE.human, PALETTE.white, 0.45) },
   [BOT]: { main: PALETTE.bot, dark: PALETTE.botDark, light: lerpColor(PALETTE.bot, PALETTE.white, 0.45) },
 };
-
-/** Stahlton der Klinge des Nahkämpfers. */
-const STEEL = 0xdfe3f2;
 
 const teamOf = (owner: number) => (owner === HUMAN ? TEAM[HUMAN] : TEAM[BOT]);
 
@@ -154,56 +161,25 @@ export function drawTower(
   label(`${Math.ceil(hp)}`, x, y + 1, { size: 8, bold: true, font: 'heading', color: alive ? TEXT.main : TEXT.dim });
 }
 
-/** Zeitbezogene Darstellung eines Minions: Szenenzeit (aus `delta` summiert), Laufen und Trefferblitz (0 bis 1). */
+export type { MinionAnim };
+
+/** Zeitbezogene Darstellung eines Minions: Szenenzeit (aus `delta` summiert), Laufen, Angriff und Trefferblitz (0 bis 1). */
 export interface MinionLook {
   id: number;
   timeMs: number;
   moving: boolean;
   flash: number;
+  /** Restzeit der Angriffsbewegung in ms (0 = kein Angriff). */
+  attackRemainingMs?: number;
 }
 
-/** Zeit und Blitze, die die Szenen an `drawMinions` geben (beides wird aus `delta` fortgeschrieben). */
-export interface MinionAnim {
-  timeMs: number;
-  flashes: ReadonlyMap<string, number>;
-}
-
-/** Füllt die Silhouette der Rolle: Nahkämpfer rund, Fernkämpfer Raute in Blickrichtung, Heiler Rundquadrat, Zerstörer Stachelkugel. */
-function fillSilhouette(
-  g: Phaser.GameObjects.Graphics,
-  shape: MinionShape,
-  x: number,
-  y: number,
-  r: number,
-  color: number,
-  alpha: number,
-): void {
-  g.fillStyle(color, alpha);
-  if (shape === 'melee') {
-    g.fillCircle(x, y, r);
-  } else if (shape === 'ranged') {
-    const w = r * 0.95;
-    const h = r * 1.3;
-    g.fillTriangle(x - h, y, x, y - w, x, y + w);
-    g.fillTriangle(x + h, y, x, y - w, x, y + w);
-  } else if (shape === 'destroyer') {
-    // Stachelkugel: Kreis mit vier Spitzen oben, unten, vorn und hinten.
-    const s = r * 1.3;
-    const w = r * 0.5;
-    g.fillCircle(x, y, r * 0.92);
-    g.fillTriangle(x - w, y - r * 0.6, x + w, y - r * 0.6, x, y - s);
-    g.fillTriangle(x - w, y + r * 0.6, x + w, y + r * 0.6, x, y + s);
-    g.fillTriangle(x - r * 0.6, y - w, x - r * 0.6, y + w, x - s, y);
-    g.fillTriangle(x + r * 0.6, y - w, x + r * 0.6, y + w, x + s, y);
-  } else {
-    g.fillRoundedRect(x - r * 0.9, y - r * 0.9, r * 1.8, r * 1.8, r * 0.5);
-  }
-}
+/** Figur im Maßstab 1 ist 24 Einheiten hoch; `FIGURE_UNIT` rechnet den Radius (`minionRadius`) in diesen Maßstab um. */
+const FIGURE_UNIT = 9;
 
 /**
- * Ein Minion mit Schatten, Teamfarben-Leuchten, Form nach Rolle (Nahkämpfer Kreis mit Klinge, Fernkämpfer Raute mit
- * Bogen, Heiler Rundquadrat mit Kreuz und Heiligenschein), Verlauf, Glanzlicht und Augen in Blickrichtung.
- * `look` liefert Wippen beim Laufen und Trefferblitz; ohne `minion` (gezogene Figur) entsteht ein neutraler Nahkämpfer.
+ * Ein Minion als Figur (`minion-figure.ts`) mit Schatten, Teamfarben-Leuchten und Lebensbalken. `look` liefert die Phase
+ * (Laufen, Angriff) und den Trefferblitz; ohne `look` steht die Figur still. Ohne `minion` (gezogene Figur) entsteht ein
+ * neutraler Nahkämpfer. `baseY` ist die Mitte der Figur; die Beine reichen darunter bis zum Boden.
  */
 export function drawMinionBody(
   g: Phaser.GameObjects.Graphics,
@@ -215,58 +191,51 @@ export function drawMinionBody(
   look?: MinionLook,
 ): void {
   const team = teamOf(owner);
-  const dir = facing(owner);
   const maxHp = minion ? (minion.maxHp ?? minion.hp) : 0;
   const r = minion ? minionRadius(maxHp) : MINION_RADIUS;
   const shape: MinionShape = minion ? minionShape(minion) : 'melee';
-  const y = baseY + (look ? bobOffset(look.timeMs, look.id, look.moving) : 0);
+  const scale = r / FIGURE_UNIT;
+  const feetY = baseY + 12 * scale;
+  const phase = look ? minionPhase(look.moving, look.attackRemainingMs ?? 0) : 'idle';
+  const stride = look && phase === 'walk' ? strideSwing(walkCycle(look.timeMs, look.id)) : 0;
 
-  // Schatten bleibt am Boden, Leuchten in der Teamfarbe.
-  g.fillStyle(PALETTE.black, 0.38 * alpha).fillEllipse(x + 1, baseY + r * 0.9, r * 2.2, r * 0.9);
-  g.fillStyle(team.main, 0.2 * alpha).fillCircle(x, y, r + 4);
+  // Schatten und Leuchten in der Teamfarbe bleiben am Boden.
+  g.fillStyle(PALETTE.black, 0.38 * alpha).fillEllipse(x + 1, feetY, r * 2.2, r * 0.9);
+  g.fillStyle(team.main, 0.18 * alpha).fillEllipse(x, feetY - 2, r * 2.6, r * 1.2);
 
-  // Ausrüstung vorn: Klinge, Bogen oder Heiligenschein.
-  if (shape === 'melee') {
-    const tip = x + dir * (r + 5);
-    g.fillStyle(team.dark, alpha).fillTriangle(x + dir * r * 0.5, y - 3, x + dir * r * 0.5, y + 3, tip + dir, y);
-    g.fillStyle(STEEL, alpha).fillTriangle(x + dir * r * 0.55, y - 1.8, x + dir * r * 0.55, y + 1.8, tip, y);
-  } else if (shape === 'ranged') {
-    const centre = dir < 0 ? Math.PI : 0;
-    g.lineStyle(2, team.dark, alpha).beginPath().arc(x, y, r + 3, centre - 1, centre + 1).strokePath();
-    g.lineStyle(1, PALETTE.goldLight, alpha).beginPath().arc(x, y, r + 3, centre - 1, centre + 1).strokePath();
-  } else if (shape === 'healer') {
-    g.lineStyle(2, PALETTE.good, 0.9 * alpha).strokeEllipse(x + dir * (r + 2.5), y, 3.5, r * 1.3);
-  } else {
-    // Zündschnur oben mit Funken.
-    g.lineStyle(1.5, STEEL, alpha).beginPath().moveTo(x, y - r).lineTo(x - dir * 2, y - r - 4).strokePath();
-    g.fillStyle(PALETTE.gold, alpha).fillCircle(x - dir * 2, y - r - 5, 1.8);
-  }
+  drawFigure(g, shape, x, feetY, facing(owner), scale, team, {
+    stride,
+    bob: look && phase === 'walk' ? bobOffset(look.timeMs, look.id, true) : 0,
+    attack: phase === 'attack' ? attackProgress(look?.attackRemainingMs ?? 0) : null,
+    fall: 0,
+    flash: look?.flash ?? 0,
+    alpha,
+  });
 
-  // Körper: dunkle Kontur, Teamfarbe, aufgehellte Fläche oben links (Verlauf), Glanzlicht.
-  fillSilhouette(g, shape, x, y, r + 1.2, team.dark, alpha);
-  fillSilhouette(g, shape, x, y, r, team.main, alpha);
-  fillSilhouette(g, shape, x - r * 0.12, y - r * 0.2, r * 0.72, team.light, 0.75 * alpha);
-  g.fillStyle(PALETTE.white, 0.55 * alpha).fillCircle(x - r * 0.35, y - r * 0.42, Math.max(1, r * 0.2));
-
-  // Augen auf der Blickseite zeigen die Laufrichtung; der Heiler trägt stattdessen ein Kreuz.
-  if (shape === 'healer') {
-    const c = r * 0.55;
-    g.fillStyle(PALETTE.white, alpha).fillRect(x - 1.5, y - c, 3, c * 2).fillRect(x - c, y - 1.5, c * 2, 3);
-    g.fillStyle(PALETTE.good, alpha).fillRect(x - 0.75, y - c + 0.75, 1.5, c * 2 - 1.5).fillRect(x - c + 0.75, y - 0.75, c * 2 - 1.5, 1.5);
-  } else {
-    const eyeX = x + dir * r * 0.3;
-    g.fillStyle(PALETTE.panelDark, alpha).fillCircle(eyeX, y - r * 0.33, 1.4).fillCircle(eyeX, y + r * 0.33, 1.4);
-    g.fillStyle(PALETTE.white, alpha).fillCircle(eyeX - 0.3, y - r * 0.33, 0.6).fillCircle(eyeX - 0.3, y + r * 0.33, 0.6);
-  }
-
-  if (look && look.flash > 0) fillSilhouette(g, shape, x, y, r + 1.2, PALETTE.white, 0.8 * look.flash * alpha);
-
-  // Lebensbalken hinter der Einheit (gegen die Blickrichtung), damit er Klinge, Bogen und Heiligenschein nicht verdeckt.
+  // Lebensbalken über dem Kopf.
   if (minion && minion.hp < maxHp) {
     const width = 14;
-    const barY = baseY - r - 7;
-    drawBar(g, x - width / 2, barY, width, 3, minion.hp / maxHp, healthFill(minion.hp / maxHp), 'steel');
+    drawBar(g, x - width / 2, feetY - 31 * scale, width, 3, minion.hp / maxHp, healthFill(minion.hp / maxHp), 'steel');
   }
+}
+
+/** Eine sterbende Einheit (Kopie aus `updateGhosts`): kippt nach hinten um und blendet aus; ohne Lebensbalken. */
+function drawGhost(g: Phaser.GameObjects.Graphics, ghost: MinionGhost): void {
+  const progress = deathProgress(ghost.ageMs);
+  const alpha = deathAlpha(progress);
+  if (alpha <= 0) return;
+  const point = minionPoint(ghost.owner, { id: ghost.id, line: ghost.line, position: ghost.position });
+  const scale = ghost.radius / FIGURE_UNIT;
+  const feetY = point.y + 12 * scale;
+  g.fillStyle(PALETTE.black, 0.38 * alpha).fillEllipse(point.x + 1, feetY, ghost.radius * 2.2, ghost.radius * 0.9);
+  drawFigure(g, ghost.shape, point.x, feetY, facing(ghost.owner), scale, teamOf(ghost.owner), {
+    stride: 0,
+    bob: 0,
+    attack: null,
+    fall: deathAngle(progress),
+    flash: 1 - progress,
+    alpha,
+  });
 }
 
 /** Kurzname für die Zuordnung am Slot, z. B. „T2o“ (Turm 2, oben) – steht neben jeder Einheit auf einem Turm-Slot. */
@@ -391,8 +360,8 @@ export function drawBoard(g: Phaser.GameObjects.Graphics, label: LabelFn, state:
 }
 
 /**
- * Alle Minions beider Spieler; `skipHumanId` lässt einen eigenen Minion aus (der gerade gezogen wird). `anim` bringt
- * Szenenzeit und Trefferblitze; im Kampf wippen die Minions beim Laufen.
+ * Alle Minions beider Spieler samt sterbenden Kopien; `skipHumanId` lässt einen eigenen Minion aus (der gerade gezogen
+ * wird). `anim` bringt Szenenzeit, Trefferblitze, Angriffe und Sterbende; im Kampf laufen die Minions im Schritt.
  */
 export function drawMinions(g: Phaser.GameObjects.Graphics, state: MatchState, skipHumanId?: number, anim?: MinionAnim): void {
   const moving = state.phase === 'combat';
@@ -407,9 +376,11 @@ export function drawMinions(g: Phaser.GameObjects.Graphics, state: MatchState, s
             timeMs: anim.timeMs,
             moving,
             flash: flashStrength(anim.flashes.get(flashKey(owner, minion.id)) ?? 0),
+            attackRemainingMs: anim.attacks.get(flashKey(owner, minion.id)) ?? 0,
           }
         : undefined;
       drawMinionBody(g, point.x, point.y, owner, minion, 1, look);
     }
   }
+  for (const ghost of anim?.ghosts ?? []) drawGhost(g, ghost);
 }
