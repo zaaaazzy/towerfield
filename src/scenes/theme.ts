@@ -150,14 +150,16 @@ export function drawBar(
   metal: FrameMetal = 'gold',
 ): void {
   const colors = METALS[metal];
-  g.fillStyle(colors.dark, 1).fillRoundedRect(x - 1, y - 1, width + 2, height + 2, 2);
-  g.fillStyle(PALETTE.panelDark, 1).fillRect(x, y, width, height);
+  const round = Math.min(FRAME.radius / 2, height / 2 + 1);
+  g.fillStyle(PALETTE.black, 0.3).fillRoundedRect(x - 1, y, width + 2, height + 2, round);
+  g.fillStyle(colors.dark, 1).fillRoundedRect(x - 1, y - 1, width + 2, height + 2, round);
+  g.fillStyle(PALETTE.panelDark, 1).fillRoundedRect(x, y, width, height, Math.max(1, round - 1));
   const filled = Math.max(0, Math.min(1, ratio)) * width;
   if (filled > 0) {
     fillGradient(g, x, y, filled, height, fill.top, fill.bottom, 1, 3);
     g.fillStyle(PALETTE.white, 0.25).fillRect(x, y, filled, 1);
   }
-  g.lineStyle(1, colors.light, 0.9).strokeRect(x - 0.5, y - 0.5, width + 1, height + 1);
+  g.lineStyle(1, colors.light, 0.9).strokeRoundedRect(x - 0.5, y - 0.5, width + 1, height + 1, round);
 }
 
 /** Füllung des Lebensbalkens: grün, bei wenig Leben rot. */

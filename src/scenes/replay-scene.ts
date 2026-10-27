@@ -14,7 +14,7 @@ import {
 } from '../logic/replay';
 import { parseReplayMoves, parseReplaySeed } from '../logic/seed';
 import { diffFx } from '../logic/fx-events';
-import { updateFlashes } from '../logic/minion-look';
+import { advanceMinionAnim, newMinionAnim } from '../logic/minion-look';
 import { REPLAY_MUSIC_SCALE } from '../logic/audio-settings';
 import { AudioLayer } from './audio';
 import { Effects } from './effects';
@@ -47,7 +47,7 @@ export class ReplayScene extends Phaser.Scene {
   private effects!: Effects;
   private audio!: AudioLayer;
   /** Szenenzeit und Trefferblitze der Minions (aus `delta` fortgeschrieben, nur Darstellung). */
-  private minionAnim: MinionAnim = { timeMs: 0, flashes: new Map() };
+  private minionAnim: MinionAnim = newMinionAnim();
 
   constructor() {
     super('replay');
@@ -77,7 +77,7 @@ export class ReplayScene extends Phaser.Scene {
         : this.record
           ? createRecordedReplay(this.record)
           : createInvalidReplay(this.seed);
-    this.minionAnim = { timeMs: 0, flashes: new Map() };
+    this.minionAnim = newMinionAnim();
     addBackdrop(this, VIEW.width, VIEW.height, BACKDROP_FIELD);
     this.pool = new LabelPool(this);
     this.effects = new Effects(this, FX_LOCATOR);
@@ -99,10 +99,7 @@ export class ReplayScene extends Phaser.Scene {
     this.effects.play(events);
     this.effects.update(deltaMs);
     this.audio.play(events, deltaMs);
-    this.minionAnim = {
-      timeMs: this.minionAnim.timeMs + deltaMs,
-      flashes: updateFlashes(this.minionAnim.flashes, events, deltaMs),
-    };
+    this.minionAnim = advanceMinionAnim(this.minionAnim, events, previous, this.replay.match, deltaMs);
     this.render();
   }
 

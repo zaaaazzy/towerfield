@@ -20,7 +20,7 @@ import { getRoundEventDef } from '../logic/round-events';
 import { LANE_COUNT, laneShortName, MAX_FIELD_LEVEL } from '../logic/lanes';
 import { type ActionBody, botPlanRecorded, createRecord, performAction, type RecordedMatch } from '../logic/match-record';
 import { HAND_FILTER_NAMES, type HandFilter, isCardVisible, nextHandFilter } from '../logic/hand-filter';
-import { updateFlashes } from '../logic/minion-look';
+import { advanceMinionAnim, newMinionAnim } from '../logic/minion-look';
 import { parseSeed } from '../logic/seed';
 import type { AudioEvent } from '../logic/audio-events';
 import { AudioLayer, audioControlAt, drawAudioControls, sliderValueAt } from './audio';
@@ -169,7 +169,7 @@ export class MainScene extends Phaser.Scene {
   /** Zustand des letzten Bilds; der Vergleich mit dem aktuellen liefert die Effekte. */
   private fxState: MatchState = this.state;
   /** Szenenzeit und Trefferblitze der Minions (aus `delta` fortgeschrieben, nur Darstellung). */
-  private minionAnim: MinionAnim = { timeMs: 0, flashes: new Map() };
+  private minionAnim: MinionAnim = newMinionAnim();
   /** Index der angetippten Karte, die auf eine Line wartet. */
   private selected: number | null = null;
   /** Karte unter dem Mauszeiger (nur Darstellung). */
@@ -237,7 +237,7 @@ export class MainScene extends Phaser.Scene {
     this.state = createMatch(parseSeed(window.location.search) ?? Date.now() >>> 0);
     this.record = createRecord(this.state.seed);
     this.fxState = this.state;
-    this.minionAnim = { timeMs: 0, flashes: new Map() };
+    this.minionAnim = newMinionAnim();
     addBackdrop(this, VIEW.width, VIEW.height, BACKDROP_FIELD);
     this.pool = new LabelPool(this);
     this.effects = new Effects(this, FX_LOCATOR);
@@ -309,10 +309,7 @@ export class MainScene extends Phaser.Scene {
     this.effects.update(deltaMs);
     this.audio.play([...this.pendingAudio, ...events], deltaMs);
     this.pendingAudio = [];
-    this.minionAnim = {
-      timeMs: this.minionAnim.timeMs + deltaMs,
-      flashes: updateFlashes(this.minionAnim.flashes, events, deltaMs),
-    };
+    this.minionAnim = advanceMinionAnim(this.minionAnim, events, previous, this.state, deltaMs);
   }
 
   /** Id des eigenen, verschiebbaren Minions unter dem Punkt, sonst `null`. */
