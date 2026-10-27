@@ -1,26 +1,45 @@
 import { describe, expect, it } from 'vitest';
-import { botPlan, botStep } from './bot';
+import { botPlan as planWith, botStep as stepWith, ECONOMY_ACTIONS, PRIORITY as BOT_PRIORITY } from './bot';
 import { getCardDef } from './cards';
-import { isLaneUnlocked, MAX_FIELD_LEVEL, unlockedLanes } from './lanes';
+import { isLaneBuyable, MAX_FIELD_LEVEL } from './lanes';
 import {
   BASE_ENERGY,
   createLaneTowers,
   createMatch,
+  HAND_LIMIT,
+  LANE_COST,
   LINE_COUNT,
   MAX_ENERGY,
+  MAX_ROUNDS,
   type MatchState,
   type PlayerIndex,
+  UPGRADE_COST,
 } from './match';
 import { firstFreeSlot, validSlots } from './placement';
 
 const cost = (id: string) => getCardDef(id).cost;
+
+/**
+ * Reihenfolge nur mit Karten (ohne Wirtschaftsaktionen), wie vor dem neuen Wirtschaftskonzept; das Upgrade als Karte
+ * steht wieder hinter `tower-hp`. Die Karten-Tests laufen damit, die Wirtschaft prüft der Block „Wirtschaft“ unten.
+ */
+const CARD_PRIORITY: readonly string[] = BOT_PRIORITY.filter((id) => !(ECONOMY_ACTIONS as readonly string[]).includes(id)).flatMap(
+  (id) => (id === 'tower-hp' ? [id, 'line-upgrade'] : [id]),
+);
+const botStep = (state: MatchState, player: PlayerIndex, priority: readonly string[] = CARD_PRIORITY) =>
+  stepWith(state, player, priority);
+const botPlan = (state: MatchState, player: PlayerIndex, priority: readonly string[] = CARD_PRIORITY) =>
+  planWith(state, player, priority);
 
 /** Baut das Feld von Spieler 1 auf `level` aus (mit den Towern der frisch freien Lanes). */
 function grow(state: MatchState, level: number): MatchState {
   const player = state.players[1];
   player.level = level;
   player.lines.forEach((lane, index) => {
-    if (isLaneUnlocked(level, index) && lane.towers.length === 0) lane.towers = createLaneTowers(index);
+    if (isLaneBuyable(level, index) && lane.towers.length === 0) {
+      lane.bought = true;
+      lane.towers = createLaneTowers(index);
+    }
   });
   return state;
 }
@@ -282,9 +301,10 @@ describe('Bot', () => {
       expect(reordered.players[1].hand).toEqual(['summon-minion']);
     });
 
-    it('verhält sich mit der Standardreihenfolge wie ohne Parameter', () => {
+    it('verhält sich mit der exportierten Standardreihenfolge wie ohne Parameter', () => {
       const state = createMatch(4);
-      expect(botPlan(state, 1, ['summon-minion', 'summon-archer', 'tower-hp', 'line-upgrade', 'minion-upgrade-line', 'summon-brute', 'tower-damage', 'minion-upgrade-all'])).toEqual(botPlan(state, 1));
+      expect(planWith(state, 1, BOT_PRIORITY)).toEqual(planWith(state, 1));
+      expect(stepWith(state, 1, BOT_PRIORITY)).toEqual(stepWith(state, 1));
     });
 
     it('spielt Karten nicht, die in der Reihenfolge fehlen', () => {
@@ -439,7 +459,7 @@ describe('Bot', () => {
 
     it('summon: lässt die Karte auf der Hand, wenn alle freien Lanes voll sind', () => {
       const state = grow(withHand(['summon-minion'], 3), 2);
-      for (const line of unlockedLanes(2)) fillLane(state, line);
+      for (const line of [0, 1, 2]) fillLane(state, line);
       const after = botPlan(state, 1);
       expect(after.players[1].hand).toEqual(['summon-minion']);
       expect(after.players[1].energy).toBe(3);
@@ -447,19 +467,18 @@ describe('Bot', () => {
       expect(after.ready[1]).toBe(true);
     });
 
-    it('line-upgrade: spielt die Karte ohne Zielline und schaltet die nächsten Lanes frei', () => {
+    it('line-upgrade: spielt die Karte ohne Zielline und hebt nur die Feldstufe (Lanes kauft man separat)', () => {
       const move = botStep(withHand(['line-upgrade'], cost('line-upgrade')), 1);
       expect(move!.cardId).toBe('line-upgrade');
       expect(move!.line).toBeUndefined();
       expect(move!.state.players[1].level).toBe(2);
-      expect(move!.state.players[1].lines.map((line) => line.towers.length)).toEqual([3, 1, 1, 0, 0]);
+      expect(move!.state.players[1].lines.map((line) => line.towers.length)).toEqual([3, 0, 0, 0, 0]);
     });
 
     it('line-upgrade: baut Lvl 1 → 2 → 3 aus und lässt danach die Karte auf der Hand', () => {
       const state = withHand(['line-upgrade', 'line-upgrade', 'line-upgrade'], 3 * cost('line-upgrade'));
       const after = botPlan(state, 1);
       expect(after.players[1].level).toBe(MAX_FIELD_LEVEL);
-      expect(after.players[1].lines.map((line) => line.towers.length)).toEqual([3, 1, 1, 1, 1]);
       expect(after.players[1].hand).toEqual(['line-upgrade']);
       expect(after.players[1].energy).toBe(cost('line-upgrade'));
       expect(after.ready[1]).toBe(true);
@@ -472,10 +491,10 @@ describe('Bot', () => {
       expect(after.ready[1]).toBe(true);
     });
 
-    it('nutzt nach dem Ausbau die neuen Lanes für Beschwörungen', () => {
-      const next = structuredClone(botPlan(withHand(['line-upgrade'], cost('line-upgrade')), 1));
-      expect(next.players[1].level).toBe(2);
-      next.ready[1] = false;
+    it('nutzt nach dem Kauf der neuen Lanes diese für Beschwörungen', () => {
+      const next = structuredClone(grow(withHand([], 0), 2));
+      next.players[1].hand = [];
+      next.players[1].energy = 0;
       next.players[1].hand = ['summon-minion', 'summon-minion', 'summon-minion'];
       next.players[1].energy = 3;
       const after = botPlan(next, 1);
@@ -646,5 +665,76 @@ describe('Bot', () => {
         }
       }
     });
+  });
+});
+
+describe('Bot: Wirtschaft', () => {
+  const economyPlan = (state: MatchState, priority: readonly string[] = BOT_PRIORITY) => planWith(state, 1, priority);
+
+  it('kauft in Runde 1 mit den Startenergie zuerst das Upgrade', () => {
+    const move = stepWith(withHand([], BASE_ENERGY), 1);
+    expect(move).toMatchObject({ economy: 'upgrade', cardId: '' });
+    expect(move!.state.players[1].level).toBe(2);
+    expect(move!.state.players[1].energy).toBe(BASE_ENERGY - UPGRADE_COST);
+  });
+
+  it('kauft eine Lane (die niedrigste kaufbare) erst ab Feldstufe 2 und mit 5 Energie', () => {
+    const level1 = withHand([], 20);
+    // Auf Stufe 1 bleibt nur das Upgrade, bis die Stufe 2 steht; danach folgt der Lane-Kauf.
+    const priority = ['buy-lane'];
+    expect(stepWith(level1, 1, priority)).toBeNull();
+    const level2 = grow(withHand([], 20), 2);
+    for (const lane of [1, 2]) level2.players[1].lines[lane] = { bought: false, towers: [], bonus: { hp: 0, damage: 0 } };
+    const first = stepWith(level2, 1, priority);
+    expect(first).toMatchObject({ economy: 'buy-lane', line: 1 });
+    expect(first!.state.players[1].energy).toBe(20 - LANE_COST);
+    expect(stepWith(first!.state, 1, priority)).toMatchObject({ economy: 'buy-lane', line: 2 });
+    const poor = grow(withHand([], LANE_COST - 1), 2);
+    poor.players[1].lines[1] = { bought: false, towers: [], bonus: { hp: 0, damage: 0 } };
+    expect(stepWith(poor, 1, priority)).toBeNull();
+  });
+
+  it('kauft Upgrade und Lane nicht mehr, wenn sich der Preis bis zum Spielende nicht amortisiert', () => {
+    const late = withHand([], 20);
+    late.round = MAX_ROUNDS;
+    expect(stepWith(late, 1, ['upgrade'])).toBeNull();
+    const lateLane = grow(withHand([], 20), 2);
+    lateLane.round = MAX_ROUNDS;
+    lateLane.players[1].lines[1] = { bought: false, towers: [], bonus: { hp: 0, damage: 0 } };
+    expect(stepWith(lateLane, 1, ['buy-lane'])).toBeNull();
+  });
+
+  it('zieht nur als Rückfall, wenn nichts anderes spielbar ist, und lässt 1 Energie übrig', () => {
+    const state = withHand(['summon-minion'], 3);
+    expect(stepWith(state, 1, ['draw', 'summon-minion'])).toMatchObject({ cardId: 'summon-minion' });
+    const stuck = withHand(['summon-mage'], 2);
+    const drawn = stepWith(stuck, 1, ['draw', 'summon-mage']);
+    expect(drawn).toMatchObject({ economy: 'draw' });
+    expect(drawn!.state.players[1].hand).toHaveLength(2);
+    expect(drawn!.state.players[1].energy).toBe(1);
+    // Mit 1 Energie bleibt nichts zum Spielen übrig: der Bot zieht nicht mehr.
+    expect(stepWith(drawn!.state, 1, ['draw', 'summon-mage'])).toBeNull();
+  });
+
+  it('zieht nicht über das Handlimit hinaus und nicht, wenn „draw“ fehlt', () => {
+    const full = withHand(Array(HAND_LIMIT).fill('summon-mage'), 5);
+    expect(stepWith(full, 1, ['draw'])).toBeNull();
+    expect(stepWith(withHand([], 5), 1, ['upgrade'])).toMatchObject({ economy: 'upgrade' });
+    expect(stepWith(withHand([], 1), 1, ['summon-minion'])).toBeNull();
+  });
+
+  it('endet mit jeder Reihenfolge, auch wenn Ziehen und Abwerfen einander abwechseln könnten', () => {
+    const order = ['draw', 'summon-guard', 'upgrade', 'buy-lane'];
+    const state = withHand(['summon-minion', 'summon-minion', 'summon-guard'], 3);
+    const after = economyPlan(state, order);
+    expect(after.ready[1]).toBe(true);
+    expect(after.players[1].energy).toBeGreaterThanOrEqual(0);
+  });
+
+  it('plant mit der Standardreihenfolge ein ganzes Match ohne Fehler und wächst mit dem Einkommen', () => {
+    let state = createMatch(3);
+    state = economyPlan(state);
+    expect(state.players[1].level).toBeGreaterThanOrEqual(2);
+    expect(state.players[1].energy).toBeLessThanOrEqual(MAX_ENERGY);
   });
 });

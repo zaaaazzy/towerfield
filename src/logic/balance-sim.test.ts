@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { buildReport, type MatchResult, runSimulation, shuffledPriority, simulateMatch, strategiesForSeed } from './balance-sim';
+import { ECONOMY_ACTIONS } from './bot';
 import { CARD_DEFS } from './cards';
 import { MAX_ROUNDS } from './match';
 
@@ -40,10 +41,18 @@ describe('Ereignis-Zähler', () => {
 });
 
 describe('Strategien', () => {
-  it('würfeln eine Reihenfolge aus allen Karten-IDs, reproduzierbar je Seed', () => {
-    expect([...shuffledPriority(5)].sort()).toEqual([...ids].sort());
+  it('würfeln eine Reihenfolge aus allen Karten-IDs und Wirtschaftsaktionen, reproduzierbar je Seed', () => {
+    expect([...shuffledPriority(5)].sort()).toEqual([...ids, ...ECONOMY_ACTIONS].sort());
     expect(shuffledPriority(5)).toEqual(shuffledPriority(5));
     expect(strategiesForSeed(7)).toEqual(strategiesForSeed(7));
+  });
+
+  it('lassen die Simulation mit jeder gewürfelten Reihenfolge enden und zählen nur gespielte Karten', () => {
+    for (let seed = 1; seed <= 30; seed += 1) {
+      const match = simulateMatch(seed, strategiesForSeed(seed));
+      expect(match.rounds).toBeLessThanOrEqual(MAX_ROUNDS);
+      expect(match.played[0].every((id) => ids.includes(id))).toBe(true);
+    }
   });
 
   it('unterscheiden sich zwischen Seeds und Spielern', () => {

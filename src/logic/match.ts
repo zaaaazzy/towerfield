@@ -575,8 +575,8 @@ export function buyLane(state: MatchState, playerIndex: PlayerIndex, lineIndex: 
 }
 
 /**
- * Zieht für `DRAW_COST` Energie eine zusätzliche Karte aus dem Deck (gleiche Reihenfolge wie beim Rundenzug, aber
- * versetzt je Spieler, damit beide verschiedene Karten sehen). Bei vollem Handlimit wird abgelehnt.
+ * Zieht für `DRAW_COST` Energie eine zusätzliche Karte aus dem Deck (gleiche Reihenfolge wie beim Rundenzug, für beide
+ * Spieler dieselbe Karte, damit das Match symmetrisch bleibt). Bei vollem Handlimit wird abgelehnt.
  */
 export function drawCard(state: MatchState, playerIndex: PlayerIndex): PlayResult {
   const error = planningError(state, playerIndex);
@@ -587,7 +587,7 @@ export function drawCard(state: MatchState, playerIndex: PlayerIndex): PlayResul
   const next = structuredClone(state);
   const player = next.players[playerIndex];
   player.energy -= DRAW_COST;
-  player.hand.push(next.deck[(next.drawn + player.extraDrawn * 2 + playerIndex) % next.deck.length]!);
+  player.hand.push(next.deck[(next.drawn + player.extraDrawn) % next.deck.length]!);
   player.extraDrawn += 1;
   return { ok: true, state: next };
 }

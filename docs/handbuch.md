@@ -165,7 +165,7 @@ Minion-Tempo, Balance-Szene, E2E, Minion-Statistik, Replay, Kartenfilter, Heiler
 | Ziehen | Ab Runde 2 dieselben 3 Karten für beide (`DRAW_PER_ROUND`). |
 | Handlimit | `HAND_LIMIT = 10`; nach dem Ziehen werden die zuletzt gezogenen Karten am Ende der Hand abgeschnitten (keine Ablage). Sie zählen als gezogen. |
 | Runden | Planung, dann Kampf, höchstens `MAX_ROUNDS = 8`. |
-| Energie | `min(MAX_ENERGY, BASE_ENERGY + (Runde - 1) * ENERGY_PER_ROUND)` = `min(8, 3 + (Runde - 1))`: 3, 4, 5, 6, 7, 8, 8, 8. Wird je Runde neu gesetzt; Unverbrauchtes verfällt. |
+| Energie | Einkommen `incomeForRound` = `3 + (Runde - 1) + Festungen + Lanes` (Festungen = Feldstufe − 1, Lanes = gekaufte Lanes − 1), höchstens `MAX_ENERGY` (17). Wird je Runde neu gesetzt; Unverbrauchtes verfällt. Upgrade (2), Lane-Kauf (5) und Ziehen (1) sind eigene Aktionen, siehe [Wirtschaft](anwendung-wirtschaft.md). |
 | Kampf | `COMBAT_TICKS = 400` Ticks à `TICK_MS = 50` ms (20 s), über `delta` in festen Ticks. Lebt nach einem Tick kein Minion (`hp > 0`) beider Spieler mehr (`anyMinionAlive`), endet die Kampfphase sofort: Runde + 1, nach Runde 8 `hpOutcome`. Das gilt auch, wenn von Anfang an keine Minions existieren. Zerstörte Tower haben Vorrang. |
 | Bogenschütze | `summonCount` (`cards.ts`): `summon-archer` beschwört in Runde N genau N Bogenschützen für eine Karte und einmal Energie. Gewünschter Slot zuerst, dann die niedrigsten freien; reicht die Lane nicht, werden nur so viele gesetzt, wie Slots frei sind (kein freier Slot: `line-full`). Undo (`undoSummon`) nimmt alle Einheiten der Karte zurück (`placements[].group`) und erstattet Energie und Karte einmal. |
 | Überlebende | Zu Rundenbeginn (`respawnSurvivors`) auf die niedrigsten freien Slots ihrer Lane gesetzt, nach `id` aufsteigend; HP, Werte und Lane bleiben, Tote entfallen. Sie zählen zur Lane-Kapazität, aber nicht zu `placements` (nicht verschieb- oder zurücknehmbar). |
@@ -185,7 +185,7 @@ Bogenschütze 4, Heiler 1, Zerstörer 1, die übrigen Karten wie in der Tabelle.
 | `summon-archer` | Bogenschütze | 2 | 20 LP, 7 Schaden/s | 14 | 10 | 2 |
 | `summon-healer` | Heiler | 2 | 20 LP, heilt 5 LP/s (`damage`), greift nie an | 10 | 10 | 1 |
 | `summon-destroyer` | Zerstörer | 2 | 40 LP, 8 Schaden/s; bei Tod Explosion (Radius 10, 15 Schaden an gegnerische Minions der Lane), siehe [Zerstörer](anwendung-zerstoerer.md) | 4 | 8 | 1 |
-| `line-upgrade` | Lane +1 | 2 | Feld-Stufe +1 (max. 3, ohne Ziel): je eine neue Lane oben und unten, ein Slot mehr je Lane | – | – | 2 |
+| `line-upgrade` | Lane +1 | 2 | Feld-Stufe +1 (max. 3, ohne Ziel); kauft keine Lanes mehr (das tut `buyLane`). Im Spiel ersetzt die Aktion `upgradeField` die Karte | – | – | 0 (nicht mehr im Deck) |
 | `tower-hp` | Tower Leben | 1 | +30 max. LP und +30 LP | – | – | 2 |
 | `tower-damage` | Tower Schaden | 2 | +4 Schaden/s | – | – | 1 |
 | `tower-lightning` | Blitz-Turm | 2 | Spezialisierung (Ziel Lane): der Tower trifft alle Minions der Lane in `TOWER_RANGE`, je mit 60 % Schaden (`LIGHTNING_FACTOR`), siehe [Tower-Spezialisierung](anwendung-tower-spezialisierung.md) | – | – | 1 |
@@ -421,9 +421,16 @@ Geschwindigkeitswahl gibt es nicht.
 | Karte spielen | `p<R><P>-<Karte>[-<Lane>]` | Karte = Index in `CARD_DEFS`, Lane 0–4 (bei Karten ohne Ziel weggelassen, auch bei „Lane +1“) |
 | Minion verschieben | `m<R><P>-<Minion>-<Lane>-<Slot>` | Minion-Id, Ziel-Lane, Slot |
 | Beschwörung zurücknehmen | `u<R><P>-<Minion>` | Minion-Id |
+| Abwerfen | `d<R><P>-<Karte>` | Karte = Index in `CARD_DEFS` |
+| Feld ausbauen | `g<R><P>` | – (Version 7) |
+| Lane kaufen | `b<R><P>-<Lane>` | Lane 0–4 (Version 7) |
+| Karte ziehen | `w<R><P>` | – (Version 7) |
 | Bereit | `r<R><P>` | – |
 
-`<R>` ist die Runde (1–8), `<P>` der Spieler (0 Blau, 1 Orange). Beispiel: `v3.p10-3-0.m10-1-0-2.r10`. Grenzen beim
+Aktuell gilt **Version 7** (Wirtschaftskonzept); Links der Version 6 und älter sind ungültig. Der Kopf `v3` oben steht für
+das historische Format.
+
+`<R>` ist die Runde (1–8), `<P>` der Spieler (0 Blau, 1 Orange). Beispiel: `v7.p10-3-0.m10-1-0-2.g10.r10`. Grenzen beim
 Lesen: 4000 Zeichen und 800 Aktionen.
 
 **Ungültige Links** führen nie zu Absturz oder `console.error`:
@@ -575,7 +582,8 @@ Funktionen: `createStats`, `recordSummon`, `recordUndo`, `recordMove`, `recordDa
 | Konstante | Wert | Datei |
 |---|---|---|
 | `START_HAND`, `DRAW_PER_ROUND`, `HAND_LIMIT` | 5, 3, 10 | `match.ts` |
-| `MAX_ROUNDS`, `BASE_ENERGY`, `ENERGY_PER_ROUND`, `MAX_ENERGY` | 8, 3, 1, 8 | `match.ts` |
+| `MAX_ROUNDS`, `BASE_ENERGY`, `ENERGY_PER_ROUND`, `MAX_ENERGY` | 8, 3, 1, 17 | `match.ts` |
+| `UPGRADE_COST`, `LANE_COST`, `DRAW_COST`, `INCOME_PER_FORTRESS`, `INCOME_PER_LANE` | 2, 5, 1, 1, 1 | `match.ts` |
 | `LINE_COUNT`, `MAX_LINE_LEVEL`, `BASE_CAPACITY` | 3, 5, 2 | `match.ts` |
 | `TOWER_HP`, `TOWER_DAMAGE`, `COMBAT_TICKS` | 100, 8, 400 | `match.ts` |
 | `LINE_LENGTH`, `TICK_MS`, `MINION_RANGE`, `MINION_SPEED`, `TOWER_RANGE` | 100, 50, 4, 10, 20 | `combat.ts` |

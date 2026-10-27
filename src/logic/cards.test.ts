@@ -136,10 +136,14 @@ describe('Karten', () => {
       expect(buildDeck(4, DECK_CYCLE)).toEqual(deck);
     });
 
-    it('zählt DECK_CYCLE als Summe aller Exemplare und enthält jede Karte der Liste', () => {
+    it('zählt DECK_CYCLE als Summe aller Exemplare und enthält jede Karte der Liste außer dem Upgrade', () => {
       const deck = buildDeck(1, DECK_CYCLE);
       expect(deck).toHaveLength(DECK_CYCLE);
-      for (const def of CARD_DEFS) expect(deck).toContain(def.id);
+      for (const def of CARD_DEFS) {
+        // Das Upgrade ist eine Aktion (`upgradeField`), nicht mehr im Deck.
+        if (def.id === 'line-upgrade') expect(deck).not.toContain(def.id);
+        else expect(deck).toContain(def.id);
+      }
     });
 
     it('definiert Lane-Karten mit Ziel Lane und einer Wirkung', () => {
@@ -172,11 +176,12 @@ describe('Karten', () => {
   });
 
   it('liefert ohne die optionalen Parameter exakt das bisherige Deck', () => {
+    // Referenz seit dem Wirtschaftskonzept: `line-upgrade` hat 0 Exemplare und liegt nicht mehr im Deck.
     const expected = [
-      'minion-upgrade-all', 'tower-hp', 'tower-hp', 'buff-minion', 'minion-upgrade-line', 'tower-shield',
+      'summon-scout', 'tower-lightning', 'tower-damage', 'summon-scout', 'buff-minion', 'minion-upgrade-line',
       'summon-minion', 'summon-minion', 'summon-brute', 'summon-archer', 'summon-healer', 'summon-minion',
-      'minion-upgrade-line', 'summon-archer', 'line-upgrade', 'summon-destroyer', 'summon-minion', 'line-upgrade',
-      'summon-brute', 'tower-lightning', 'tower-damage',
+      'minion-upgrade-all', 'summon-archer', 'tower-hp', 'summon-destroyer', 'summon-minion', 'tower-hp',
+      'summon-brute', 'minion-upgrade-line', 'tower-shield',
     ];
     expect(buildDeck(5, 21)).toEqual(expected);
   });

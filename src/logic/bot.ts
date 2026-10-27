@@ -35,7 +35,7 @@ export const ECONOMY_ACTIONS = ['upgrade', 'buy-lane', 'draw'] as const;
 export type EconomyAction = (typeof ECONOMY_ACTIONS)[number];
 
 /** Reihenfolge, in der der Bot Karten und Wirtschaftsaktionen bevorzugt. */
-const PRIORITY = [
+export const PRIORITY = [
   'upgrade',
   'summon-minion',
   'summon-archer',
@@ -202,10 +202,15 @@ export function botStep(
   priority: readonly string[] = PRIORITY,
 ): BotMove | null {
   for (const id of priority) {
+    // Ziehen ist nur der Rückfall (siehe unten), egal wo es in der Liste steht.
+    if (id === 'draw') continue;
     const move = tryEconomy(state, playerIndex, id) ?? tryPlay(state, playerIndex, id);
     if (move) return move;
   }
-  return discardStep(state, playerIndex, priority);
+  // Ziehen nur, wenn sonst nichts spielbar ist. Jedes Ziehen kostet Energie, daher endet die Planung auch dann, wenn
+  // Abwerfen (+Energie) und Ziehen (−Energie) einander abwechseln könnten.
+  const drawn = priority.includes('draw') ? tryEconomy(state, playerIndex, 'draw') : null;
+  return drawn ?? discardStep(state, playerIndex, priority);
 }
 
 /**

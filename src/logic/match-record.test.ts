@@ -24,7 +24,7 @@ import { parseReplaySeed } from './seed';
 const SEEDS = [1, 5, 42];
 
 describe('Aufzeichnung und Nachspielen', () => {
-  it('enthält alle fünf Aktionstypen mit Runde und Spieler', () => {
+  it('enthält alle acht Aktionstypen mit Runde und Spieler', () => {
     const types = new Set<string>();
     for (const seed of SEEDS) {
       for (const action of playScriptedMatch(seed).record.actions) {
@@ -34,7 +34,7 @@ describe('Aufzeichnung und Nachspielen', () => {
         expect([0, 1]).toContain(action.player);
       }
     }
-    expect([...types].sort()).toEqual(['discard', 'move', 'play', 'ready', 'undo']);
+    expect([...types].sort()).toEqual(['buy-lane', 'discard', 'draw', 'move', 'play', 'ready', 'undo', 'upgrade']);
   });
 
   it('zeichnet Slots, Verschieben und Abwerfen auf und spielt sie mit gleichem Ergebnis nach', () => {
@@ -62,7 +62,8 @@ describe('Aufzeichnung und Nachspielen', () => {
     state.players[1].hand = ['buff-minion', 'summon-brute'];
     state.players[1].energy = 1;
     const planned = botPlanRecorded(state, createRecord(4), 1);
-    expect(planned.record.actions.map((a) => a.type)).toEqual(['discard', 'play', 'ready']);
+    // Nach dem Abwerfen hat der Bot 2 Energie und baut das Feld aus (Upgrade steht in der Priorität vorn).
+    expect(planned.record.actions.map((a) => a.type)).toEqual(['discard', 'upgrade', 'ready']);
     expect(planned.record.actions[0]).toMatchObject({ type: 'discard', cardId: 'buff-minion', player: 1 });
     const first = applyAction(state, planned.record.actions[0]!);
     expect(first.ok).toBe(true);
@@ -81,6 +82,25 @@ describe('Aufzeichnung und Nachspielen', () => {
       ok: false,
       reason: 'no-such-card',
     });
+  });
+
+  it('wendet Upgrade, Lane-Kauf und Ziehen über die Regeln an und lehnt Regelverstöße ab', () => {
+    const state = createMatch(1);
+    state.players[0].energy = 20;
+    expect(applyAction(state, { type: 'buy-lane', round: 1, player: 0, line: 1 })).toMatchObject({
+      ok: false,
+      reason: 'level-too-low',
+    });
+    const upgraded = applyAction(state, { type: 'upgrade', round: 1, player: 0 });
+    if (!upgraded.ok) throw new Error(upgraded.reason);
+    expect(upgraded.state.players[0].level).toBe(2);
+    const bought = applyAction(upgraded.state, { type: 'buy-lane', round: 1, player: 0, line: 2 });
+    if (!bought.ok) throw new Error(bought.reason);
+    expect(bought.state.players[0].lines[2]!.bought).toBe(true);
+    const drawn = applyAction(bought.state, { type: 'draw', round: 1, player: 0 });
+    if (!drawn.ok) throw new Error(drawn.reason);
+    expect(drawn.state.players[0].hand).toHaveLength(state.players[0].hand.length + 1);
+    expect(applyAction(drawn.state, { type: 'draw', round: 2, player: 0 })).toMatchObject({ ok: false, reason: 'wrong-round' });
   });
 
   it('wendet „spielen“ mit gewähltem Turm-Slot an', () => {
@@ -176,8 +196,12 @@ describe('Aufzeichnung und Nachspielen', () => {
           return { type, round: 1, player: 0, minionId: 99 };
         case 'discard':
           return { type, round: 1, player: 0, cardId: 'summon-brute' };
+        case 'upgrade':
+        case 'draw':
         case 'ready':
           return { type, round: 1, player: 0 };
+        case 'buy-lane':
+          return { type, round: 1, player: 0, line: 1 };
       }
     };
     expect(applyAction({ ...state, players: [{ ...state.players[0], hand: [] }, state.players[1]] }, missing('play'))).toMatchObject({ ok: false, reason: 'no-such-card' });
@@ -220,8 +244,10 @@ describe('Aufzeichnen verändert nichts', () => {
       expect(planned.state).toEqual(botPlan(state, 1));
       const actions = planned.record.actions;
       expect(actions.at(-1)).toMatchObject({ type: 'ready', player: 1, round: 1 });
-      const played = actions.filter((a) => a.type === 'play').length;
-      expect(played).toBe(state.players[1].hand.length - planned.state.players[1].hand.length);
+      const count = (type: string) => actions.filter((a) => a.type === type).length;
+      // Jede gespielte oder abgeworfene Karte verlässt die Hand, jede gezogene kommt dazu.
+      const shrink = state.players[1].hand.length - planned.state.players[1].hand.length;
+      expect(count('play') + count('discard') - count('draw')).toBe(shrink);
     }
   });
 });
@@ -249,6 +275,9 @@ describe('encodeMatch / decodeMatch', () => {
       { type: 'play', round: 4, player: 0, cardId: 'summon-minion', line: 0, slot: 5 },
       { type: 'play', round: 4, player: 1, cardId: 'lane-buff', line: 2 },
       { type: 'discard', round: 6, player: 1, cardId: 'buff-minion' },
+      { type: 'upgrade', round: 1, player: 0 },
+      { type: 'buy-lane', round: 2, player: 1, line: 4 },
+      { type: 'draw', round: 3, player: 0 },
       { type: 'ready', round: 5, player: 1 },
     ];
     for (const list of [[], actions]) {
@@ -280,8 +309,9 @@ describe('encodeMatch / decodeMatch', () => {
       'v3.r10',
       'v4.r10',
       'v5.r10',
-      'v7.r10',
-      '6.r10',
+      'v6.r10',
+      'v8.r10',
+      '7.r10',
       `V${RECORD_VERSION}.r10`,
       `${v}.x10`,
       `${v}.r90`,
@@ -308,6 +338,11 @@ describe('encodeMatch / decodeMatch', () => {
       `${v}.m10-1-1-0-0`,
       `${v}.u10`,
       `${v}.u10-1-1`,
+      `${v}.g10-1`,
+      `${v}.w10-1`,
+      `${v}.b10`,
+      `${v}.b10-5`,
+      `${v}.b10-1-1`,
       `${v}.p10-9999999`,
       `${v}.p10-0%20`,
       '<script>',
@@ -323,23 +358,28 @@ describe('encodeMatch / decodeMatch', () => {
   });
 
   it('lehnt Links aus älteren Versionen ab, nimmt aber alle fünf Lane-Indizes an', () => {
-    expect(RECORD_VERSION).toBe(6);
+    expect(RECORD_VERSION).toBe(7);
     expect(decodeMatch(1, 'v1.p10-0-0.r10')).toBeNull();
-    // Ältere Versionen kennen weder Turm-Slots noch neue Karten: Kartenindizes, Deck und Regeln wären andere.
-    for (const old of ['v2', 'v3', 'v4', 'v5']) expect(decodeMatch(1, `${old}.p10-0-0.r10`)).toBeNull();
+    // Ältere Versionen kennen weder Turm-Slots noch das neue Wirtschaftskonzept: Deck und Regeln wären andere.
+    for (const old of ['v2', 'v3', 'v4', 'v5', 'v6']) expect(decodeMatch(1, `${old}.p10-0-0.r10`)).toBeNull();
     for (const lane of [0, 1, 2, 3, 4]) {
-      expect(decodeMatch(1, `v6.p10-0-${lane}`)?.actions).toEqual([
+      expect(decodeMatch(1, `v7.p10-0-${lane}`)?.actions).toEqual([
         { type: 'play', round: 1, player: 0, cardId: 'summon-minion', line: lane },
       ]);
-      expect(decodeMatch(1, `v6.p10-0-${lane}-3`)?.actions).toEqual([
+      expect(decodeMatch(1, `v7.p10-0-${lane}-3`)?.actions).toEqual([
         { type: 'play', round: 1, player: 0, cardId: 'summon-minion', line: lane, slot: 3 },
       ]);
-      expect(decodeMatch(1, `v6.m10-1-${lane}-0`)?.actions).toEqual([
+      expect(decodeMatch(1, `v7.m10-1-${lane}-0`)?.actions).toEqual([
         { type: 'move', round: 1, player: 0, minionId: 1, line: lane, slot: 0 },
       ]);
+      expect(decodeMatch(1, `v7.b10-${lane}`)?.actions).toEqual([{ type: 'buy-lane', round: 1, player: 0, line: lane }]);
     }
-    expect(decodeMatch(1, 'v6.p10-0-5')).toBeNull();
-    expect(decodeMatch(1, 'v6.d20-3')?.actions).toEqual([{ type: 'discard', round: 2, player: 0, cardId: 'summon-healer' }]);
+    expect(decodeMatch(1, 'v7.p10-0-5')).toBeNull();
+    expect(decodeMatch(1, 'v7.g11.w20')?.actions).toEqual([
+      { type: 'upgrade', round: 1, player: 1 },
+      { type: 'draw', round: 2, player: 0 },
+    ]);
+    expect(decodeMatch(1, 'v7.d20-3')?.actions).toEqual([{ type: 'discard', round: 2, player: 0, cardId: 'summon-healer' }]);
   });
 
   it('kodiert die Ziel-Minion-ID der Karte „Minion stärken“ und liest sie zurück', () => {
@@ -349,7 +389,7 @@ describe('encodeMatch / decodeMatch', () => {
     ];
     const record: RecordedMatch = { ...createRecord(9), actions };
     const text = encodeMatch(record);
-    expect(text).toBe('v6.p20-12-7.p31-12-0');
+    expect(text).toBe('v7.p20-12-7.p31-12-0');
     expect(decodeMatch(9, text)).toEqual(record);
   });
 
@@ -400,7 +440,7 @@ describe('encodeMatch / decodeMatch', () => {
   });
 
   it('manipulierte, aber lesbare Daten bricht erst das Nachspielen ab', () => {
-    const text = encodeMatch(playScriptedMatch(5).record).replace(/^v6\./, 'v6.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0.');
+    const text = encodeMatch(playScriptedMatch(5).record).replace(/^v7\./, 'v7.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0.');
     const decoded = decodeMatch(5, text);
     expect(decoded).not.toBeNull();
     const result = replayRecorded(decoded!);
@@ -444,7 +484,7 @@ describe('encodeMatch / decodeMatch', () => {
       'tower-armor',
       'minion-upgrade-elite',
     ]);
-    expect(RECORD_VERSION).toBe(6);
+    expect(RECORD_VERSION).toBe(7);
   });
 });
 

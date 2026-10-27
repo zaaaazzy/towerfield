@@ -3,7 +3,7 @@
  * Die Zahlen beschreiben den Bot mit zufällig variierter Kartenreihenfolge, nicht menschliches Spielverhalten.
  * Zufall nur über `nextRandom` (Seed), daher ist jede Simulation reproduzierbar.
  */
-import { botPlan, ECONOMY_ACTIONS } from './bot';
+import { botStep, ECONOMY_ACTIONS } from './bot';
 import { CARD_DEFS } from './cards';
 import { TICK_MS } from './combat';
 import { nextRandom } from './game-state';
@@ -16,6 +16,7 @@ import {
   MAX_ROUNDS,
   type Outcome,
   type PlayerIndex,
+  setReady,
 } from './match';
 import { ROUND_EVENTS, type RoundEventId } from './round-events';
 
@@ -93,18 +94,6 @@ export function strategiesForSeed(seed: number): Strategies {
   return [shuffledPriority(base + 0x5bd1e995), shuffledPriority(base + 0x5bd1e996)];
 }
 
-/** Karten, die zwischen `before` und `after` aus der Hand verschwunden sind. */
-function removedCards(before: string[], after: string[]): string[] {
-  const rest = [...after];
-  const removed: string[] = [];
-  for (const id of before) {
-    const index = rest.indexOf(id);
-    if (index >= 0) rest.splice(index, 1);
-    else removed.push(id);
-  }
-  return removed;
-}
-
 /**
  * Spielt ein volles Match Bot gegen Bot. Je Runde planen beide, danach läuft die ganze Kampfphase in einem
  * `advance`-Aufruf (spart das Klonen des Zustands). Endet nach höchstens `MAX_ROUNDS` Runden mit `phase === 'over'`.
@@ -120,9 +109,12 @@ export function simulateMatch(seed: number, strategies: Strategies): MatchResult
       if (state.event && state.round !== eventRound) events.push(state.event);
       eventRound = state.round;
       for (const index of [0, 1] as PlayerIndex[]) {
-        const before = state.players[index].hand;
-        state = botPlan(state, index, strategies[index]);
-        played[index].push(...removedCards(before, state.players[index].hand));
+        // Schrittweise statt `botPlan`, damit auch eine gezogene und gleich gespielte Karte zählt.
+        for (let move = botStep(state, index, strategies[index]); move; move = botStep(state, index, strategies[index])) {
+          if (!move.economy && !move.discard) played[index].push(move.cardId);
+          state = move.state;
+        }
+        state = setReady(state, index);
       }
     } else {
       state = advance(state, COMBAT_TICKS * TICK_MS);
