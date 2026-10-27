@@ -6,7 +6,14 @@
 import Phaser from 'phaser';
 import { PALETTE } from './theme';
 
-export const TEXTURE_KEYS = { backdrop: 'backdrop', spark: 'spark', glow: 'glow' } as const;
+export const TEXTURE_KEYS = {
+  backdrop: 'backdrop',
+  spark: 'spark',
+  glow: 'glow',
+  arrow: 'arrow',
+  sword: 'sword',
+  splinter: 'splinter',
+} as const;
 
 /** Wo Boden, Wege und Hand-Tisch liegen; ohne Angabe gibt es nur Verlauf und Vignette (z. B. Balance-Szene). */
 export interface FieldGeometry {
@@ -196,6 +203,46 @@ export function ensureTextures(scene: Phaser.Scene): void {
     gradient.addColorStop(1, 'rgba(255,255,255,0)');
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, 64, 64);
+  });
+  // Holzpfeil, Spitze nach rechts (Rotation 0 = Flug nach rechts): Federn, Schaft, Eisenspitze.
+  createCanvasTexture(scene, TEXTURE_KEYS.arrow, 22, 6, (ctx) => {
+    ctx.fillStyle = css(0xe8dcc0);
+    ctx.fillRect(0, 0, 4, 2);
+    ctx.fillRect(0, 4, 4, 2);
+    ctx.fillStyle = css(PALETTE.bronze);
+    ctx.fillRect(1, 2, 16, 2);
+    ctx.fillStyle = css(PALETTE.stone);
+    ctx.beginPath();
+    ctx.moveTo(16, 0.5);
+    ctx.lineTo(22, 3);
+    ctx.lineTo(16, 5.5);
+    ctx.closePath();
+    ctx.fill();
+  });
+  // Schwert, Klinge nach rechts: Lederknauf, Bronze-Parierstange, Stahlklinge mit dunkler Kante.
+  createCanvasTexture(scene, TEXTURE_KEYS.sword, 26, 8, (ctx) => {
+    ctx.fillStyle = css(PALETTE.bronzeDark);
+    ctx.fillRect(0, 3, 6, 2);
+    ctx.fillStyle = css(PALETTE.bronze);
+    ctx.fillRect(6, 0, 2, 8);
+    ctx.fillStyle = css(PALETTE.stoneDark);
+    ctx.beginPath();
+    ctx.moveTo(8, 1.5);
+    ctx.lineTo(22, 1.5);
+    ctx.lineTo(26, 4);
+    ctx.lineTo(22, 6.5);
+    ctx.lineTo(8, 6.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = css(0xdfe6ee);
+    ctx.fillRect(8, 2.5, 14, 3);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(9, 3, 12, 1);
+  });
+  // Weisser Splitter, wird beim Ausstoss holzfarben eingefärbt.
+  createCanvasTexture(scene, TEXTURE_KEYS.splinter, 6, 2, (ctx) => {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, 6, 2);
   });
 }
 

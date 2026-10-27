@@ -163,8 +163,25 @@ function wav(samples) {
   return Buffer.concat([header, data]);
 }
 
+/**
+ * Diese Effekte sind Kenney-Samples (CC0, siehe `docs/anwendung-audio.md`) und liegen fertig im Repository; der
+ * Generator überschreibt sie nicht. Die Formeln oben bleiben als Ersatz, falls ein Sample wieder entfällt.
+ */
+const SAMPLED = new Set([
+  'melee-hit',
+  'arrow',
+  'shield-block',
+  'tower-hit',
+  'tower-down',
+  'minion-death',
+  'card-play',
+  'round-start',
+  'round-end',
+]);
+
 mkdirSync(OUT, { recursive: true });
 for (const [name, build] of Object.entries(SOUNDS)) {
+  if (SAMPLED.has(name)) continue;
   const file = wav(build());
   writeFileSync(join(OUT, `${name}.wav`), file);
   console.log(`${name}.wav  ${file.length} Bytes`);
