@@ -46,21 +46,14 @@ export function laneRow(lane: number): number {
   return laneDef(lane).row;
 }
 
-/** Ausbaustufe, ab der die Lane frei ist. */
+/** Ausbaustufe, ab der sich die Lane kaufen lässt (gekauft wird sie in `match.ts`, siehe `buyLane`). */
 export function laneUnlockLevel(lane: number): number {
   return laneDef(lane).level;
 }
 
-/** Ist die Lane bei Ausbaustufe `level` frei? Ungültige Lane-Indizes sind nie frei. */
-export function isLaneUnlocked(level: number, lane: number): boolean {
+/** Lässt sich die Lane bei Ausbaustufe `level` kaufen? Ungültige Lane-Indizes nie. */
+export function isLaneBuyable(level: number, lane: number): boolean {
   return isLane(lane) && laneDef(lane).level <= level;
-}
-
-/** Lane-Indizes, die bei Ausbaustufe `level` frei sind, von oben nach unten angeordnet. */
-export function unlockedLanes(level: number): number[] {
-  return Array.from({ length: LANE_COUNT }, (_, lane) => lane)
-    .filter((lane) => isLaneUnlocked(level, lane))
-    .sort((a, b) => laneRow(a) - laneRow(b));
 }
 
 /** Anzeigename der Lane, z. B. „Start-Lane“ oder „Lvl 2 oben“. */

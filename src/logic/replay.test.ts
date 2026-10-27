@@ -72,12 +72,13 @@ describe('Replay-Logik', () => {
       const result = simulateMatch(seed, strategiesForSeed(seed));
       const { replay } = runReplay(seed);
       for (const player of [0, 1] as const) {
-        const ids = replay.events.filter((e) => e.player === player).map((e) => e.cardId);
+        // Nur gespielte Karten: Abwerfen und Wirtschaftsaktionen (Upgrade, Lane-Kauf, Ziehen) sind eigene Aktionen.
+        const ids = replay.events.filter((e) => e.player === player && e.action === undefined).map((e) => e.cardId);
         expect(ids.sort()).toEqual([...result.played[player]].sort());
       }
       for (const event of replay.events) {
         expect(event.round).toBeGreaterThanOrEqual(1);
-        expect(CARD_DEFS.some((def) => def.id === event.cardId)).toBe(true);
+        if (event.cardId !== '') expect(CARD_DEFS.some((def) => def.id === event.cardId)).toBe(true);
       }
     }
   });
@@ -210,8 +211,10 @@ describe('Replay einer Aufzeichnung', () => {
     const replay = runReplay(7).replay;
     expect(replay.script).toBeNull();
     expect(replay.aborted).toBeNull();
-    // Beim Abwerfen des Bots steht `discard`, sonst nichts.
-    expect(replay.events.every((event) => event.action === undefined || event.action === 'discard')).toBe(true);
+    // Beim Abwerfen und bei Wirtschaftsaktionen des Bots steht die Aktion, beim Spielen einer Karte nichts.
+    const allowed = [undefined, 'discard', 'upgrade', 'buy-lane', 'draw'];
+    expect(replay.events.every((event) => allowed.includes(event.action))).toBe(true);
+    expect(replay.events.some((event) => event.action === 'upgrade')).toBe(true);
   });
 
   it('spielt das Abwerfen des Bots im Bot-Replay als Ereignis ab', () => {
@@ -252,6 +255,13 @@ describe('describeEvent für Aufzeichnungen', () => {
     const undo = describeEvent({ ...base, player: 1, action: 'undo', cardId: 'summon-minion', line: null });
     expect(undo).toBe('Runde 3 · Orange nimmt Minion zurück');
     expect(describeEvent({ ...base, action: 'ready', cardId: '', line: null })).toBe('Runde 3 · Blau ist bereit');
+  });
+
+  it('beschreibt Upgrade, Lane-Kauf und Ziehen', () => {
+    expect(describeEvent({ ...base, action: 'upgrade', cardId: '', line: null })).toBe('Runde 3 · Blau baut das Feld aus');
+    expect(describeEvent({ ...base, action: 'draw', cardId: '', line: null })).toBe('Runde 3 · Blau zieht eine Karte');
+    expect(describeEvent({ ...base, action: 'buy-lane', cardId: '', line: 1 })).toBe('Runde 3 · Blau kauft Lvl 2 oben');
+    expect(describeEvent({ ...base, action: 'buy-lane', cardId: '', line: null })).toBe('Runde 3 · Blau kauft eine Lane');
   });
 
   it('beschreibt das Verschieben eines Überlebenden früherer Runden ohne Karte als „Einheit“', () => {

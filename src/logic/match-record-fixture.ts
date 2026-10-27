@@ -4,8 +4,7 @@
  * `botPlanRecorded` mitschreibt.
  */
 import { getCardDef } from './cards';
-import { unlockedLanes } from './lanes';
-import { advance, createMatch, type MatchState } from './match';
+import { advance, createMatch, type MatchState, openLanes } from './match';
 import {
   type ActionBody,
   botPlanRecorded,
@@ -32,8 +31,11 @@ export function playScriptedMatch(seed: number): PlayedMatch {
   };
   for (let guard = 0; guard < 1000 && state.phase !== 'over'; guard += 1) {
     if (state.phase === 'planning') {
-      // Nur freie Lanes (aufsteigend nach Index); das Feld wächst, sobald „Lane ausbauen“ gespielt wird.
-      const freeLanes = () => unlockedLanes(state.players[0].level).sort((a, b) => a - b);
+      // Nur gekaufte Lanes (aufsteigend nach Index); die Wirtschaftsaktionen unten erweitern das Feld.
+      const freeLanes = () => openLanes(state.players[0]);
+      if (state.round === 1) act({ type: 'upgrade' });
+      if (state.round === 2) act({ type: 'draw' });
+      if (state.round >= 3) act({ type: 'buy-lane', line: state.round === 3 ? 1 : 2 });
       // In geraden Runden wirft der Mensch zuerst seine letzte Karte ab.
       if (state.round % 2 === 0 && state.players[0].hand.length > 0) {
         act({ type: 'discard', cardId: state.players[0].hand.at(-1)! });

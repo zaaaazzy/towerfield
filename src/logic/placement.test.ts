@@ -2,14 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { getCardDef } from './cards';
 import { type Minion, type Tower } from './combat';
 import {
+  buyLane,
   createMatch,
   laneSlotCounts,
   type MatchState,
   MOVE_COST,
   moveMinion,
   playCard,
+  type PlayResult,
   setReady,
   undoSummon,
+  upgradeField,
 } from './match';
 import {
   describeSlot,
@@ -53,6 +56,19 @@ function minion(line: number, slot: number, id = 1): Minion {
 
 const tower = (offset: number, hp = 100): Tower => ({ offset, hp, maxHp: 100, damage: 8 });
 
+/** Der Zustand nach einer erfolgreichen Aktion; wirft mit dem Ablehnungsgrund. */
+function unwrap(result: PlayResult): MatchState {
+  if (!result.ok) throw new Error(result.reason);
+  return result.state;
+}
+
+/** Öffnet die Lane `lane` von Spieler 0 mit einem einzelnen Tower, ohne Kauf (nur für Platzierungstests). */
+function openLane(state: MatchState, lane: number): void {
+  const line = state.players[0].lines[lane]!;
+  line.bought = true;
+  line.towers = [tower(0)];
+}
+
 describe('Slots', () => {
   it('bietet je lebendem Tower genau zwei Slots, oben und unten', () => {
     const towers = [tower(0), tower(8), tower(16)];
@@ -67,11 +83,15 @@ describe('Slots', () => {
   it('gibt der Start-Lane sechs Slots, den anderen Lanes zwei, gesperrten keine', () => {
     const player = createMatch(1).players[0];
     expect(laneSlotCounts(player)).toEqual([6, 0, 0, 0, 0]);
-    const start = setup();
-    start.players[0].hand = ['line-upgrade', 'line-upgrade'];
-    const level2 = playCard(start, 0, 0).state;
-    expect(laneSlotCounts(level2.players[0])).toEqual([6, 2, 2, 0, 0]);
-    expect(laneSlotCounts(playCard(level2, 0, 0).state.players[0])).toEqual([6, 2, 2, 2, 2]);
+    let state = setup();
+    state.players[0].energy = 100;
+    // Feldstufe 2 → obere und untere Lane kaufen, Feldstufe 3 → die beiden äußeren.
+    state = unwrap(upgradeField(state, 0));
+    for (const lane of [1, 2]) state = unwrap(buyLane(state, 0, lane));
+    expect(laneSlotCounts(state.players[0])).toEqual([6, 2, 2, 0, 0]);
+    state = unwrap(upgradeField(state, 0));
+    for (const lane of [3, 4]) state = unwrap(buyLane(state, 0, lane));
+    expect(laneSlotCounts(state.players[0])).toEqual([6, 2, 2, 2, 2]);
   });
 
   it('bietet für einen zerstörten Tower keine Slots mehr', () => {
@@ -158,8 +178,8 @@ describe('Beschwören auf Slots', () => {
 
   it('erlaubt gleiche Slots auf verschiedenen Lanes', () => {
     const state = setup(2);
-    state.players[0].lines[1].towers = [tower(0)];
-    state.players[0].lines[2].towers = [tower(0)];
+    openLane(state, 1);
+    openLane(state, 2);
     const first = playCard(state, 0, 0, 0, 0);
     expect(playCard(first.state, 0, 0, 1, 0).ok).toBe(true);
     expect(playCard(first.state, 0, 0, 2, 0).ok).toBe(true);
@@ -202,7 +222,7 @@ describe('Verschieben auf einen anderen Turm-Slot', () => {
 
   it('versetzt auch auf einen Tower einer anderen Lane', () => {
     const state = setup(2);
-    state.players[0].lines[1].towers = [tower(0)];
+    openLane(state, 1);
     const placed = playCard(state, 0, 0, 0, 0).state;
     const moved = moveMinion(placed, 0, placed.players[0].minions[0]!.id, 1, 1);
     expect(moved.state.players[0].minions[0]).toMatchObject({ line: 1, slot: 1, position: 0 });
@@ -293,7 +313,7 @@ describe('Verschieben auf einen anderen Turm-Slot', () => {
 
   it('aktualisiert die Lane der Beschwörung dieser Runde in der Synergie-Liste', () => {
     const state = setup(2);
-    state.players[0].lines[1].towers = [tower(0)];
+    openLane(state, 1);
     const placed = playCard(state, 0, 0, 0, 0).state;
     const moved = moveMinion(placed, 0, placed.players[0].minions[0]!.id, 1, 0).state;
     expect(moved.players[0].played[0]).toMatchObject({ line: 1 });
@@ -361,6 +381,7 @@ describe('Zeiger, Slot-Punkte und Einrasten', () => {
 
   it('liefert Lane-Slots hinter dem Tower-Ende nur für freie Lanes ohne Lane-Karte', () => {
     const player = setup(2).players[0];
+    player.lines[1].bought = true;
     player.lines[1].towers = [tower(0)];
     expect(freeLaneSlotPoints(player.lines, geometry).map((p) => p.line)).toEqual([0, 1]);
     player.lines[0].laneEffect = 'buff';

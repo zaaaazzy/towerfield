@@ -33,7 +33,7 @@ flowchart LR
     E -- ja --> F[Spielende]
 ```
 
-1. **Rundenstart** (`startRound`): Energie = `energyForRound`, beide Spieler ziehen dieselben Karten, Handlimit wird
+1. **Rundenstart** (`startRound`): Energie = `roundEnergy` (Einkommen des Spielers, siehe unten), beide Spieler ziehen dieselben Karten, Handlimit wird
    angewendet, `placements` wird geleert.
 2. **Planung** (`phase = 'planning'`): beide Spieler gleichzeitig. Karten spielen (`playCard`), Beschwörungen verschieben
    (`moveMinion`) oder zurücknehmen (`undoSummon`). „Bereit“ (`setReady`) ist endgültig für diese Runde.
@@ -51,7 +51,9 @@ flowchart LR
   Karten zählen als gezogen.
 - **Ablage:** gespielte Karten (verfallene kommen nicht hinein; eine Ablage für sie wäre ein Folgeauftrag). Ist nur Anzeige (kein Nachmischen); Datenfeld folgt in Folgeauftrag 4.
   Eine per `undoSummon` zurückgenommene Karte kommt zurück an die Hand (nicht in die Ablage).
-- **Energie:** pro Runde neu gesetzt (`3 + (Runde − 1)`, max. `MAX_ENERGY`), nicht übertragbar.
+- **Energie:** pro Runde neu gesetzt auf das Einkommen `3 + (Runde − 1) + Festungen + Lanes` (`incomeForRound`, höchstens
+  `MAX_ENERGY` = 17), nicht übertragbar. Upgrade, Lane-Kauf und Ziehen sind eigene Aktionen, siehe
+  [Wirtschaft](anwendung-wirtschaft.md). Die Karte `line-upgrade` liegt nicht mehr im Deck (Anzahl 0).
 - **Ausspielen:** Phase Planung, Spieler nicht bereit, genug Energie, gültiges Ziel. Sonst Fehler (`PlayError`) und
   unveränderter Zustand.
 

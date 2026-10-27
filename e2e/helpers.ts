@@ -82,6 +82,9 @@ export async function cardPointOf(page: Page, index: number): Promise<{ x: numbe
 export const LANE_Y = [232, 162, 302, 92, 372];
 const LANE_TAP_X = 180;
 export const READY_BUTTON = { x: 290, y: 612 };
+/** Mitten der Tasten „Upgrade“ und „Ziehen“ im oberen Rand, Spiegel von `UPGRADE_BUTTON`/`DRAW_BUTTON` in `main-scene.ts`. */
+export const UPGRADE_TAP = { x: 310, y: 44 };
+export const DRAW_TAP = { x: 138, y: 44 };
 
 /**
  * Spiegel von `GEOMETRY`/`FIELD` aus `src/scenes/field-view.ts`. Die Datei importiert Phaser und läuft nicht im
@@ -184,11 +187,23 @@ export function setHand(page: Page, hand: string[], energy: number): Promise<voi
   );
 }
 
-/** Schaltet die Lanes der Ausbaustufe `level` für den Menschen frei (setzt nur `level` im Szenenzustand der Tests). */
+/**
+ * Hebt das Feld des Menschen auf `level` und „kauft“ alle Lanes, die auf dieser Stufe kaufbar sind (Lane 1 und 2 ab
+ * Stufe 2, Lane 3 und 4 ab Stufe 3), mit je einem Tower wie die Start-Lane. Setzt nur den Szenenzustand der Tests, die
+ * Regeln (`upgradeField`, `buyLane`) laufen unverändert; ihre Wirkung prüft der Test zum Wirtschaftskonzept.
+ */
 export function unlockField(page: Page, level = 2): Promise<void> {
   return page.evaluate((wanted) => {
-    const scene = window.game!.scene.getScene('main') as unknown as { state: { players: { level: number }[] } };
-    scene.state.players[0]!.level = wanted;
+    type Lane = { bought: boolean; towers: { offset?: number }[] };
+    const scene = window.game!.scene.getScene('main') as unknown as { state: { players: { level: number; lines: Lane[] }[] } };
+    const me = scene.state.players[0]!;
+    me.level = wanted;
+    me.lines.forEach((lane, index) => {
+      const needed = index === 0 ? 1 : index <= 2 ? 2 : 3;
+      if (needed > wanted || lane.bought) return;
+      lane.bought = true;
+      lane.towers = [{ ...me.lines[0]!.towers[0]!, offset: 0 }];
+    });
   }, level);
 }
 

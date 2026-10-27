@@ -3,10 +3,22 @@ import { CARD_ART_IDS, cardTypeStyle } from '../logic/card-style';
 import { getCardDef } from '../logic/cards';
 import { diffFx } from '../logic/fx-events';
 import { type CardPose, cardAt, fanLayout, HAND_FAN, liftedPose, sortHand } from '../logic/hand-layout';
-import { advance, createMatch, DISCARD_ENERGY, type MatchState, MAX_ROUNDS, MOVE_COST } from '../logic/match';
+import {
+  advance,
+  boughtLaneCount,
+  createMatch,
+  DISCARD_ENERGY,
+  DRAW_COST,
+  incomeForRound,
+  isLaneOpen,
+  type MatchState,
+  MAX_ROUNDS,
+  MOVE_COST,
+  UPGRADE_COST,
+} from '../logic/match';
 import { getRoundEventDef } from '../logic/round-events';
-import { isLaneUnlocked, LANE_COUNT, laneShortName } from '../logic/lanes';
-import { botPlanRecorded, createRecord, performAction, type RecordedMatch } from '../logic/match-record';
+import { LANE_COUNT, laneShortName, MAX_FIELD_LEVEL } from '../logic/lanes';
+import { type ActionBody, botPlanRecorded, createRecord, performAction, type RecordedMatch } from '../logic/match-record';
 import { HAND_FILTER_NAMES, type HandFilter, isCardVisible, nextHandFilter } from '../logic/hand-filter';
 import { updateFlashes } from '../logic/minion-look';
 import { parseSeed } from '../logic/seed';
@@ -88,6 +100,9 @@ const FX_MAX_DELTA_MS = 500;
 
 /** Taste „Abwerfen“ oben links: sichtbar, solange eine Karte gewählt ist oder gezogen wird; Karte darauf ablegen wirft sie ab. */
 const DISCARD_BUTTON = { x: 6, y: 32, width: 96, height: 24 };
+/** Tasten für die Wirtschaft im oberen Rand: eine Karte ziehen (links neben dem Gegner-Text) und das Feld ausbauen. */
+const DRAW_BUTTON = { x: 106, y: 32, width: 64, height: 24 };
+const UPGRADE_BUTTON = { x: 266, y: 32, width: 88, height: 24 };
 /** Zeitkonstanten (ms) der weichen Animationen: Punkte-Nähe, Einblenden, Einrasten der gezogenen Karte, Rückflug. */
 const PROXIMITY_TIME_MS = 70;
 const FADE_TIME_MS = 110;
@@ -517,7 +532,7 @@ export class MainScene extends Phaser.Scene {
   private laneAt(x: number, y: number): number | null {
     if (x < FIELD.ownTowerX - 30 || x > FIELD.enemyTowerX + 30) return null;
     const lane = FIELD.laneCenters.findIndex(
-      (center, line) => isLaneUnlocked(this.state.players[HUMAN].level, line) && Math.abs(y - center) <= FIELD.laneHalfHeight,
+      (center, line) => isLaneOpen(this.state.players[HUMAN], line) && Math.abs(y - center) <= FIELD.laneHalfHeight,
     );
     return lane < 0 ? null : lane;
   }
@@ -601,6 +616,14 @@ export class MainScene extends Phaser.Scene {
       if (selected !== null && !this.isVisibleInHand(selected)) this.selected = null;
       return;
     }
+    if (inside(UPGRADE_BUTTON, x, y)) {
+      this.economy({ type: 'upgrade' });
+      return;
+    }
+    if (inside(DRAW_BUTTON, x, y)) {
+      this.economy({ type: 'draw' });
+      return;
+    }
     const index = this.cardIndexAt(x, y);
     if (index !== null) {
       this.message = '';
@@ -612,7 +635,12 @@ export class MainScene extends Phaser.Scene {
       }
       return;
     }
-    if (this.selected === null || this.selectedNeedsMinion() || y > LAYOUT.handTop - 4) return;
+    if (this.selected === null) {
+      const locked = this.lockedLaneAt(x, y);
+      if (locked !== null) this.economy({ type: 'buy-lane', line: locked });
+      return;
+    }
+    if (this.selectedNeedsMinion() || y > LAYOUT.handTop - 4) return;
     // Ein Antippen nahe einem grünen Punkt wählt diesen Slot, sonst die angetippte Lane (erster freier Slot bzw. Lane-Slot).
     const snap = snapTarget(this.activeTargets(), x, y);
     if (snap) {
@@ -627,6 +655,25 @@ export class MainScene extends Phaser.Scene {
   private isVisibleInHand(handIndex: number): boolean {
     const id = this.state.players[HUMAN].hand[handIndex];
     return id !== undefined && isCardVisible(getCardDef(id).type, this.handFilter);
+  }
+
+  /** Noch nicht gekaufte Lane unter dem Punkt (nur ihr abgedunkelter Streifen), sonst `null`. */
+  private lockedLaneAt(x: number, y: number): number | null {
+    if (x < FIELD.ownTowerX - 14 || x > FIELD.enemyTowerX + 14) return null;
+    const human = this.state.players[HUMAN];
+    const lane = FIELD.laneCenters.findIndex(
+      (center, line) => !isLaneOpen(human, line) && Math.abs(y - center) <= FIELD.pathHalfHeight,
+    );
+    return lane < 0 ? null : lane;
+  }
+
+  /** Führt eine Wirtschaftsaktion (Upgrade, Lane kaufen, Karte ziehen) des Menschen aus und zeigt einen Fehlergrund. */
+  private economy(body: ActionBody): void {
+    const done = performAction(this.state, this.record, HUMAN, body);
+    this.state = done.result.state;
+    this.record = done.record;
+    this.message = done.result.ok ? '' : this.explain(done.result.reason);
+    if (done.result.ok) this.pendingAudio.push({ kind: 'card-play' });
   }
 
   /** Wirft die Handkarte ab (bringt `DISCARD_ENERGY` Energie, siehe `discardCard`). */
@@ -683,7 +730,11 @@ export class MainScene extends Phaser.Scene {
       case 'max-level':
         return 'Feld ist auf Höchststufe';
       case 'level-too-low':
-        return 'Lane-Level zu niedrig';
+        return 'Feldstufe zu niedrig';
+      case 'lane-owned':
+        return 'Lane schon gekauft';
+      case 'hand-full':
+        return 'Hand ist voll';
       case 'already-specialized':
         return 'Tower schon spezialisiert';
       case 'slot-taken':
@@ -729,6 +780,32 @@ export class MainScene extends Phaser.Scene {
     );
   }
 
+  /** Tasten „Ziehen“ und „Upgrade“ mit Preis; grau, wenn die Aktion jetzt nicht geht. Dazu das Einkommen der nächsten Runde. */
+  private drawEconomyButtons(state: MatchState): void {
+    const human = state.players[HUMAN];
+    const planning = state.phase === 'planning' && !state.ready[HUMAN];
+    const maxLevel = human.level >= MAX_FIELD_LEVEL;
+    const buttons = [
+      { rect: DRAW_BUTTON, text: `Ziehen -${DRAW_COST}`, enabled: planning && human.energy >= DRAW_COST },
+      {
+        rect: UPGRADE_BUTTON,
+        text: maxLevel ? `Lvl ${human.level} (max)` : `Upgrade -${UPGRADE_COST}`,
+        enabled: planning && !maxLevel && human.energy >= UPGRADE_COST,
+      },
+    ];
+    for (const { rect, text, enabled } of buttons) {
+      drawButton(this.graphics, rect, { enabled });
+      this.label(text, rect.x + rect.width / 2, rect.y + rect.height / 2, { size: 11, font: 'heading', bold: true });
+    }
+    const next = Math.min(MAX_ROUNDS, state.round + 1);
+    this.label(
+      `Feld Lvl ${human.level} · Einkommen ${incomeForRound(state.round, human.level, boughtLaneCount(human))}, nächste Runde ${incomeForRound(next, human.level, boughtLaneCount(human))}`,
+      VIEW.width / 2,
+      64,
+      { size: 9, color: TEXT.gold },
+    );
+  }
+
   private label: LabelFn =(text, x, y, options) => this.pool.label(text, x, y, options);
 
   private render(): void {
@@ -751,7 +828,7 @@ export class MainScene extends Phaser.Scene {
       bold: true,
     });
     drawAudioControls(g, this.label, this.audio.current);
-    this.label(`Gegner: ${bot.hand.length} Karten`, VIEW.width / 2, 40, { size: 11, color: TEXT.dim });
+    this.label(`Gegner: ${bot.hand.length} Karten`, 218, 40, { size: 10, color: TEXT.dim });
     if (state.event && state.phase !== 'over') {
       const event = getRoundEventDef(state.event);
       this.label(`${event.name}: ${event.description}`, VIEW.width / 2, 54, { size: 11, color: TEXT.gold });
@@ -773,6 +850,7 @@ export class MainScene extends Phaser.Scene {
     }
     if (this.ghost) this.drawGhost(this.ghost);
     this.drawDiscardButton(state, drag?.handIndex != null);
+    this.drawEconomyButtons(state);
     if (needsMinion) {
       // Mögliche Ziele der gewählten Karte: alle eigenen lebenden Minions mit grünem Ring.
       for (const minion of human.minions) {

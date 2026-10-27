@@ -3,7 +3,7 @@
  * Die Zahlen beschreiben den Bot mit zufällig variierter Kartenreihenfolge, nicht menschliches Spielverhalten.
  * Zufall nur über `nextRandom` (Seed), daher ist jede Simulation reproduzierbar.
  */
-import { botPlan } from './bot';
+import { botStep, ECONOMY_ACTIONS } from './bot';
 import { CARD_DEFS } from './cards';
 import { TICK_MS } from './combat';
 import { nextRandom } from './game-state';
@@ -16,6 +16,7 @@ import {
   MAX_ROUNDS,
   type Outcome,
   type PlayerIndex,
+  setReady,
 } from './match';
 import { ROUND_EVENTS, type RoundEventId } from './round-events';
 
@@ -74,9 +75,9 @@ export interface SimulationOptions {
 
 const ratio = (part: number, whole: number): number => (whole === 0 ? 0 : part / whole);
 
-/** Karten-IDs in zufälliger Reihenfolge (Fisher-Yates über `nextRandom`). */
+/** Karten-IDs und Wirtschaftsaktionen des Bots in zufälliger Reihenfolge (Fisher-Yates über `nextRandom`). */
 export function shuffledPriority(seed: number): string[] {
-  const ids = CARD_DEFS.map((def) => def.id);
+  const ids: string[] = [...CARD_DEFS.map((def) => def.id), ...ECONOMY_ACTIONS];
   let state = seed >>> 0;
   for (let index = ids.length - 1; index > 0; index -= 1) {
     const random = nextRandom(state);
@@ -91,18 +92,6 @@ export function shuffledPriority(seed: number): string[] {
 export function strategiesForSeed(seed: number): Strategies {
   const base = Math.imul(seed, 2) >>> 0;
   return [shuffledPriority(base + 0x5bd1e995), shuffledPriority(base + 0x5bd1e996)];
-}
-
-/** Karten, die zwischen `before` und `after` aus der Hand verschwunden sind. */
-function removedCards(before: string[], after: string[]): string[] {
-  const rest = [...after];
-  const removed: string[] = [];
-  for (const id of before) {
-    const index = rest.indexOf(id);
-    if (index >= 0) rest.splice(index, 1);
-    else removed.push(id);
-  }
-  return removed;
 }
 
 /**
@@ -120,9 +109,12 @@ export function simulateMatch(seed: number, strategies: Strategies): MatchResult
       if (state.event && state.round !== eventRound) events.push(state.event);
       eventRound = state.round;
       for (const index of [0, 1] as PlayerIndex[]) {
-        const before = state.players[index].hand;
-        state = botPlan(state, index, strategies[index]);
-        played[index].push(...removedCards(before, state.players[index].hand));
+        // Schrittweise statt `botPlan`, damit auch eine gezogene und gleich gespielte Karte zählt.
+        for (let move = botStep(state, index, strategies[index]); move; move = botStep(state, index, strategies[index])) {
+          if (!move.economy && !move.discard) played[index].push(move.cardId);
+          state = move.state;
+        }
+        state = setReady(state, index);
       }
     } else {
       state = advance(state, COMBAT_TICKS * TICK_MS);
