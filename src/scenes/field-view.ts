@@ -51,7 +51,7 @@ import { describeSynergy } from '../logic/synergies';
 import type { Point } from './effects';
 import type { LabelFn } from './labels';
 import { drawFigure } from './minion-figure';
-import { drawBar, healthFill, lerpColor, PALETTE, TEXT } from './theme';
+import { drawBar, healthFill, lerpColor, LIGHT, MATERIAL, PALETTE, TEAM_COLOR, TEXT } from './theme';
 
 export const HUMAN = 0;
 export const BOT = 1;
@@ -178,7 +178,7 @@ export function drawTower(
     if (tower.specialization) {
       // Markierung im Schild des Towers (die Fläche über dem Tower gehört den Turm-Slots): gelb für den Blitz-Turm,
       // blau für den Schild-Turm.
-      const mark = tower.specialization === 'lightning' ? 0xffd23a : 0x5ab4ff;
+      const mark = tower.specialization === 'lightning' ? TEAM_COLOR.markLightning : TEAM_COLOR.markShield;
       g.fillStyle(mark, 0.35).fillRoundedRect(x - 5, y - 5, 10, 11, 2);
       g.lineStyle(1, mark, 1).strokeRoundedRect(x - 5.5, y - 5.5, 11, 12, 2);
     }
@@ -194,15 +194,15 @@ export function drawTower(
   const embers = look.ember > 0 ? (look.collapsed ? RUIN_EMBERS : WALL_EMBERS) : [];
   embers.forEach(([ex, ey], index) => {
     const glow = look.ember * emberFlicker(timeMs, index, seed);
-    g.fillStyle(0xff7a1a, 0.55 * glow).fillCircle(x + ex, y + ey, 2.2);
-    g.fillStyle(0xffd23a, 0.9 * glow).fillCircle(x + ex, y + ey, 1);
+    g.fillStyle(LIGHT.emberGlow, 0.55 * glow).fillCircle(x + ex, y + ey, 2.2);
+    g.fillStyle(LIGHT.emberCore, 0.9 * glow).fillCircle(x + ex, y + ey, 1);
   });
   const puffs = smokePuffCount(look.smoke);
   const smokeY = look.collapsed ? y + 2 : y - 13;
   for (let index = 0; index < puffs; index += 1) {
     const puff = smokePuff(timeMs, index, seed);
     const alpha = look.smoke * 0.5 * (1 - puff.rise);
-    g.fillStyle(0x3a3a40, alpha).fillCircle(x - 3 + index * 3 + puff.drift, smokeY - puff.rise * SMOKE_RISE, 2 + puff.rise * 2);
+    g.fillStyle(MATERIAL.smoke, alpha).fillCircle(x - 3 + index * 3 + puff.drift, smokeY - puff.rise * SMOKE_RISE, 2 + puff.rise * 2);
   }
 
   drawBar(g, x - 10, y - 21, 20, 4, maxHp > 0 ? hp / maxHp : 0, healthFill(maxHp > 0 ? hp / maxHp : 0), 'gold');

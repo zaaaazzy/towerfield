@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { CARD_ART_IDS, cardTypeStyle } from '../logic/card-style';
 import { getCardDef } from '../logic/cards';
+import { ENERGY_BAR, ENERGY_LABEL, ENERGY_MESSAGE, energyCrystalLayout } from '../logic/energy-layout';
 import { diffFx } from '../logic/fx-events';
 import { type CardPose, cardAt, fanLayout, HAND_FAN, liftedPose, sortHand } from '../logic/hand-layout';
 import {
@@ -56,7 +57,7 @@ import {
 import { type LabelFn, LabelPool } from './labels';
 import { copyToClipboard, shareUrl, shareUrlLines } from './share';
 import { addBackdrop } from './textures';
-import { drawButton, drawPanel, PALETTE, TEXT } from './theme';
+import { drawButton, drawPanel, PALETTE, SURFACE, TEXT } from './theme';
 
 /** Spielfläche im Hochformat; Phaser skaliert sie per `Scale.FIT` auf den Bildschirm. */
 export const VIEW = { width: 360, height: 640 };
@@ -846,7 +847,7 @@ export class MainScene extends Phaser.Scene {
     drawButton(
       this.graphics,
       DISCARD_BUTTON,
-      hover ? { top: 0xd9a441, bottom: 0x8a5a14 } : { top: 0x6a4a8a, bottom: 0x35234f },
+      hover ? SURFACE.buttonDiscardHover : SURFACE.buttonDiscard,
     );
     this.label(
       `Abwerfen +${DISCARD_ENERGY}`,
@@ -966,11 +967,7 @@ export class MainScene extends Phaser.Scene {
 
     const matching = cards.filter(({ def }) => isCardVisible(def.type, this.handFilter)).length;
     const filterButton = LAYOUT.filterButton;
-    drawButton(
-      g,
-      filterButton,
-      this.handFilter === 'all' ? { top: 0x4a4570, bottom: 0x2a2548 } : { top: 0x5a82d0, bottom: 0x28427f },
-    );
+    drawButton(g, filterButton, this.handFilter === 'all' ? SURFACE.buttonFilterAll : SURFACE.buttonFilterActive);
     this.label(
       `Filter: ${HAND_FILTER_NAMES[this.handFilter]} (${matching})`,
       filterButton.x + filterButton.width / 2,
@@ -979,19 +976,15 @@ export class MainScene extends Phaser.Scene {
     );
 
     // Leiste unten: Energie im Bronzerahmen mit Kristall, Bereit-Knopf.
-    drawPanel(g, 6, 597, 108, 27, { metal: 'bronze', radius: 8 });
-    const crystal = [
-      new Phaser.Geom.Point(22, 603),
-      new Phaser.Geom.Point(28, 611),
-      new Phaser.Geom.Point(22, 619),
-      new Phaser.Geom.Point(16, 611),
-    ];
-    g.fillStyle(PALETTE.energy, 0.3).fillCircle(22, 611, 11);
-    g.fillStyle(PALETTE.goldDark, 1).fillPoints(crystal, true);
-    g.fillStyle(PALETTE.energy, 1).fillPoints(crystal.map((p) => new Phaser.Geom.Point(22 + (p.x - 22) * 0.75, 611 + (p.y - 611) * 0.75)), true);
-    g.fillStyle(PALETTE.white, 0.45).fillPoints([crystal[0]!, new Phaser.Geom.Point(26, 610), new Phaser.Geom.Point(22, 611)], true);
-    this.label(`Energie ${human.energy}`, 72, 612, { size: 16, color: TEXT.gold, font: 'heading', bold: true });
-    if (this.message) this.label(this.message, 70, 632, { size: 10, color: TEXT.bad });
+    drawPanel(g, ENERGY_BAR.x, ENERGY_BAR.y, ENERGY_BAR.width, ENERGY_BAR.height, { metal: 'bronze', radius: 8 });
+    const crystal = energyCrystalLayout();
+    const toPoints = (points: readonly { x: number; y: number }[]) => points.map((p) => new Phaser.Geom.Point(p.x, p.y));
+    g.fillStyle(PALETTE.energy, 0.3).fillCircle(crystal.center.x, crystal.center.y, crystal.glowRadius);
+    g.fillStyle(PALETTE.goldDark, 1).fillPoints(toPoints(crystal.outer), true);
+    g.fillStyle(PALETTE.energy, 1).fillPoints(toPoints(crystal.inner), true);
+    g.fillStyle(PALETTE.white, 0.45).fillPoints(toPoints(crystal.shine), true);
+    this.label(`Energie ${human.energy}`, ENERGY_LABEL.x, ENERGY_LABEL.y, { size: 16, color: TEXT.gold, font: 'heading', bold: true });
+    if (this.message) this.label(this.message, ENERGY_MESSAGE.x, ENERGY_MESSAGE.y, { size: 10, color: TEXT.bad });
     const button = LAYOUT.button;
     const waiting = state.phase !== 'planning' || state.ready[HUMAN];
     drawButton(g, button, { enabled: !waiting });

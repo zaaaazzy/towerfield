@@ -46,10 +46,57 @@ Georgia/Palatino (Serife), Fließtext in Trebuchet/Segoe UI/Verdana.
 
 ## Assets und Lizenzen
 
-`public/assets/` enthält keine Dateien; alle Grafiken entstehen aus Phaser-Grafik-API und Canvas-Verläufen im Code und
-stehen unter derselben Lizenz wie das Projekt. Fremde Dateien (Bilder, Schriften) werden nicht verwendet. Kommen später
-Dateien hinzu, werden sie unter `public/assets/` abgelegt, im `preload()` der Szene geladen (Pfad ohne `public/`) und hier
-mit Quelle und Lizenz eingetragen.
+`public/assets/` enthält zwei Ordner:
+
+- `cards/`: 11 Karten-SVGs (siehe [Karten-SVGs](#karten-svgs)).
+- `audio/`: Sounddateien (`.wav`, dazu zwei Schleifen als `.m4a`), geladen von der Audio-Steuerung, Details in [`anwendung-audio.md`](anwendung-audio.md).
+
+Alle übrigen Grafiken entstehen aus Phaser-Grafik-API und Canvas-Verläufen im Code. Fremde Bilder und Schriften werden
+nicht verwendet. Neue Dateien kommen unter `public/assets/`, werden im `preload()` der Szene geladen (Pfad ohne `public/`)
+und hier mit Quelle und Lizenz eingetragen.
+
+**Quelle und Lizenz der Dateien in `public/assets/`:** Im Repository ist dazu nichts vermerkt (keine Lizenzdatei, kein
+Autorenhinweis; die Git-Historie nennt nur den Agenten-Commit). Ob sie selbst erzeugt oder übernommen wurden, ist
+**offen** und muss vom Projektinhaber geklärt werden; eine Lizenz wird hier nicht angenommen.
+
+## Karten-SVGs
+
+- **Ablage:** `public/assets/cards/<id>.svg`, geladen in `main-scene.ts` (`preload()`) als Textur `card-art-<id>` mit
+  `this.load.svg(..., { width: 268, height: 144 })`.
+- **Format:** 268×144 Pixel Zielgröße. Die Dateien selbst sind 134×72 (`viewBox 0 0 134 72`), also genau halb so groß und
+  im gleichen Seitenverhältnis; beim Laden werden sie verdoppelt. Alle Maße unten beziehen sich auf die 134×72-Datei.
+- **Dateinamen:** entsprechen den Einträgen von `CARD_ART_IDS` in `src/logic/card-style.ts`: `summon-minion`,
+  `summon-brute`, `summon-archer`, `summon-healer`, `summon-destroyer`, `line-upgrade`, `tower-hp`, `tower-damage`,
+  `minion-upgrade-line`, `minion-upgrade-all`, `buff-minion`. Karten ohne Eintrag zeigen das Typ-Symbol.
+- **Quelle und Lizenz:** unbekannt, siehe oben; hier nicht erfunden. Offen.
+- Die Szene schneidet das Bild mittig zu (keine Verzerrung) und legt es in die Bildfläche der Karte.
+
+## Bildsprache
+
+Abgeleitet aus den vorhandenen SVGs und `FRAME`; neue Karten-SVGs halten sich daran.
+
+- **Lichtrichtung:** Licht kommt von oben. Hintergründe sind senkrechte Verläufe (oben hell, unten dunkel, z. B. `#6c3a2a` → `#241410`), am Boden liegt ein dunkles Band (`opacity 0.7`), Figuren werfen eine flache Schattenellipse darunter (`#000`, `opacity 0.4`). Ein weicher Lichtfleck (`opacity ≈ 0.18`) sitzt hinter der Figur. In `theme.ts` entsprechend: Schatten nach unten rechts versetzt (`drawPanel`: +1/+3), Glanzlicht als weißer 1-px-Streifen oben (`drawBar`).
+- **Konturstärke:** Hauptformen haben eine dunkle Kontur von 2 (grosse Flächen bis 3), Details 1,5, Linienzeichnung 1–1,3 in der 134×72-Datei (also 4/3/2 px auf der Karte). Die Kontur ist ein abgedunkelter Ton der Füllfarbe, nie Schwarz. Rahmen im Code: aussen `FRAME.outer` = 2, innen `FRAME.inner` = 1.
+- **Sättigung:** Flächen sind mittel gesättigt, der Hintergrund dunkel und gedämpft, nur ein Akzent pro Bild (Hauptfigur oder Symbol) ist kräftig (z. B. Herz `#e0384a`, Bogen `#8a5a2a`). Pro Bild höchstens ein Akzent, keine Neonfarben; Leuchten kommt über Transparenz (0,15–0,45), nicht über zusätzliche Sättigung. Die Kartentyp-Farben bleiben in `logic/card-style.ts`.
+
+## Theme-Tokens nach Rollen
+
+`theme.ts` gliedert die Farben nach Rollen; jede Gruppe ist ein eigenes Objekt und lässt sich später als Ganzes
+austauschen (Grundlage für Nacht- oder Rundenstimmungen, die selbst noch nicht umgesetzt sind). `PALETTE` bleibt als
+flache Sicht auf diese Gruppen erhalten.
+
+| Gruppe | Inhalt |
+| --- | --- |
+| `SURFACE` (Oberfläche) | Hintergründe, Panels, Boden, Wege, Knopfverläufe (Bereit, Abwerfen, Filter) |
+| `LIGHT` (Licht) | Abenddämmerung-Stützpunkte, Glut, Energie-Blau, Weiß/Schwarz für Glanz und Schatten |
+| `MATERIAL` (Material) | Gold, Bronze, Stahl, Stein, Rauch |
+| `TEAM_COLOR` (Team) | Spieler, Gegner, Gut/Schlecht, Spezialisierungsmarken der Tower |
+
+In `card-view.ts`, `field-view.ts` und `main-scene.ts` stehen keine Hex-Farbliterale mehr. Nicht umgestellt sind
+`textures.ts`, `minion-figure.ts`, `effects.ts`, `replay-scene.ts` und `balance-scene.ts`.
+
+Das Layout der Energie-Leiste (Rahmen, Kristall, Textpositionen) steht in `src/logic/energy-layout.ts`
+(`energyCrystalLayout` liefert die Eckpunkte der Raute, der inneren Raute und des Glanzdreiecks; mit Test).
 
 ## Hinweise
 
