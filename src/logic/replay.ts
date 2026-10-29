@@ -4,8 +4,8 @@
  * oder eine Aufzeichnung (`createRecordedReplay`, Züge aus `match-record.ts`). Beide teilen sich Takt, Zeitlupe,
  * `stepReplay` und `describeEvent`. Die Regeln kommen unverändert aus `match.ts`, `bot.ts` und `match-record.ts`.
  */
-import { botStep } from './bot';
-import { type Strategies, strategiesForSeed } from './balance-sim';
+import { botStepFor } from './bot';
+import { type Levels, type Strategies, strategiesForSeed } from './balance-sim';
 import { getCardDef } from './cards';
 import { laneName } from './lanes';
 import { advance, createMatch, type MatchState, type PlayerIndex, setReady } from './match';
@@ -43,6 +43,11 @@ export interface ReplayAbort {
 export interface ReplayState {
   match: MatchState;
   strategies: Strategies;
+  /**
+   * Bot-Stufe je Spieler. Beim Bot-Replay spielen die Bots damit (`botStepFor`); bei einer Aufzeichnung steht hier die
+   * Stufe des Bots (Spieler 1) aus `RecordedMatch.botLevel`, die Züge kommen aber aus `script`.
+   */
+  levels: Levels;
   /** Alle bisher gespielten Karten in der Reihenfolge, in der sie gespielt wurden. */
   events: ReplayEvent[];
   /** Zeit seit der letzten Aktion in der Planungsphase. */
@@ -57,11 +62,12 @@ export interface ReplayState {
   aborted: ReplayAbort | null;
 }
 
-/** Bot-Replay: ein Seed legt Deck und Strategien beider Bots fest. */
-export function createReplay(seed: number): ReplayState {
+/** Bot-Replay: ein Seed legt Deck und Strategien beider Bots fest; `levels` wählt ihre Stufen (Standard: beide „Leicht“). */
+export function createReplay(seed: number, levels: Levels = ['easy', 'easy']): ReplayState {
   return {
     match: createMatch(seed),
     strategies: strategiesForSeed(seed),
+    levels,
     events: [],
     pauseMs: 0,
     turn: 0,
@@ -73,7 +79,7 @@ export function createReplay(seed: number): ReplayState {
 
 /** Replay einer Aufzeichnung: spielt ihre Aktionen der Reihe nach über die bestehenden Regeln nach. */
 export function createRecordedReplay(record: RecordedMatch): ReplayState {
-  return { ...createReplay(record.seed), script: record.actions };
+  return { ...createReplay(record.seed, ['easy', record.botLevel ?? 'easy']), script: record.actions };
 }
 
 /** Replay, das sofort mit `invalid-data` stehen bleibt (Zugdaten nicht lesbar). */
@@ -137,7 +143,7 @@ function planStep(replay: ReplayState): ReplayState {
   const { match, turn } = replay;
   const player: PlayerIndex = match.ready[turn] ? (turn === 0 ? 1 : 0) : turn;
   const next: PlayerIndex = player === 0 ? 1 : 0;
-  const move = botStep(match, player, replay.strategies[player]);
+  const move = botStepFor(replay.levels[player], match, player, replay.strategies[player]);
   if (!move) return { ...replay, match: setReady(match, player), turn: next };
   const event: ReplayEvent = {
     round: match.round,

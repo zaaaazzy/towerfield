@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { parseFast, parseReplayMoves, parseReplaySeed, parseSeed } from './seed';
+import { parseBotLevel, parseFast, parseReplayMoves, parseReplaySeed, parseSeed } from './seed';
+
+describe('parseBotLevel', () => {
+  it('liest ?bot=normal und ?bot=easy', () => {
+    expect(parseBotLevel('?bot=normal')).toBe('normal');
+    expect(parseBotLevel('?seed=3&bot=normal&fast=1')).toBe('normal');
+    expect(parseBotLevel('?bot=easy')).toBe('easy');
+  });
+
+  it('fällt bei fehlendem oder ungültigem Wert auf easy zurück', () => {
+    for (const search of ['', '?seed=1', '?bot=', '?bot=xyz', '?bot=Normal', '?bot=hard', '?bot=normal,easy']) {
+      expect(parseBotLevel(search), search).toBe('easy');
+    }
+  });
+});
 
 describe('parseFast', () => {
   it('ist nur mit einem Wert ungleich leer und 0 aktiv', () => {

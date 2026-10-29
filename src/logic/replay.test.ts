@@ -1,8 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { simulateMatch, strategiesForSeed } from './balance-sim';
 import { CARD_DEFS } from './cards';
-import { advance } from './match';
-import { createRecord, decodeMatch, encodeMatch, type RecordedAction, type RecordedMatch } from './match-record';
+import { advance, createMatch } from './match';
+import {
+  botPlanRecorded,
+  createRecord,
+  decodeMatch,
+  encodeMatch,
+  performAction,
+  type RecordedAction,
+  type RecordedMatch,
+} from './match-record';
 import { playScriptedMatch } from './match-record-fixture';
 import {
   combatDelta,
@@ -20,6 +28,50 @@ import {
   SLOWMO_FACTOR,
   stepReplay,
 } from './replay';
+
+describe('Replay mit Bot-Stufe', () => {
+  it('Bot-Replay: Standard ist Leicht gegen Leicht, mit Stufen spielen die Bots danach', () => {
+    expect(createReplay(3).levels).toEqual(['easy', 'easy']);
+    const normal = createReplay(3, ['normal', 'normal']);
+    expect(normal.levels).toEqual(['normal', 'normal']);
+    let easyReplay = createReplay(3);
+    let normalReplay = normal;
+    for (let step = 0; step < MAX_STEPS && !(isReplayOver(easyReplay) && isReplayOver(normalReplay)); step += 1) {
+      easyReplay = stepReplay(easyReplay, FRAME_MS);
+      normalReplay = stepReplay(normalReplay, FRAME_MS);
+    }
+    expect(isReplayOver(normalReplay)).toBe(true);
+    expect(normalReplay.events).not.toEqual(easyReplay.events);
+  });
+
+  it('Aufzeichnung: die Stufe des Bots kommt aus dem Record, die Züge aus dem Skript', () => {
+    expect(createRecordedReplay(createRecord(3)).levels).toEqual(['easy', 'easy']);
+    expect(createRecordedReplay(createRecord(3, 'normal')).levels).toEqual(['easy', 'normal']);
+  });
+
+  it('ein mit „Normal“ aufgezeichnetes Match läuft im Replay mit demselben Ergebnis', () => {
+    let state = createMatch(7);
+    let record = createRecord(7, 'normal');
+    for (let guard = 0; guard < 1000 && state.phase !== 'over'; guard += 1) {
+      if (state.phase === 'planning') {
+        const human = performAction(state, record, 0, { type: 'ready' });
+        const planned = botPlanRecorded(human.result.state, human.record, 1);
+        state = planned.state;
+        record = planned.record;
+      } else {
+        state = advance(state, 1000);
+      }
+    }
+    expect(state.phase).toBe('over');
+    let replay = createRecordedReplay(decodeMatch(7, encodeMatch(record))!);
+    for (let steps = 0; steps < MAX_STEPS && !isReplayOver(replay) && !isReplayAborted(replay); steps += 1) {
+      replay = stepReplay(replay, FRAME_MS);
+    }
+    expect(isReplayAborted(replay)).toBe(false);
+    expect(replay.match.outcome).toBe(state.outcome);
+    expect(replay.match.players).toEqual(state.players);
+  });
+});
 
 const FRAME_MS = 100;
 /** Sicherung gegen Endlosschleifen: 8 Runden Kampf in Zeitlupe plus Planung, mit Reserve. */

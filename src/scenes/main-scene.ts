@@ -25,7 +25,8 @@ import { advancePress, type PressState, startPress } from '../logic/long-press';
 import { advanceMinionAnim, newMinionAnim } from '../logic/minion-look';
 import { summarizeStats } from '../logic/match-stats';
 import { bannerFor } from '../logic/phase-banner';
-import { parseFast, parseSeed } from '../logic/seed';
+import { BOT_LEVEL_NAMES, type BotLevel } from '../logic/bot';
+import { parseBotLevel, parseFast, parseSeed } from '../logic/seed';
 import type { AudioEvent } from '../logic/audio-events';
 import { AudioLayer, audioControlAt, drawAudioControls, sliderValueAt } from './audio';
 import {
@@ -115,6 +116,8 @@ const DISCARD_BUTTON = { x: 6, y: 32, width: 96, height: 24 };
 /** Tasten für die Wirtschaft im oberen Rand: eine Karte ziehen (links neben dem Gegner-Text) und das Feld ausbauen. */
 const DRAW_BUTTON = { x: 106, y: 32, width: 64, height: 24 };
 const UPGRADE_BUTTON = { x: 266, y: 32, width: 88, height: 24 };
+/** Schalter für die Bot-Stufe zwischen „Ziehen“ und „Upgrade“; nur vor der ersten Aktion des Menschen in Runde 1 tippbar. */
+const BOT_BUTTON = { x: 174, y: 32, width: 88, height: 24 };
 /** Zeitkonstanten (ms) der weichen Animationen: Punkte-Nähe, Einblenden, Einrasten der gezogenen Karte, Rückflug. */
 const PROXIMITY_TIME_MS = 70;
 const FADE_TIME_MS = 110;
@@ -246,6 +249,11 @@ export class MainScene extends Phaser.Scene {
     return this.record;
   }
 
+  /** Stufe des Gegners in diesem Match (nur lesen, z. B. für E2E-Tests). */
+  get botLevel(): BotLevel {
+    return this.record.botLevel ?? 'easy';
+  }
+
   /** Index der angetippten Handkarte, die auf eine Line wartet (nur lesen, z. B. für E2E-Tests). */
   get selectedCard(): number | null {
     return this.selected;
@@ -275,7 +283,7 @@ export class MainScene extends Phaser.Scene {
 
   create(): void {
     this.state = createMatch(parseSeed(window.location.search) ?? Date.now() >>> 0);
-    this.record = createRecord(this.state.seed);
+    this.record = createRecord(this.state.seed, parseBotLevel(window.location.search));
     this.fxState = this.state;
     this.minionAnim = newMinionAnim();
     addBackdrop(this, VIEW.width, VIEW.height, BACKDROP_FIELD);
@@ -722,6 +730,10 @@ export class MainScene extends Phaser.Scene {
       if (selected !== null && !this.isVisibleInHand(selected)) this.selected = null;
       return;
     }
+    if (this.botSwitchable() && inside(BOT_BUTTON, x, y)) {
+      this.switchBotLevel();
+      return;
+    }
     if (inside(UPGRADE_BUTTON, x, y)) {
       this.economy({ type: 'upgrade' });
       return;
@@ -886,6 +898,26 @@ export class MainScene extends Phaser.Scene {
     );
   }
 
+  /** Die Bot-Stufe lässt sich noch wählen: Runde 1, Planung, der Mensch hat noch nichts getan (nur der Bot hat gespielt). */
+  private botSwitchable(): boolean {
+    return (
+      this.state.phase === 'planning' &&
+      this.state.round === 1 &&
+      !this.state.ready[HUMAN] &&
+      this.record.actions.every((action) => action.player === BOT)
+    );
+  }
+
+  /** Wechselt die Stufe und beginnt dasselbe Match (gleicher Seed) neu, damit der Bot mit der neuen Stufe plant. */
+  private switchBotLevel(): void {
+    const next: BotLevel = this.botLevel === 'easy' ? 'normal' : 'easy';
+    this.state = createMatch(this.record.seed);
+    this.record = createRecord(this.record.seed, next);
+    this.fxState = this.state;
+    this.selected = null;
+    this.message = '';
+  }
+
   /** Tasten „Ziehen“ und „Upgrade“ mit Preis; grau, wenn die Aktion jetzt nicht geht. Dazu das Einkommen der nächsten Runde. */
   private drawEconomyButtons(state: MatchState): void {
     const human = state.players[HUMAN];
@@ -934,7 +966,17 @@ export class MainScene extends Phaser.Scene {
       bold: true,
     });
     drawAudioControls(g, this.label, this.audio.current);
-    this.label(`Gegner: ${bot.hand.length} Karten`, 218, 40, { size: 10, color: TEXT.dim });
+    const botName = BOT_LEVEL_NAMES[this.botLevel];
+    if (this.botSwitchable()) {
+      drawButton(g, BOT_BUTTON, { enabled: true });
+      this.label(`Bot: ${botName}`, BOT_BUTTON.x + BOT_BUTTON.width / 2, BOT_BUTTON.y + BOT_BUTTON.height / 2, {
+        size: 11,
+        font: 'heading',
+        bold: true,
+      });
+    } else {
+      this.label(`Bot ${botName} · ${bot.hand.length} Karten`, 218, 40, { size: 9, color: TEXT.dim });
+    }
     if (state.event && state.phase !== 'over') {
       const event = getRoundEventDef(state.event);
       this.label(`${event.name}: ${event.description}`, VIEW.width / 2, 54, { size: 11, color: TEXT.gold });

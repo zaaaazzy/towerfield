@@ -3,7 +3,7 @@
  * Die Zahlen beschreiben den Bot mit zufällig variierter Kartenreihenfolge, nicht menschliches Spielverhalten.
  * Zufall nur über `nextRandom` (Seed), daher ist jede Simulation reproduzierbar.
  */
-import { botStep, ECONOMY_ACTIONS } from './bot';
+import { BOT_LEVELS, type BotLevel, botStepFor, ECONOMY_ACTIONS } from './bot';
 import { CARD_DEFS } from './cards';
 import { TICK_MS } from './combat';
 import { nextRandom } from './game-state';
@@ -23,8 +23,13 @@ import { ROUND_EVENTS, type RoundEventId } from './round-events';
 /** Kartenreihenfolge je Spieler. */
 export type Strategies = readonly [readonly string[], readonly string[]];
 
+/** Bot-Stufe je Spieler. */
+export type Levels = readonly [BotLevel, BotLevel];
+
 export interface MatchResult {
   seed: number;
+  /** Stufen der beiden Bots; fehlt bei Ergebnissen ohne Stufenvergleich (beide „Leicht“). */
+  levels?: Levels;
   outcome: Outcome;
   rounds: number;
   /** `towers`: ein Tower-Satz zerstört, `round-limit`: Entscheidung nach der Rundengrenze. */
@@ -49,9 +54,23 @@ export interface CardStats {
   deltaToBaseline: number;
 }
 
+/** Ergebnis einer Bot-Stufe in den Matches, in denen beide Stufen gegeneinander gespielt haben. */
+export interface LevelStats {
+  /** Matches mit dieser Stufe (jedes Stufen-Match zählt für beide Stufen). */
+  matches: number;
+  wins: number;
+  /** `wins / matches`; 0 ohne Matches. */
+  winRate: number;
+}
+
 export interface BalanceReport {
   startSeed: number;
   totalMatches: number;
+  /**
+   * Siegquote je Bot-Stufe, nur aus Matches mit verschiedenen Stufen (Leicht gegen Normal). Ohne solche Matches sind
+   * alle Werte 0. Remis zählen als Match, aber nicht als Sieg.
+   */
+  levelStats: Record<BotLevel, LevelStats>;
   winRatePlayer0: number;
   winRatePlayer1: number;
   drawRate: number;
@@ -71,6 +90,8 @@ export interface BalanceReport {
 export interface SimulationOptions {
   startSeed: number;
   count: number;
+  /** Matches Leicht gegen Normal mit Seitenwechsel je Seed (`levelsForSeed`); sonst spielen beide Seiten „Leicht“. */
+  compareLevels?: boolean;
 }
 
 const ratio = (part: number, whole: number): number => (whole === 0 ? 0 : part / whole);
@@ -95,10 +116,20 @@ export function strategiesForSeed(seed: number): Strategies {
 }
 
 /**
+ * Stufen für den Stufenvergleich: bei geradem Seed spielt Spieler 0 „Leicht“ und Spieler 1 „Normal“, bei ungeradem
+ * Seed umgekehrt (Seitenwechsel je Seed, damit kein Vorteil einer Seite die Quote verzerrt).
+ */
+export function levelsForSeed(seed: number): Levels {
+  return seed % 2 === 0 ? ['easy', 'normal'] : ['normal', 'easy'];
+}
+
+/**
  * Spielt ein volles Match Bot gegen Bot. Je Runde planen beide, danach läuft die ganze Kampfphase in einem
  * `advance`-Aufruf (spart das Klonen des Zustands). Endet nach höchstens `MAX_ROUNDS` Runden mit `phase === 'over'`.
+ * `levels` wählt die Stufe je Spieler (Standard: beide „Leicht“, dann gilt `strategies`); „Normal“ ignoriert die
+ * Kartenreihenfolge seiner Seite.
  */
-export function simulateMatch(seed: number, strategies: Strategies): MatchResult {
+export function simulateMatch(seed: number, strategies: Strategies, levels?: Levels): MatchResult {
   let state: MatchState = createMatch(seed);
   const played: [string[], string[]] = [[], []];
   const events: RoundEventId[] = [];
@@ -110,7 +141,12 @@ export function simulateMatch(seed: number, strategies: Strategies): MatchResult
       eventRound = state.round;
       for (const index of [0, 1] as PlayerIndex[]) {
         // Schrittweise statt `botPlan`, damit auch eine gezogene und gleich gespielte Karte zählt.
-        for (let move = botStep(state, index, strategies[index]); move; move = botStep(state, index, strategies[index])) {
+        const level = levels?.[index] ?? 'easy';
+        for (
+          let move = botStepFor(level, state, index, strategies[index]);
+          move;
+          move = botStepFor(level, state, index, strategies[index])
+        ) {
           if (!move.economy && !move.discard) played[index].push(move.cardId);
           state = move.state;
         }
@@ -125,6 +161,7 @@ export function simulateMatch(seed: number, strategies: Strategies): MatchResult
   }
   return {
     seed,
+    ...(levels ? { levels } : {}),
     outcome: state.outcome,
     rounds: state.round,
     endedBy: destroyedOutcome(state) !== null ? 'towers' : 'round-limit',
@@ -172,9 +209,25 @@ export function buildReport(results: readonly MatchResult[], startSeed: number):
   const eventCounts = Object.fromEntries(ROUND_EVENTS.map((def) => [def.id, 0])) as EventCounts;
   for (const result of results) for (const id of result.events ?? []) eventCounts[id] += 1;
 
+  const levelStats = Object.fromEntries(BOT_LEVELS.map((level) => [level, { matches: 0, wins: 0, winRate: 0 }])) as Record<
+    BotLevel,
+    LevelStats
+  >;
+  for (const result of results) {
+    const levels = result.levels;
+    if (!levels || levels[0] === levels[1]) continue;
+    for (const index of [0, 1] as PlayerIndex[]) {
+      const stats = levelStats[levels[index]];
+      stats.matches += 1;
+      if (result.outcome === (index === 0 ? 'player0' : 'player1')) stats.wins += 1;
+    }
+  }
+  for (const stats of Object.values(levelStats)) stats.winRate = ratio(stats.wins, stats.matches);
+
   return {
     startSeed,
     totalMatches: total,
+    levelStats,
     winRatePlayer0: ratio(count('player0'), total),
     winRatePlayer1: ratio(count('player1'), total),
     drawRate: ratio(count('draw'), total),
@@ -192,12 +245,15 @@ export function buildReport(results: readonly MatchResult[], startSeed: number):
   };
 }
 
-/** Simuliert `count` Matches mit den Seeds `startSeed`, `startSeed + 1`, … und aggregiert sie. */
+/**
+ * Simuliert `count` Matches mit den Seeds `startSeed`, `startSeed + 1`, … und aggregiert sie. Mit `compareLevels` spielt
+ * jedes Match Leicht gegen Normal (siehe `levelsForSeed`).
+ */
 export function runSimulation(options: SimulationOptions): BalanceReport {
   const results: MatchResult[] = [];
   for (let index = 0; index < options.count; index += 1) {
     const seed = (options.startSeed + index) >>> 0;
-    results.push(simulateMatch(seed, strategiesForSeed(seed)));
+    results.push(simulateMatch(seed, strategiesForSeed(seed), options.compareLevels ? levelsForSeed(seed) : undefined));
   }
   return buildReport(results, options.startSeed);
 }
