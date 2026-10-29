@@ -1,6 +1,8 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { CARD_BALANCE } from './balance-config';
 import { CARD_DEFS, type CardDef, type CardType, getCardDef } from './cards';
-import { CARD_TYPE_STYLES, cardArtKey, cardStats, cardTypeStyle, describeCard } from './card-style';
+import { CARD_ART_IDS, CARD_TYPE_STYLES, cardArtKey, cardStats, cardTypeStyle, describeCard } from './card-style';
 
 const TYPES: CardType[] = [
   'line-upgrade',
@@ -31,23 +33,21 @@ describe('cardTypeStyle', () => {
 });
 
 describe('cardArtKey', () => {
-  it('gibt den Karten der ersten Version ein eigenes Bild, Spezialisierungen und neuen Karten nur das Typ-Symbol', () => {
-    const symbolOnly = new Set([
-      'tower-lightning',
-      'tower-shield',
-      'summon-scout',
-      'summon-guard',
-      'summon-mage',
-      'lane-buff',
-      'lane-shield',
-      'tower-armor',
-      'minion-upgrade-elite',
-    ]);
-    const withArt = CARD_DEFS.filter((def) => !symbolOnly.has(def.id));
-    const keys = withArt.map((def) => cardArtKey(def));
-    expect(keys.every((key) => key !== null)).toBe(true);
-    expect(new Set(keys).size).toBe(withArt.length);
-    for (const id of symbolOnly) expect(cardArtKey(getCardDef(id))).toBeNull();
+  it('liefert für jede Karte aus CARD_DEFS einen eigenen Schlüssel der Form card-art-<id>', () => {
+    const missing = CARD_DEFS.filter((def) => cardArtKey(def) === null).map((def) => def.id);
+    expect(missing, `Karten ohne Bild: ${missing.join(', ')}`).toEqual([]);
+    const keys = CARD_DEFS.map((def) => cardArtKey(def));
+    expect(new Set(keys).size).toBe(CARD_DEFS.length);
+    for (const def of CARD_DEFS) expect(cardArtKey(def)).toBe(`card-art-${def.id}`);
+  });
+
+  it('listet jede Karten-ID genau einmal und hat zu jeder Karte eine SVG-Datei im Format 134×72', () => {
+    expect(new Set(CARD_ART_IDS).size).toBe(CARD_ART_IDS.length);
+    expect(CARD_ART_IDS).toHaveLength(CARD_DEFS.length);
+    for (const def of CARD_DEFS) {
+      const svg = readFileSync(`public/assets/cards/${def.id}.svg`, 'utf8');
+      expect(svg, `${def.id}.svg`).toContain('viewBox="0 0 134 72"');
+    }
   });
 
   it('kennt kein Bild für unbekannte Karten (Rückfall auf das Typ-Symbol)', () => {
@@ -57,9 +57,18 @@ describe('cardArtKey', () => {
 
 describe('cardStats', () => {
   it('zeigt Leben und Schaden aus der Definition, bei Upgrades mit Plus', () => {
-    expect(cardStats(getCardDef('summon-brute'))).toEqual({ hp: 80, damage: 12, bonus: false });
-    expect(cardStats(getCardDef('tower-hp'))).toEqual({ hp: 30, damage: 0, bonus: true });
-    expect(cardStats(getCardDef('minion-upgrade-all'))).toEqual({ hp: 5, damage: 1, bonus: true });
+    const { hp, damage } = CARD_BALANCE['summon-brute'];
+    expect(cardStats(getCardDef('summon-brute'))).toEqual({ hp, damage, bonus: false });
+    expect(cardStats(getCardDef('tower-hp'))).toEqual({
+      hp: CARD_BALANCE['tower-hp'].hp,
+      damage: CARD_BALANCE['tower-hp'].damage,
+      bonus: true,
+    });
+    expect(cardStats(getCardDef('minion-upgrade-all'))).toEqual({
+      hp: CARD_BALANCE['minion-upgrade-all'].hp,
+      damage: CARD_BALANCE['minion-upgrade-all'].damage,
+      bonus: true,
+    });
   });
 
   it('hat für die Line-Karte und die Spezialisierungen keine Werte', () => {
@@ -71,9 +80,10 @@ describe('cardStats', () => {
 
 describe('cardStats mit leeren Werten', () => {
   it('zeigt Werte, sobald Leben oder Schaden gesetzt ist, und nichts, wenn beides 0 ist', () => {
-    expect(cardStats(getCardDef('tower-damage'))).toEqual({ hp: 0, damage: 4, bonus: true });
+    const { hp, damage } = CARD_BALANCE['tower-damage'];
+    expect(cardStats(getCardDef('tower-damage'))).toEqual({ hp, damage, bonus: true });
     expect(cardStats({ ...getCardDef('tower-hp'), hp: 0, damage: 0 } as CardDef)).toBeNull();
-    expect(cardStats({ ...getCardDef('tower-hp'), hp: 0, damage: 4 } as CardDef)).toEqual({ hp: 0, damage: 4, bonus: true });
+    expect(cardStats({ ...getCardDef('tower-hp'), hp: 0, damage } as CardDef)).toEqual({ hp: 0, damage, bonus: true });
   });
 });
 

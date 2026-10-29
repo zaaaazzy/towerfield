@@ -19,6 +19,12 @@ export function parseReplayMoves(search: string): string | null {
   return new URLSearchParams(search).get('moves');
 }
 
+/** Schnellvorlauf (`?fast=1`): Banner und Abschluss-Einblendung entfallen, damit E2E-Tests nicht warten. */
+export function parseFast(search: string): boolean {
+  const value = new URLSearchParams(search).get('fast');
+  return value !== null && value !== '' && value !== '0';
+}
+
 function parseSeedParam(search: string, name: string): number | null {
   const value = new URLSearchParams(search).get(name);
   if (value === null || !/^\d{1,15}$/.test(value)) return null;

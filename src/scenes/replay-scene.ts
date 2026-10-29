@@ -20,7 +20,8 @@ import { AudioLayer } from './audio';
 import { Effects } from './effects';
 import { drawBoard, drawMinions, type MinionAnim } from './field-view';
 import { type LabelFn, LabelPool } from './labels';
-import { BACKDROP_FIELD, FX_LOCATOR, VIEW } from './main-scene';
+import { AmbienceLayer } from './ambience-layer';
+import { AMBIENCE_BOUNDS, BACKDROP_FIELD, FX_LOCATOR, VIEW } from './main-scene';
 import { shareUrl, shareUrlLines } from './share';
 import { addBackdrop } from './textures';
 import { drawPanel, TEXT } from './theme';
@@ -45,6 +46,7 @@ export class ReplayScene extends Phaser.Scene {
   private graphics!: Phaser.GameObjects.Graphics;
   private pool!: LabelPool;
   private effects!: Effects;
+  private ambience!: AmbienceLayer;
   private audio!: AudioLayer;
   /** Szenenzeit und Trefferblitze der Minions (aus `delta` fortgeschrieben, nur Darstellung). */
   private minionAnim: MinionAnim = newMinionAnim();
@@ -79,6 +81,7 @@ export class ReplayScene extends Phaser.Scene {
           : createInvalidReplay(this.seed);
     this.minionAnim = newMinionAnim();
     addBackdrop(this, VIEW.width, VIEW.height, BACKDROP_FIELD);
+    this.ambience = new AmbienceLayer(this, this.replay.match.seed, this.replay.match.round, AMBIENCE_BOUNDS, VIEW);
     this.pool = new LabelPool(this);
     this.effects = new Effects(this, FX_LOCATOR);
     this.audio = new AudioLayer(this, this.seed, REPLAY_MUSIC_SCALE);
@@ -100,6 +103,8 @@ export class ReplayScene extends Phaser.Scene {
     this.effects.update(deltaMs);
     this.audio.play(events, deltaMs);
     this.minionAnim = advanceMinionAnim(this.minionAnim, events, previous, this.replay.match, deltaMs);
+    this.ambience.setRound(this.replay.match.round);
+    this.ambience.update(deltaMs);
     this.render();
   }
 

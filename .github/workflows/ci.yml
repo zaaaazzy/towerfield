@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+  # Wird von pages.yml (Push auf main) als Gate vor dem Deploy aufgerufen.
+  workflow_call:
+
+permissions:
+  contents: read
+
+# Eigene Gruppe (nicht "pages"), sonst blockiert der aufrufende Workflow sich selbst.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  pruefen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Tag muss zur gepinnten Version von @playwright/test in package.json passen.
+    container: mcr.microsoft.com/playwright:v1.64.1-noble
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - run: npm run test:smoke
+      - name: Playwright-Bericht hochladen
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: playwright-bericht
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 14

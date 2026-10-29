@@ -13,7 +13,14 @@ export const TEXTURE_KEYS = {
   arrow: 'arrow',
   sword: 'sword',
   splinter: 'splinter',
+  /** Weißer, weicher Lichtkegel (radialer Verlauf); die Lichtschicht färbt ihn ein. */
+  lightCone: 'light-cone',
+  /** Waagerecht nahtlos wiederholbares Nebelband in Weiß. */
+  fog: 'fog',
 } as const;
+
+/** Maße der Nebeltextur in Pixeln (Breite = Wiederholperiode des Bands). */
+export const FOG_TEXTURE = { width: 256, height: 64 };
 
 /** Wo Boden, Wege und Hand-Tisch liegen; ohne Angabe gibt es nur Verlauf und Vignette (z. B. Balance-Szene). */
 export interface FieldGeometry {
@@ -203,6 +210,37 @@ export function ensureTextures(scene: Phaser.Scene): void {
     gradient.addColorStop(1, 'rgba(255,255,255,0)');
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, 64, 64);
+  });
+  createCanvasTexture(scene, TEXTURE_KEYS.lightCone, 128, 128, (ctx) => {
+    const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+    gradient.addColorStop(0, 'rgba(255,255,255,1)');
+    gradient.addColorStop(0.35, 'rgba(255,255,255,0.45)');
+    gradient.addColorStop(0.7, 'rgba(255,255,255,0.12)');
+    gradient.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 128, 128);
+  });
+  // Nebelband: weiche Wolken aus festem Muster; jede Wolke wird zusätzlich um ±Breite versetzt gemalt, damit die Kanten nahtlos sind.
+  createCanvasTexture(scene, TEXTURE_KEYS.fog, FOG_TEXTURE.width, FOG_TEXTURE.height, (ctx) => {
+    const random = patternRandom(31);
+    for (let index = 0; index < 9; index += 1) {
+      const x = random() * FOG_TEXTURE.width;
+      const y = FOG_TEXTURE.height * (0.3 + random() * 0.4);
+      const rx = 30 + random() * 40;
+      const ry = 10 + random() * 14;
+      const alpha = 0.25 + random() * 0.3;
+      for (const shift of [-FOG_TEXTURE.width, 0, FOG_TEXTURE.width]) {
+        ctx.save();
+        ctx.translate(x + shift, y);
+        ctx.scale(1, ry / rx);
+        const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+        gradient.addColorStop(0, `rgba(255,255,255,${alpha})`);
+        gradient.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(-rx, -rx, rx * 2, rx * 2);
+        ctx.restore();
+      }
+    }
   });
   // Holzpfeil, Spitze nach rechts (Rotation 0 = Flug nach rechts): Federn, Schaft, Eisenspitze.
   createCanvasTexture(scene, TEXTURE_KEYS.arrow, 22, 6, (ctx) => {

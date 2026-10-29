@@ -4,6 +4,7 @@ import { buildReport, type MatchResult, runSimulation, shuffledPriority, simulat
 import { ECONOMY_ACTIONS } from './bot';
 import { CARD_DEFS } from './cards';
 import { MAX_ROUNDS } from './match';
+import { EVENT_INTERVAL } from './round-events';
 
 const ids = CARD_DEFS.map((def) => def.id);
 
@@ -17,9 +18,9 @@ describe('Ereignis-Zähler', () => {
     expect(runSimulation({ startSeed: 1, count: 30 }).eventCounts).toEqual(report.eventCounts);
     expect(Object.keys(report.eventCounts).sort()).toEqual(['early-respawn', 'energy', 'tower-shield']);
     const total = Object.values(report.eventCounts).reduce((sum, value) => sum + value, 0);
-    // Bis zu zwei Ereignisrunden je Match (Runde 3 und 6); Matches können früher enden.
+    // Höchstens eine Ereignisrunde je EVENT_INTERVAL Runden und Match; Matches können früher enden.
     expect(total).toBeGreaterThan(0);
-    expect(total).toBeLessThanOrEqual(60);
+    expect(total).toBeLessThanOrEqual(30 * Math.floor(MAX_ROUNDS / EVENT_INTERVAL));
   });
 
   it('summiert die Ereignisse der Ergebnisse; ohne Ergebnisse ist alles 0', () => {
@@ -36,7 +37,7 @@ describe('Ereignis-Zähler', () => {
 
   it('simulateMatch meldet nur Ereignisse der tatsächlich gespielten Runden', () => {
     const match = simulateMatch(3, strategiesForSeed(3));
-    expect(match.events!.length).toBeLessThanOrEqual(match.rounds >= 6 ? 2 : match.rounds >= 3 ? 1 : 0);
+    expect(match.events!.length).toBeLessThanOrEqual(Math.floor(match.rounds / EVENT_INTERVAL));
   });
 });
 
@@ -102,6 +103,13 @@ describe('runSimulation', () => {
     expect(report.avgRounds).toBeGreaterThanOrEqual(1);
     expect(report.avgRounds).toBeLessThanOrEqual(MAX_ROUNDS);
     expect(report.towerKillShare + report.roundLimitShare).toBeCloseTo(1, 10);
+  });
+
+  it('spielt den Zerstörer und endet ohne Remis', () => {
+    const report = runSimulation({ startSeed: 1, count: 20 });
+    const destroyer = report.cards.find((card) => card.cardId === 'summon-destroyer');
+    expect(destroyer?.plays).toBeGreaterThan(0);
+    expect(report.drawRate).toBe(0);
   });
 
   it('ist reproduzierbar und hängt vom Seed-Bereich ab', () => {

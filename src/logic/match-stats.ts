@@ -54,6 +54,36 @@ export function recordDamage(stats: MatchStats, minionId: number, kind: 'minion'
   else entry.towerDamage += amount;
 }
 
+/** Kurzbilanz für den Abschlussbildschirm; fasst nur bestehende Werte zusammen. */
+export interface StatsSummary {
+  /** Alle gespielten Beschwörungen. */
+  summoned: number;
+  /** Gesamtschaden an Minions und an Towern (gerundet). */
+  minionDamage: number;
+  towerDamage: number;
+  /** Karten-ID mit dem meisten Gesamtschaden (bei Gleichstand die zuerst erfasste), `null` ohne Schaden. */
+  topCardId: string | null;
+}
+
+export function summarizeStats(stats: MatchStats): StatsSummary {
+  let summoned = 0;
+  for (const counts of Object.values(stats.played)) for (const count of counts) summoned += count;
+  let minionDamage = 0;
+  let towerDamage = 0;
+  let topCardId: string | null = null;
+  let top = 0;
+  for (const [cardId, entry] of Object.entries(stats.damage)) {
+    minionDamage += entry.minionDamage;
+    towerDamage += entry.towerDamage;
+    const total = entry.minionDamage + entry.towerDamage;
+    if (total > top) {
+      top = total;
+      topCardId = cardId;
+    }
+  }
+  return { summoned, minionDamage: Math.round(minionDamage), towerDamage: Math.round(towerDamage), topCardId };
+}
+
 function addPlayed(stats: MatchStats, cardId: string, line: number, delta: number): void {
   const counts = (stats.played[cardId] ??= []);
   for (let index = counts.length; index <= line; index += 1) counts.push(0);

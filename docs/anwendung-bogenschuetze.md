@@ -62,8 +62,8 @@ erscheint automatisch.
   Deckreihenfolge müssen darauf geprüft werden.
 - **Balance:** `TOWER_RANGE` (20) gegen Reichweite 14 ist ein eigener Schritt im Designkonzept. Es wurde keine neue
   Balance-Simulation durchgeführt.
-- **Smoke-Test:** Im Entwickler-Lauf war „beschworener Minion lässt sich ziehen“ als `skip` markiert (nicht von diesem
-  Auftrag geändert); im Testlauf des Testers lief er grün.
+- **E2E-Test:** Das Ziehen eines beschworenen Minions läuft ohne `skip` mit festem Seed über `dragMinion`
+  (`e2e/helpers.ts`, Tests „Drag: …“ in `gameplay.spec.ts`).
 - **Nicht enthalten:** Projektile, Animationen, neue Assets, weitere Rollen; keine Änderung an `TOWER_RANGE`,
   `START_HAND`, `DRAW_PER_ROUND`, `MAX_ENERGY` oder am Brocken-Tempo.
 - **Bot:** Keine Strategie über die Aufnahme in `PRIORITY` hinaus.

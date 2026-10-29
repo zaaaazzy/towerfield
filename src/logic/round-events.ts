@@ -3,6 +3,7 @@
  * und Canvas. Die Wahl fällt beim Rundenstart über einen eigenen Event-Seed (aus dem Match-Seed abgeleitet, getrennt vom
  * Deck-Seed) und gilt vor der Kampfphase, die Kampfberechnung bleibt zufallsfrei. Das Ereignis ist ab der Planung sichtbar.
  */
+import { EVENT_ENERGY_BONUS } from './balance-config';
 import { nextRandom } from './game-state';
 
 export type RoundEventId = 'energy' | 'early-respawn' | 'tower-shield';
@@ -22,8 +23,8 @@ export const ROUND_EVENTS: readonly RoundEventDef[] = [
 
 /** Jede `EVENT_INTERVAL`-te Runde löst ein Ereignis aus (bei `MAX_ROUNDS = 8`: Runde 3 und 6). */
 export const EVENT_INTERVAL = 3;
-/** Zusätzliche Energie bei „Energieschub“ (gedeckelt durch `MAX_ENERGY`). */
-export const EVENT_ENERGY_BONUS = 1;
+// Der Energieschub (gedeckelt durch `MAX_ENERGY`) steht in `balance-config.ts`.
+export { EVENT_ENERGY_BONUS };
 /** Vorsprung überlebender Minions bei „Früher Aufbruch“ in Ticks (1 Sekunde); die Strecke folgt dem Minion-Tempo. */
 export const EARLY_RESPAWN_TICKS = 20;
 /** Schild-Punkte je Tower bei „Tower-Schild“; sie absorbieren Schaden vor den HP und verfallen nach dem Kampf. */

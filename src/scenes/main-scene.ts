@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { CARD_ART_IDS, cardTypeStyle } from '../logic/card-style';
 import { getCardDef } from '../logic/cards';
+import { ENERGY_BAR, ENERGY_LABEL, ENERGY_MESSAGE, energyCrystalLayout } from '../logic/energy-layout';
 import { diffFx } from '../logic/fx-events';
 import { type CardPose, cardAt, fanLayout, HAND_FAN, liftedPose, sortHand } from '../logic/hand-layout';
 import {
@@ -20,8 +21,11 @@ import { getRoundEventDef } from '../logic/round-events';
 import { LANE_COUNT, laneShortName, MAX_FIELD_LEVEL } from '../logic/lanes';
 import { type ActionBody, botPlanRecorded, createRecord, performAction, type RecordedMatch } from '../logic/match-record';
 import { HAND_FILTER_NAMES, type HandFilter, isCardVisible, nextHandFilter } from '../logic/hand-filter';
+import { advancePress, type PressState, startPress } from '../logic/long-press';
 import { advanceMinionAnim, newMinionAnim } from '../logic/minion-look';
-import { parseSeed } from '../logic/seed';
+import { summarizeStats } from '../logic/match-stats';
+import { bannerFor } from '../logic/phase-banner';
+import { parseFast, parseSeed } from '../logic/seed';
 import type { AudioEvent } from '../logic/audio-events';
 import { AudioLayer, audioControlAt, drawAudioControls, sliderValueAt } from './audio';
 import {
@@ -33,6 +37,9 @@ import {
   slotProximity,
   snapTarget,
 } from '../logic/placement';
+import { AmbienceLayer } from './ambience-layer';
+import { BannerView, crestColors, drawCrest, drawRays } from './banner-view';
+import { CardDetailView } from './card-detail-view';
 import { CardView } from './card-view';
 import { Effects, type Locator } from './effects';
 import {
@@ -53,7 +60,7 @@ import {
 import { type LabelFn, LabelPool } from './labels';
 import { copyToClipboard, shareUrl, shareUrlLines } from './share';
 import { addBackdrop } from './textures';
-import { drawButton, drawPanel, PALETTE, TEXT } from './theme';
+import { drawButton, drawPanel, PALETTE, SURFACE, TEXT } from './theme';
 
 /** Spielfläche im Hochformat; Phaser skaliert sie per `Scale.FIT` auf den Bildschirm. */
 export const VIEW = { width: 360, height: 640 };
@@ -68,6 +75,9 @@ export const BACKDROP_FIELD = {
   pathHalfHeight: FIELD.pathHalfHeight,
   handTop: 440,
 };
+
+/** Fläche der Glühwürmchen: das Spielfeld oberhalb der Hand; auch von der Replay-Szene genutzt. */
+export const AMBIENCE_BOUNDS = { width: VIEW.width, height: BACKDROP_FIELD.handTop };
 
 /** Wie Effekte Ereignisse auf Bildschirmpunkte abbilden; auch von der Replay-Szene genutzt. */
 export const FX_LOCATOR: Locator = {
@@ -84,9 +94,11 @@ const LAYOUT = {
 
 const STATS_PANEL = { x: 20, y: 60, width: 320, height: 500 };
 const STATS_CLOSE = { x: 120, y: 504, width: 120, height: 40 };
-/** Ende-Bild mit Teilen-URL (nach dem Schließen der Statistik) und der Knopf zum Kopieren des Links. */
-const SHARE_PANEL = { x: 20, y: 150, width: 320, height: 360 };
-const SHARE_COPY = { x: 110, y: 424, width: 140, height: 36 };
+/** Abschlussbildschirm (nach dem Schließen der Statistik): Wappen, Bilanz, Teilen-URL und der Knopf zum Kopieren. */
+const SHARE_PANEL = { x: 20, y: 30, width: 320, height: 560 };
+const SHARE_COPY = { x: 110, y: 496, width: 140, height: 36 };
+/** Mitte des Wappens und der Lichtstrahlen im Abschlussbildschirm. */
+const CREST_CENTER = { x: 180, y: 100 };
 const SHARE_LINE_HEIGHT = 12;
 
 /** Trefferradius zum Greifen eines Minions; größer als die gezeichnete Fläche, damit Touch trifft. */
@@ -128,6 +140,12 @@ interface DragState {
   dragging: boolean;
 }
 
+/** Druck auf eine Handkarte: Haltezeit und Bewegung für das Langdrücken (siehe `long-press.ts`). */
+interface HandPress {
+  handIndex: number;
+  press: PressState;
+}
+
 /** Die Figur, die eine gezogene Karte darstellt: folgt dem Zeiger, rastet an Punkten ein und fliegt zurück in die Hand. */
 interface CardGhost {
   cardId: string;
@@ -161,6 +179,7 @@ export class MainScene extends Phaser.Scene {
   private graphics!: Phaser.GameObjects.Graphics;
   private pool!: LabelPool;
   private effects!: Effects;
+  private ambience!: AmbienceLayer;
   private audio!: AudioLayer;
   /** Regler, der gerade gezogen wird (nur Eingabezustand). */
   private slider: 'music' | 'effects' | null = null;
@@ -191,6 +210,17 @@ export class MainScene extends Phaser.Scene {
   private handFilter: HandFilter = 'all';
   /** Ansichten der Handkarten, je Anzeigeplatz von links nach rechts (wiederverwendet). */
   private cardViews: CardView[] = [];
+  /** Detailansicht der Handkarten (langes Drücken) und der Hand-Index der gezeigten Karte. */
+  private detailView!: CardDetailView;
+  private detail: number | null = null;
+  /** Dauer des gerade gezeichneten Bilds in Millisekunden (0 beim Zeichnen außerhalb von `update`). */
+  private frameMs = 0;
+  /** Gedrückte Handkarte, solange der Zeiger unten ist und noch kein Ziehen läuft. */
+  private handPress: HandPress | null = null;
+  /** Banner für Rundenwechsel und Spielende (Ablauf in `phase-banner.ts`). */
+  private banner!: BannerView;
+  /** Zeit seit Spielende in ms (aus `delta`), treibt die Lichtstrahlen des Abschlussbildschirms. */
+  private endClockMs = 0;
 
   constructor() {
     super('main');
@@ -221,6 +251,16 @@ export class MainScene extends Phaser.Scene {
     return this.selected;
   }
 
+  /** Läuft gerade ein Banner (nur lesen, z. B. für E2E-Tests)? */
+  get bannerActive(): boolean {
+    return this.banner.active;
+  }
+
+  /** Hand-Index der Karte in der Detailansicht oder `null` (nur lesen, z. B. für E2E-Tests). */
+  get detailCard(): number | null {
+    return this.detail;
+  }
+
   /** Die grünen Punkte, die gerade angezeigt werden, samt Nähe des Zeigers (nur lesen, z. B. für E2E-Tests). */
   get slotDots(): { line: number; slot: number | null; x: number; y: number; proximity: number }[] {
     if (this.dotFade <= 0.01) return [];
@@ -239,6 +279,7 @@ export class MainScene extends Phaser.Scene {
     this.fxState = this.state;
     this.minionAnim = newMinionAnim();
     addBackdrop(this, VIEW.width, VIEW.height, BACKDROP_FIELD);
+    this.ambience = new AmbienceLayer(this, this.state.seed, this.state.round, AMBIENCE_BOUNDS, VIEW);
     this.pool = new LabelPool(this);
     this.effects = new Effects(this, FX_LOCATOR);
     this.audio = new AudioLayer(this, this.state.seed);
@@ -256,12 +297,18 @@ export class MainScene extends Phaser.Scene {
     this.statsClosed = false;
     this.handFilter = 'all';
     this.cardViews = [];
+    this.detail = null;
+    this.handPress = null;
     this.graphics = this.add.graphics();
+    this.detailView = new CardDetailView(this, VIEW);
+    this.banner = new BannerView(this, VIEW, parseFast(window.location.search));
+    this.endClockMs = 0;
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => this.onPointerDown(pointer.worldX, pointer.worldY));
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => this.onPointerMove(pointer.worldX, pointer.worldY));
     this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => this.onPointerUp(pointer.worldX, pointer.worldY));
     this.input.on('pointerupoutside', () => {
       this.slider = null;
+      this.closeDetail();
       this.cancelDrag();
     });
     this.input.on('gameout', () => {
@@ -282,10 +329,37 @@ export class MainScene extends Phaser.Scene {
       this.hovered = null;
     }
     if (this.state.phase !== 'planning' || this.state.ready[HUMAN]) this.cancelDrag();
+    if (this.state.phase !== 'planning') this.closeDetail();
+    this.updatePress(deltaMs);
     this.updateLifts(deltaMs);
     this.updateDrag(deltaMs);
     this.updateEffects(deltaMs);
+    this.banner.update(deltaMs);
+    if (this.state.phase === 'over') this.endClockMs += deltaMs;
+    this.ambience.setRound(this.state.round);
+    this.ambience.update(deltaMs);
+    this.frameMs = deltaMs;
     this.render();
+    this.frameMs = 0;
+  }
+
+  /** Rechnet die Haltezeit eines Drucks auf eine Handkarte fort; ab der Schwelle öffnet die Detailansicht. */
+  private updatePress(deltaMs: number): void {
+    const held = this.handPress;
+    if (!held || held.press.status !== 'pending') return;
+    const at = this.pointer ?? { x: held.press.startX, y: held.press.startY };
+    const press = advancePress(held.press, deltaMs, at.x, at.y);
+    this.handPress = { ...held, press };
+    if (press.status !== 'open') return;
+    // Die Karte wird weder gezogen noch angetippt: Loslassen schließt nur die Ansicht.
+    this.detail = held.handIndex;
+    this.drag = null;
+  }
+
+  /** Schließt die Detailansicht; ein noch laufender Druck löst danach nichts mehr aus. */
+  private closeDetail(): void {
+    this.detail = null;
+    this.handPress = null;
   }
 
   /** Gleitet jede Handkarte zur Ziel-Anhebung (Hover oder Auswahl). */
@@ -306,6 +380,7 @@ export class MainScene extends Phaser.Scene {
     this.fxState = this.state;
     const events = deltaMs <= FX_MAX_DELTA_MS ? diffFx(previous, this.state) : [];
     this.effects.play(events);
+    for (const event of events) this.banner.show(bannerFor(event, this.state));
     this.effects.update(deltaMs);
     this.audio.play([...this.pendingAudio, ...events], deltaMs);
     this.pendingAudio = [];
@@ -377,6 +452,17 @@ export class MainScene extends Phaser.Scene {
   }
 
   private onPointerDown(x: number, y: number): void {
+    // Ein Tippen auf den Banner-Streifen überspringt das Banner; alles andere geht durch.
+    if (this.banner.handleTap(y)) {
+      this.drag = null;
+      return;
+    }
+    // Ein Tippen bei offener Detailansicht schließt sie, mehr nicht.
+    if (this.detail !== null) {
+      this.closeDetail();
+      this.drag = null;
+      return;
+    }
     const control = audioControlAt(x, y);
     if (control === 'mute') {
       this.audio.toggleMute();
@@ -402,8 +488,11 @@ export class MainScene extends Phaser.Scene {
       return;
     }
     const handIndex = this.cardIndexAt(x, y);
-    if (handIndex !== null && this.isDraggable(handIndex)) {
-      this.drag = { minionId: null, handIndex, startX: x, startY: y, x, y, dragging: false };
+    if (handIndex !== null) {
+      // Auf einer Handkarte entscheidet erst das Loslassen (Tippen) oder die Haltezeit (Detailansicht).
+      this.pointer = { x, y };
+      this.handPress = { handIndex, press: startPress(x, y) };
+      this.drag = this.isDraggable(handIndex) ? { minionId: null, handIndex, startX: x, startY: y, x, y, dragging: false } : null;
       return;
     }
     this.drag = null;
@@ -437,6 +526,8 @@ export class MainScene extends Phaser.Scene {
     }
     this.pointer = { x, y };
     this.hovered = this.drag?.dragging ? null : this.cardIndexAt(x, y);
+    // Bewegung über die Toleranz bricht das Langdrücken sofort ab (nicht erst im nächsten Bild).
+    if (this.handPress) this.handPress = { ...this.handPress, press: advancePress(this.handPress.press, 0, x, y) };
     const drag = this.drag;
     if (!drag) return;
     drag.x = x;
@@ -448,12 +539,25 @@ export class MainScene extends Phaser.Scene {
       this.selected = null;
     }
     drag.dragging = true;
+    this.handPress = null;
   }
 
   private onPointerUp(x: number, y: number): void {
     this.slider = null;
+    const held = this.handPress;
+    this.handPress = null;
+    if (this.detail !== null) {
+      // Loslassen nach dem Langdrücken schließt nur die Ansicht: keine Karte wird gespielt oder gewählt.
+      this.closeDetail();
+      this.drag = null;
+      return;
+    }
     const drag = this.drag;
-    if (!drag) return;
+    if (!drag) {
+      // Gedrückte Karte ohne Ziehen (z. B. Upgrade): das Antippen gilt erst beim Loslassen.
+      if (held) this.handleTap(held.press.startX, held.press.startY);
+      return;
+    }
     this.drag = null;
     if (!drag.dragging) {
       // Kurzes Antippen ohne Ziehen: wie bisher behandeln.
@@ -583,6 +687,11 @@ export class MainScene extends Phaser.Scene {
 
   private handleTap(x: number, y: number): void {
     if (this.state.phase === 'over') {
+      // Das Spielende-Banner kommt zuerst; ein Tippen blendet es aus, danach folgt der Abschlussbildschirm.
+      if (this.banner.active) {
+        this.banner.skip();
+        return;
+      }
       if (!this.statsClosed) {
         if (inside(STATS_CLOSE, x, y)) this.statsClosed = true;
         return;
@@ -767,7 +876,7 @@ export class MainScene extends Phaser.Scene {
     drawButton(
       this.graphics,
       DISCARD_BUTTON,
-      hover ? { top: 0xd9a441, bottom: 0x8a5a14 } : { top: 0x6a4a8a, bottom: 0x35234f },
+      hover ? SURFACE.buttonDiscardHover : SURFACE.buttonDiscard,
     );
     this.label(
       `Abwerfen +${DISCARD_ENERGY}`,
@@ -814,7 +923,7 @@ export class MainScene extends Phaser.Scene {
     const bot = state.players[BOT];
 
     const needsMinion = this.selectedNeedsMinion();
-    drawBoard(g, this.label, state, this.selected !== null && !needsMinion);
+    drawBoard(g, this.label, state, this.selected !== null && !needsMinion, this.minionAnim.timeMs);
 
     const phaseText =
       state.phase === 'planning' ? 'Planung' : state.phase === 'combat' ? 'Kampf' : 'Ende';
@@ -877,14 +986,17 @@ export class MainScene extends Phaser.Scene {
     this.cardViews.forEach((view, slot) => {
       if (slot >= shown) view.hide();
     });
+    const detailId = this.detail === null ? undefined : human.hand[this.detail];
+    if (detailId !== undefined && state.phase === 'planning') {
+      const def = getCardDef(detailId);
+      this.detailView.update(def, human.energy >= def.cost, this.frameMs);
+    } else {
+      this.detailView.hide();
+    }
 
     const matching = cards.filter(({ def }) => isCardVisible(def.type, this.handFilter)).length;
     const filterButton = LAYOUT.filterButton;
-    drawButton(
-      g,
-      filterButton,
-      this.handFilter === 'all' ? { top: 0x4a4570, bottom: 0x2a2548 } : { top: 0x5a82d0, bottom: 0x28427f },
-    );
+    drawButton(g, filterButton, this.handFilter === 'all' ? SURFACE.buttonFilterAll : SURFACE.buttonFilterActive);
     this.label(
       `Filter: ${HAND_FILTER_NAMES[this.handFilter]} (${matching})`,
       filterButton.x + filterButton.width / 2,
@@ -893,19 +1005,15 @@ export class MainScene extends Phaser.Scene {
     );
 
     // Leiste unten: Energie im Bronzerahmen mit Kristall, Bereit-Knopf.
-    drawPanel(g, 6, 597, 108, 27, { metal: 'bronze', radius: 8 });
-    const crystal = [
-      new Phaser.Geom.Point(22, 603),
-      new Phaser.Geom.Point(28, 611),
-      new Phaser.Geom.Point(22, 619),
-      new Phaser.Geom.Point(16, 611),
-    ];
-    g.fillStyle(PALETTE.energy, 0.3).fillCircle(22, 611, 11);
-    g.fillStyle(PALETTE.goldDark, 1).fillPoints(crystal, true);
-    g.fillStyle(PALETTE.energy, 1).fillPoints(crystal.map((p) => new Phaser.Geom.Point(22 + (p.x - 22) * 0.75, 611 + (p.y - 611) * 0.75)), true);
-    g.fillStyle(PALETTE.white, 0.45).fillPoints([crystal[0]!, new Phaser.Geom.Point(26, 610), new Phaser.Geom.Point(22, 611)], true);
-    this.label(`Energie ${human.energy}`, 72, 612, { size: 16, color: TEXT.gold, font: 'heading', bold: true });
-    if (this.message) this.label(this.message, 70, 632, { size: 10, color: TEXT.bad });
+    drawPanel(g, ENERGY_BAR.x, ENERGY_BAR.y, ENERGY_BAR.width, ENERGY_BAR.height, { metal: 'bronze', radius: 8 });
+    const crystal = energyCrystalLayout();
+    const toPoints = (points: readonly { x: number; y: number }[]) => points.map((p) => new Phaser.Geom.Point(p.x, p.y));
+    g.fillStyle(PALETTE.energy, 0.3).fillCircle(crystal.center.x, crystal.center.y, crystal.glowRadius);
+    g.fillStyle(PALETTE.goldDark, 1).fillPoints(toPoints(crystal.outer), true);
+    g.fillStyle(PALETTE.energy, 1).fillPoints(toPoints(crystal.inner), true);
+    g.fillStyle(PALETTE.white, 0.45).fillPoints(toPoints(crystal.shine), true);
+    this.label(`Energie ${human.energy}`, ENERGY_LABEL.x, ENERGY_LABEL.y, { size: 16, color: TEXT.gold, font: 'heading', bold: true });
+    if (this.message) this.label(this.message, ENERGY_MESSAGE.x, ENERGY_MESSAGE.y, { size: 10, color: TEXT.bad });
     const button = LAYOUT.button;
     const waiting = state.phase !== 'planning' || state.ready[HUMAN];
     drawButton(g, button, { enabled: !waiting });
@@ -915,31 +1023,53 @@ export class MainScene extends Phaser.Scene {
       bold: true,
     });
 
-    if (state.phase === 'over' && !this.statsClosed) {
-      this.renderStats(state);
-    } else if (state.phase === 'over') {
-      g.fillStyle(PALETTE.black, 0.55).fillRect(0, 0, VIEW.width, VIEW.height);
-      const panel = SHARE_PANEL;
-      drawPanel(g, panel.x, panel.y, panel.width, panel.height, { metal: 'gold' });
-      const text =
-        state.outcome === 'draw' ? 'Unentschieden' : state.outcome === 'player0' ? 'Du gewinnst!' : 'Du verlierst';
-      this.label(text, VIEW.width / 2, panel.y + 36, { size: 26, font: 'heading', bold: true, color: TEXT.gold, stroke: 3 });
-      this.label('Replay zum Teilen:', VIEW.width / 2, panel.y + 78, { size: 12, color: TEXT.dim });
-      const lines = shareUrlLines(shareUrl(this.record));
-      this.label(lines.join('\n'), VIEW.width / 2, panel.y + 96 + (lines.length * SHARE_LINE_HEIGHT) / 2, {
-        size: 9,
-        stroke: 1,
-      });
-      drawButton(g, SHARE_COPY);
-      this.label('Link kopieren', SHARE_COPY.x + SHARE_COPY.width / 2, SHARE_COPY.y + SHARE_COPY.height / 2, {
-        size: 13,
-        font: 'heading',
-        bold: true,
-      });
-      this.label('Tippen für ein neues Spiel', VIEW.width / 2, panel.y + panel.height - 28, { size: 13, color: TEXT.dim });
+    // Während das Spielende-Banner läuft, bleibt das Feld sichtbar; danach folgen Statistik und Abschlussbildschirm.
+    if (state.phase === 'over' && !this.banner.active) {
+      if (!this.statsClosed) this.renderStats(state);
+      else this.renderEndScreen(state);
     }
 
     this.pool.hideUnused();
+  }
+
+  /** Abschlussbildschirm: Lichtstrahlen, Wappen in der Teamfarbe, Bilanz aus `state.stats`, Teilen-Link, Neustart. */
+  private renderEndScreen(state: MatchState): void {
+    const g = this.graphics;
+    const panel = SHARE_PANEL;
+    const centerX = VIEW.width / 2;
+    const won = state.outcome === 'player0';
+    const lost = state.outcome === 'player1';
+    // Das Wappen gehört dem Sieger; beim Unentschieden trägt der Mensch es.
+    const colors = crestColors(lost ? 'bot' : 'human');
+    // Die Beschriftungen des Felds liegen über der Grafik; der Abschlussbildschirm ersetzt sie durch seine eigenen.
+    this.pool.reset();
+    g.fillStyle(PALETTE.black, 0.55).fillRect(0, 0, VIEW.width, VIEW.height);
+    drawPanel(g, panel.x, panel.y, panel.width, panel.height, { metal: 'gold' });
+    drawRays(g, CREST_CENTER.x, CREST_CENTER.y, 150, this.endClockMs, won ? PALETTE.goldLight : colors.light);
+    drawCrest(g, CREST_CENTER.x, CREST_CENTER.y, 64, colors);
+
+    const text = state.outcome === 'draw' ? 'Unentschieden' : won ? 'Du gewinnst!' : 'Du verlierst';
+    this.label(text, centerX, panel.y + 142, { size: 26, font: 'heading', bold: true, color: TEXT.gold, stroke: 3 });
+
+    const summary = summarizeStats(state.stats);
+    const rows = [
+      `Beschwörungen: ${summary.summoned}`,
+      `Schaden an Minions: ${summary.minionDamage}`,
+      `Schaden an Towern: ${summary.towerDamage}`,
+      `Stärkste Karte: ${summary.topCardId === null ? '–' : getCardDef(summary.topCardId).name}`,
+    ];
+    rows.forEach((row, index) => this.label(row, centerX, panel.y + 176 + index * 16, { size: 12 }));
+
+    this.label('Replay zum Teilen:', centerX, panel.y + 262, { size: 12, color: TEXT.dim });
+    const lines = shareUrlLines(shareUrl(this.record));
+    this.label(lines.join('\n'), centerX, panel.y + 280 + (lines.length * SHARE_LINE_HEIGHT) / 2, { size: 9, stroke: 1 });
+    drawButton(g, SHARE_COPY);
+    this.label('Link kopieren', SHARE_COPY.x + SHARE_COPY.width / 2, SHARE_COPY.y + SHARE_COPY.height / 2, {
+      size: 13,
+      font: 'heading',
+      bold: true,
+    });
+    this.label('Tippen für ein neues Spiel', centerX, panel.y + panel.height - 24, { size: 13, color: TEXT.dim });
   }
 
   /** Overlay nach Match-Ende: Ergebnis, Karten pro Line und Schaden je Minion-Typ (liest nur `state.stats`). */

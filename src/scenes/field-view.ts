@@ -38,11 +38,20 @@ import {
   slotTower,
   validSlots,
 } from '../logic/placement';
+import {
+  emberFlicker,
+  SMOKE_RISE,
+  smokePuff,
+  smokePuffCount,
+  TOWER_LOOKS,
+  towerDamageStage,
+  towerSeed,
+} from '../logic/tower-look';
 import { describeSynergy } from '../logic/synergies';
 import type { Point } from './effects';
 import type { LabelFn } from './labels';
 import { drawFigure } from './minion-figure';
-import { drawBar, healthFill, lerpColor, PALETTE, TEXT } from './theme';
+import { drawBar, healthFill, lerpColor, LIGHT, MATERIAL, PALETTE, TEAM_COLOR, TEXT } from './theme';
 
 export const HUMAN = 0;
 export const BOT = 1;
@@ -120,6 +129,12 @@ export function towerPoint(owner: number, line: number, tower: number): Point {
   return { x: lineX(owner, laneTowerOffsets(line)[tower] ?? 0), y: FIELD.laneCenters[line]! };
 }
 
+type Segment = readonly [number, number, number, number];
+const WALL_CRACKS: readonly Segment[] = [[-7, -8, -4, -2], [6, -8, 3, 0], [-8, 4, -3, 9], [7, 3, 4, 10]];
+const RUIN_CRACKS: readonly Segment[] = [[-6, 4, -4, 10], [4, 5, 2, 11], [0, 4, 1, 8], [6, 6, 7, 10]];
+const WALL_EMBERS: readonly (readonly [number, number])[] = [[-6, -12], [5, -4], [-2, 8]];
+const RUIN_EMBERS: readonly (readonly [number, number])[] = [[-5, 5], [4, 7], [0, 10]];
+
 /** Ein Tower, kompakt (die drei Tower der Start-Lane stehen nur 24 px auseinander), mit Lebensbalken darüber. */
 export function drawTower(
   g: Phaser.GameObjects.Graphics,
@@ -128,35 +143,68 @@ export function drawTower(
   y: number,
   tower: { hp: number; maxHp: number; specialization?: 'lightning' | 'shield' },
   owner: number,
+  timeMs = 0,
 ): void {
   const { hp, maxHp } = tower;
-  const alive = hp > 0;
+  const look = TOWER_LOOKS[towerDamageStage(hp, maxHp)];
+  const alive = !look.collapsed;
   const team = teamOf(owner);
   const accent = alive ? team.main : PALETTE.stoneDark;
   const wall = alive ? PALETTE.stone : lerpColor(PALETTE.stoneDark, PALETTE.black, 0.3);
+  const shade = lerpColor(wall, PALETTE.black, 0.45);
 
   // Schatten und Teamfarben-Schein auf dem Boden.
   g.fillStyle(PALETTE.black, 0.4).fillEllipse(x + 2, y + 12, 22, 7);
   if (alive) g.fillStyle(team.main, 0.2).fillEllipse(x, y + 10, 26, 10);
 
-  // Mauerwerk: Zinnen, Sockel mit Verlauf, Teamfarben-Streifen, Schild in der Mitte.
-  for (let block = 0; block < 3; block += 1) {
-    g.fillStyle(wall, 1).fillRect(x - 9 + block * 7, y - 13, 4, 4);
-  }
-  g.fillStyle(lerpColor(wall, PALETTE.black, 0.45), 1).fillRect(x - 9, y - 9, 18, 21);
-  g.fillStyle(wall, 1).fillRect(x - 9, y - 9, 18, 10);
-  g.fillStyle(PALETTE.white, 0.18).fillRect(x - 9, y - 9, 18, 1);
-  g.fillStyle(accent, 1).fillRect(x - 9, y - 9, 2, 21).fillRect(x + 7, y - 9, 2, 21);
-  g.fillStyle(accent, 1).fillRoundedRect(x - 6, y - 6, 12, 13, 2);
-  g.fillStyle(PALETTE.panelDark, 0.9).fillRoundedRect(x - 5, y - 5, 10, 11, 2);
+  if (look.collapsed) {
+    // Ruine: niedrige, zerbrochene Mauerreste an derselben Stelle.
+    g.fillStyle(shade, 1).fillRect(x - 9, y + 3, 18, 9);
+    g.fillStyle(wall, 1).fillRect(x - 9, y + 3, 7, 4).fillRect(x + 1, y + 5, 8, 3).fillRect(x - 3, y + 1, 4, 3);
+    g.fillStyle(accent, 1).fillRect(x - 9, y + 5, 2, 7);
+    g.fillStyle(PALETTE.black, 0.55).fillTriangle(x + 2, y + 3, x + 9, y + 3, x + 9, y + 9);
+  } else {
+    // Mauerwerk: Zinnen (abgebrochene fehlen von rechts), Sockel mit Verlauf, Teamfarben-Streifen, Schild in der Mitte.
+    for (let block = 0; block < 3 - look.missingMerlons; block += 1) {
+      g.fillStyle(wall, 1).fillRect(x - 9 + block * 7, y - 13, 4, 4);
+    }
+    g.fillStyle(shade, 1).fillRect(x - 9, y - 9, 18, 21);
+    g.fillStyle(wall, 1).fillRect(x - 9, y - 9, 18, 10);
+    g.fillStyle(PALETTE.white, 0.18).fillRect(x - 9, y - 9, 18, 1);
+    g.fillStyle(accent, 1).fillRect(x - 9, y - 9, 2, 21).fillRect(x + 7, y - 9, 2, 21);
+    g.fillStyle(accent, 1).fillRoundedRect(x - 6, y - 6, 12, 13, 2);
+    g.fillStyle(PALETTE.panelDark, 0.9).fillRoundedRect(x - 5, y - 5, 10, 11, 2);
 
-  if (alive && tower.specialization) {
-    // Markierung im Schild des Towers (die Fläche über dem Tower gehört den Turm-Slots): gelb für den Blitz-Turm,
-    // blau für den Schild-Turm.
-    const mark = tower.specialization === 'lightning' ? 0xffd23a : 0x5ab4ff;
-    g.fillStyle(mark, 0.35).fillRoundedRect(x - 5, y - 5, 10, 11, 2);
-    g.lineStyle(1, mark, 1).strokeRoundedRect(x - 5.5, y - 5.5, 11, 12, 2);
+    if (tower.specialization) {
+      // Markierung im Schild des Towers (die Fläche über dem Tower gehört den Turm-Slots): gelb für den Blitz-Turm,
+      // blau für den Schild-Turm.
+      const mark = tower.specialization === 'lightning' ? TEAM_COLOR.markLightning : TEAM_COLOR.markShield;
+      g.fillStyle(mark, 0.35).fillRoundedRect(x - 5, y - 5, 10, 11, 2);
+      g.lineStyle(1, mark, 1).strokeRoundedRect(x - 5.5, y - 5.5, 11, 12, 2);
+    }
   }
+
+  // Risse (feste Anordnung, nur die Anzahl wächst mit dem Schaden); in der Ruine auf die Mauerreste begrenzt.
+  const cracks = look.collapsed ? RUIN_CRACKS : WALL_CRACKS;
+  g.lineStyle(1, PALETTE.black, 0.8);
+  for (const [x1, y1, x2, y2] of cracks.slice(0, look.cracks)) g.lineBetween(x + x1, y + y1, x + x2, y + y2);
+
+  // Glut an den Bruchstellen und Rauch; beides aus der Szenenzeit, nie aus Frames.
+  const seed = towerSeed(x, y);
+  const embers = look.ember > 0 ? (look.collapsed ? RUIN_EMBERS : WALL_EMBERS) : [];
+  embers.forEach(([ex, ey], index) => {
+    const glow = look.ember * emberFlicker(timeMs, index, seed);
+    g.fillStyle(LIGHT.emberGlow, 0.55 * glow).fillCircle(x + ex, y + ey, 2.2);
+    g.fillStyle(LIGHT.emberCore, 0.9 * glow).fillCircle(x + ex, y + ey, 1);
+  });
+  const puffs = smokePuffCount(look.smoke);
+  const smokeY = look.collapsed ? y + 2 : y - 13;
+  for (let index = 0; index < puffs; index += 1) {
+    const puff = smokePuff(timeMs, index, seed);
+    const alpha = look.smoke * 0.5 * (1 - puff.rise);
+    g.fillStyle(MATERIAL.smoke, alpha).fillCircle(x - 3 + index * 3 + puff.drift, smokeY - puff.rise * SMOKE_RISE, 2 + puff.rise * 2);
+  }
+
   drawBar(g, x - 10, y - 21, 20, 4, maxHp > 0 ? hp / maxHp : 0, healthFill(maxHp > 0 ? hp / maxHp : 0), 'gold');
   label(`${Math.ceil(hp)}`, x, y + 1, { size: 8, bold: true, font: 'heading', color: alive ? TEXT.main : TEXT.dim });
 }
@@ -318,7 +366,7 @@ export function drawSlotDots(g: Phaser.GameObjects.Graphics, dots: readonly Slot
  * Lanes, Bauplätze und beide Tower-Gruppen. Lanes, die der Mensch noch nicht gekauft hat, liegen abgedunkelt mit
  * Preis oder nötiger Feldstufe da. `highlight` rahmt die gekauften Lanes golden.
  */
-export function drawBoard(g: Phaser.GameObjects.Graphics, label: LabelFn, state: MatchState, highlight = false): void {
+export function drawBoard(g: Phaser.GameObjects.Graphics, label: LabelFn, state: MatchState, highlight = false, timeMs = 0): void {
   const human = state.players[HUMAN];
   const bot = state.players[BOT];
   const left = FIELD.ownTowerX - 14;
@@ -338,7 +386,7 @@ export function drawBoard(g: Phaser.GameObjects.Graphics, label: LabelFn, state:
         center,
         { size: 10, color: buyable ? TEXT.gold : TEXT.dim },
       );
-      for (const tower of bot.lines[line]!.towers) drawTower(g, label, lineX(BOT, tower.offset ?? 0), center, tower, BOT);
+      for (const tower of bot.lines[line]!.towers) drawTower(g, label, lineX(BOT, tower.offset ?? 0), center, tower, BOT, timeMs);
       continue;
     }
     if (highlight) {
@@ -349,8 +397,10 @@ export function drawBoard(g: Phaser.GameObjects.Graphics, label: LabelFn, state:
     drawSlotMarkers(g, label, state, line, state.phase === 'planning');
     drawLaneSlot(g, label, human.lines[line]!, lineX(HUMAN, 0) - LANE_SLOT_GAP, center);
     drawLaneSlot(g, label, bot.lines[line]!, lineX(BOT, 0) + LANE_SLOT_GAP, center);
-    for (const tower of bot.lines[line]!.towers) drawTower(g, label, lineX(BOT, tower.offset ?? 0), center, tower, BOT);
-    for (const tower of human.lines[line]!.towers) drawTower(g, label, lineX(HUMAN, tower.offset ?? 0), center, tower, HUMAN);
+    for (const tower of bot.lines[line]!.towers) drawTower(g, label, lineX(BOT, tower.offset ?? 0), center, tower, BOT, timeMs);
+    for (const tower of human.lines[line]!.towers) {
+      drawTower(g, label, lineX(HUMAN, tower.offset ?? 0), center, tower, HUMAN, timeMs);
+    }
     label(laneName(line), 180, center - 30, { size: 9, color: TEXT.gold });
     // Aktive Synergien der Lane (nur Anzeige, die Regeln stehen in `logic/synergies.ts`).
     human.synergies

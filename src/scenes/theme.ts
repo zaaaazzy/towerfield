@@ -3,9 +3,15 @@
  * Alle Szenen nehmen Farben und Schriften nur von hier. Die Kartentyp-Farben stehen in `logic/card-style.ts`.
  */
 import Phaser from 'phaser';
+import type { LightStops } from '../logic/ambience';
 
-/** Palette: dunkles Fantasy-Blau/Violett, Gold- und Bronze-Akzente, kräftige Teamfarben. */
-export const PALETTE = {
+/*
+ * Tokens nach Rollen. Jede Gruppe ist ein eigenes Objekt und lässt sich später als Ganzes austauschen
+ * (z. B. eine Nacht- oder Rundenstimmung); `PALETTE` bleibt als flache Sicht darauf für die bestehenden Szenen.
+ */
+
+/** Oberfläche: Hintergründe, Panels, Boden, Wege und Knopfflächen (Verläufe als `top`/`bottom`). */
+export const SURFACE = {
   bgDeep: 0x0b0820,
   bgMid: 0x1b1540,
   bgLight: 0x2d2460,
@@ -15,6 +21,34 @@ export const PALETTE = {
   ground: 0x1f2a47,
   path: 0x3b3558,
   pathEdge: 0x1a1535,
+  disabled: 0x3a3556,
+  /** Knopfflächen: Bereit/Ziehen (grün), Abwerfen (Ruhe/Hover), Kartenfilter (alle/aktiv). */
+  buttonReady: { top: 0x4fae54, bottom: 0x23602a },
+  buttonDiscard: { top: 0x6a4a8a, bottom: 0x35234f },
+  buttonDiscardHover: { top: 0xd9a441, bottom: 0x8a5a14 },
+  buttonFilterAll: { top: 0x4a4570, bottom: 0x2a2548 },
+  buttonFilterActive: { top: 0x5a82d0, bottom: 0x28427f },
+} as const;
+
+/** Licht: Abenddämmerung-Schicht (siehe `scenes/ambience-layer.ts`, Werte pro Runde in `logic/ambience.ts`), Glut, Glanz und Schatten. */
+export const LIGHT = {
+  eveningGold: 0xf2b84b,
+  duskViolet: 0x5b3a8e,
+  nightBlue: 0x0d1536,
+  torchOrange: 0xff8a2b,
+  fogGrey: 0xa9aec4,
+  fireflyYellow: 0xe8ff7a,
+  /** Glut an Bruchstellen: Außenschein und heller Kern. */
+  emberGlow: 0xff7a1a,
+  emberCore: 0xffd23a,
+  /** Energie-Kristall. */
+  energy: 0x5ad7ff,
+  white: 0xffffff,
+  black: 0x000000,
+} as const;
+
+/** Material: Metalle (Rahmen), Stein und Rauch. */
+export const MATERIAL = {
   gold: 0xf2c14e,
   goldLight: 0xffe08a,
   goldDark: 0x9c6b1f,
@@ -22,20 +56,66 @@ export const PALETTE = {
   bronzeDark: 0x5f3513,
   stone: 0x8a86a6,
   stoneDark: 0x4a4668,
+  steelLight: 0xc9cde0,
+  steelDark: 0x4d5069,
+  smoke: 0x3a3a40,
+} as const;
+
+/** Team: Spieler- und Gegnerfarben, Gut/Schlecht und die Turm-Spezialisierungsmarken. */
+export const TEAM_COLOR = {
   human: 0x35b6ff,
   humanDark: 0x0f5a8f,
   bot: 0xff6a3d,
   botDark: 0x8f2a10,
   good: 0x6bd16f,
   goodDark: 0x2c7a31,
+  goodLight: 0x9af0a0,
   bad: 0xef5350,
   badDark: 0x8e1f1d,
-  /** Energie-Kristall. */
-  energy: 0x5ad7ff,
-  disabled: 0x3a3556,
-  white: 0xffffff,
-  black: 0x000000,
+  badLight: 0xff8a80,
+  /** Markierung im Schild des Towers: Blitz-Turm gelb, Schild-Turm blau. */
+  markLightning: 0xffd23a,
+  markShield: 0x5ab4ff,
 } as const;
+
+/** Palette (flache Sicht auf die Rollen): dunkles Fantasy-Blau/Violett, Gold- und Bronze-Akzente, kräftige Teamfarben. */
+export const PALETTE = {
+  bgDeep: SURFACE.bgDeep,
+  bgMid: SURFACE.bgMid,
+  bgLight: SURFACE.bgLight,
+  panel: SURFACE.panel,
+  panelDark: SURFACE.panelDark,
+  ground: SURFACE.ground,
+  path: SURFACE.path,
+  pathEdge: SURFACE.pathEdge,
+  disabled: SURFACE.disabled,
+  gold: MATERIAL.gold,
+  goldLight: MATERIAL.goldLight,
+  goldDark: MATERIAL.goldDark,
+  bronze: MATERIAL.bronze,
+  bronzeDark: MATERIAL.bronzeDark,
+  stone: MATERIAL.stone,
+  stoneDark: MATERIAL.stoneDark,
+  human: TEAM_COLOR.human,
+  humanDark: TEAM_COLOR.humanDark,
+  bot: TEAM_COLOR.bot,
+  botDark: TEAM_COLOR.botDark,
+  good: TEAM_COLOR.good,
+  goodDark: TEAM_COLOR.goodDark,
+  bad: TEAM_COLOR.bad,
+  badDark: TEAM_COLOR.badDark,
+  energy: LIGHT.energy,
+  white: LIGHT.white,
+  black: LIGHT.black,
+} as const;
+
+/** Farbstützpunkte für `ambienceForRound`. */
+export const LIGHT_STOPS: LightStops = {
+  gold: LIGHT.eveningGold,
+  dusk: LIGHT.duskViolet,
+  night: LIGHT.nightBlue,
+  torch: LIGHT.torchOrange,
+};
 
 /** Seitenhintergrund hinter dem Canvas (gleich `PALETTE.bgDeep`, auch in `index.html`). */
 export const PAGE_BACKGROUND = '#0b0820';
@@ -103,7 +183,7 @@ export type FrameMetal = 'gold' | 'bronze' | 'steel';
 const METALS: Record<FrameMetal, { light: number; dark: number }> = {
   gold: { light: PALETTE.goldLight, dark: PALETTE.goldDark },
   bronze: { light: PALETTE.bronze, dark: PALETTE.bronzeDark },
-  steel: { light: 0xc9cde0, dark: 0x4d5069 },
+  steel: { light: MATERIAL.steelLight, dark: MATERIAL.steelDark },
 };
 
 /** Gerahmtes Panel: Metallrand (zweifach, hell/dunkel), Füllung mit Verlauf. `border` überschreibt das Metall. */
@@ -164,7 +244,7 @@ export function drawBar(
 
 /** Füllung des Lebensbalkens: grün, bei wenig Leben rot. */
 export function healthFill(ratio: number): { top: number; bottom: number } {
-  return ratio > 0.35 ? { top: 0x9af0a0, bottom: PALETTE.goodDark } : { top: 0xff8a80, bottom: PALETTE.badDark };
+  return ratio > 0.35 ? { top: TEAM_COLOR.goodLight, bottom: TEAM_COLOR.goodDark } : { top: TEAM_COLOR.badLight, bottom: TEAM_COLOR.badDark };
 }
 
 /** Knopf mit Metallrand; `enabled = false` zeigt ihn gedämpft. */
@@ -176,8 +256,8 @@ export function drawButton(
   const enabled = options.enabled ?? true;
   drawPanel(g, rect.x, rect.y, rect.width, rect.height, {
     metal: enabled ? 'gold' : 'steel',
-    top: enabled ? (options.top ?? 0x4fae54) : PALETTE.disabled,
-    bottom: enabled ? (options.bottom ?? 0x23602a) : PALETTE.panelDark,
+    top: enabled ? (options.top ?? SURFACE.buttonReady.top) : PALETTE.disabled,
+    bottom: enabled ? (options.bottom ?? SURFACE.buttonReady.bottom) : PALETTE.panelDark,
     radius: 8,
   });
 }
