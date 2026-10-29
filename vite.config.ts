@@ -27,6 +27,14 @@ export default defineConfig({
       exclude: ['src/**/*.test.ts'],
       reporter: ['text', 'html', 'json-summary'],
       reportsDirectory: 'coverage',
+      // Feste Untergrenzen für die Logik (Ist-Stand: Zeilen 99,92 / Zweige 99,72 / Funktionen 100 / Anweisungen 99,94).
+      // Unterschreitet eine Metrik, endet `npm run test:coverage` mit Exit-Code 1 und nennt sie. Nicht senken – Tests ergänzen.
+      thresholds: {
+        lines: 99.5,
+        branches: 99,
+        functions: 100,
+        statements: 99.5,
+      },
     },
   },
 });
