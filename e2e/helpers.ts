@@ -252,6 +252,37 @@ export function fastForwardCombat(page: Page): Promise<void> {
   });
 }
 
+/** Zeit pro Bild beim Vorspulen mit `stepFrames`, ungefähr 60 Bilder pro Sekunde. */
+export const STEP_MS = 16;
+
+/**
+ * Hält den Echtzeit-Loop an und startet die Szene neu; ab hier läuft die Zeit nur über `stepFrames`. So hängt jedes
+ * Bild nur von Seed und Anzahl der Schritte ab (Animationen von Licht, Nebel und Glanz stehen reproduzierbar), nicht
+ * von der Rechenzeit der Maschine. Danach Eingaben wie gewohnt senden und mit `stepFrames` verarbeiten lassen.
+ */
+export function freezeGame(page: Page): Promise<void> {
+  return page.evaluate(() => {
+    const game = window.game!;
+    game.loop.sleep();
+    game.scene.getScene('main').scene.restart();
+    game.step(0, 16);
+  });
+}
+
+/** Lässt `frames` Bilder zu je `deltaMs` laufen (Eingabe, Szenen-Update und Zeichnen), nur bei angehaltenem Loop. */
+export function stepFrames(page: Page, frames: number, deltaMs: number = STEP_MS): Promise<void> {
+  return page.evaluate(
+    ([count, delta]) => {
+      const game = window.game! as unknown as { step(time: number, delta: number): void; __time?: number };
+      for (let frame = 0; frame < (count as number); frame += 1) {
+        game.__time = (game.__time ?? 0) + (delta as number);
+        game.step(game.__time, delta as number);
+      }
+    },
+    [frames, deltaMs] as const,
+  );
+}
+
 /**
  * Setzt `enemies` als Minions des Gegners und lässt die laufende Kampfphase genau `ticks` Ticks (je `TICK_MS`) laufen,
  * alles in einem einzigen Browser-Aufruf. So stört weder der Echtzeit-Loop noch der Bot die Messung. Liefert den

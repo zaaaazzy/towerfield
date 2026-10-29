@@ -7,6 +7,8 @@ const devPort = Number(process.env.SMOKE_DEV_PORT ?? 5181);
 export default defineConfig({
   testDir: 'e2e',
   timeout: 30_000,
+  // Screenshot-Vergleiche (e2e/grafik.spec.ts) brauchen bei ausgelasteter Maschine mehr als die üblichen 5 s.
+  expect: { timeout: 20_000 },
   reporter: process.env.CI ? 'line' : 'list',
   use: { baseURL: `http://localhost:${port}` },  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: [

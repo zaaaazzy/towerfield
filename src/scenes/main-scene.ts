@@ -20,6 +20,7 @@ import { getRoundEventDef } from '../logic/round-events';
 import { LANE_COUNT, laneShortName, MAX_FIELD_LEVEL } from '../logic/lanes';
 import { type ActionBody, botPlanRecorded, createRecord, performAction, type RecordedMatch } from '../logic/match-record';
 import { HAND_FILTER_NAMES, type HandFilter, isCardVisible, nextHandFilter } from '../logic/hand-filter';
+import { advancePress, type PressState, startPress } from '../logic/long-press';
 import { advanceMinionAnim, newMinionAnim } from '../logic/minion-look';
 import { parseSeed } from '../logic/seed';
 import type { AudioEvent } from '../logic/audio-events';
@@ -34,6 +35,7 @@ import {
   snapTarget,
 } from '../logic/placement';
 import { AmbienceLayer } from './ambience-layer';
+import { CardDetailView } from './card-detail-view';
 import { CardView } from './card-view';
 import { Effects, type Locator } from './effects';
 import {
@@ -132,6 +134,12 @@ interface DragState {
   dragging: boolean;
 }
 
+/** Druck auf eine Handkarte: Haltezeit und Bewegung für das Langdrücken (siehe `long-press.ts`). */
+interface HandPress {
+  handIndex: number;
+  press: PressState;
+}
+
 /** Die Figur, die eine gezogene Karte darstellt: folgt dem Zeiger, rastet an Punkten ein und fliegt zurück in die Hand. */
 interface CardGhost {
   cardId: string;
@@ -196,6 +204,13 @@ export class MainScene extends Phaser.Scene {
   private handFilter: HandFilter = 'all';
   /** Ansichten der Handkarten, je Anzeigeplatz von links nach rechts (wiederverwendet). */
   private cardViews: CardView[] = [];
+  /** Detailansicht der Handkarten (langes Drücken) und der Hand-Index der gezeigten Karte. */
+  private detailView!: CardDetailView;
+  private detail: number | null = null;
+  /** Dauer des gerade gezeichneten Bilds in Millisekunden (0 beim Zeichnen außerhalb von `update`). */
+  private frameMs = 0;
+  /** Gedrückte Handkarte, solange der Zeiger unten ist und noch kein Ziehen läuft. */
+  private handPress: HandPress | null = null;
 
   constructor() {
     super('main');
@@ -224,6 +239,11 @@ export class MainScene extends Phaser.Scene {
   /** Index der angetippten Handkarte, die auf eine Line wartet (nur lesen, z. B. für E2E-Tests). */
   get selectedCard(): number | null {
     return this.selected;
+  }
+
+  /** Hand-Index der Karte in der Detailansicht oder `null` (nur lesen, z. B. für E2E-Tests). */
+  get detailCard(): number | null {
+    return this.detail;
   }
 
   /** Die grünen Punkte, die gerade angezeigt werden, samt Nähe des Zeigers (nur lesen, z. B. für E2E-Tests). */
@@ -262,12 +282,16 @@ export class MainScene extends Phaser.Scene {
     this.statsClosed = false;
     this.handFilter = 'all';
     this.cardViews = [];
+    this.detail = null;
+    this.handPress = null;
     this.graphics = this.add.graphics();
+    this.detailView = new CardDetailView(this, VIEW);
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => this.onPointerDown(pointer.worldX, pointer.worldY));
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => this.onPointerMove(pointer.worldX, pointer.worldY));
     this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => this.onPointerUp(pointer.worldX, pointer.worldY));
     this.input.on('pointerupoutside', () => {
       this.slider = null;
+      this.closeDetail();
       this.cancelDrag();
     });
     this.input.on('gameout', () => {
@@ -288,12 +312,35 @@ export class MainScene extends Phaser.Scene {
       this.hovered = null;
     }
     if (this.state.phase !== 'planning' || this.state.ready[HUMAN]) this.cancelDrag();
+    if (this.state.phase !== 'planning') this.closeDetail();
+    this.updatePress(deltaMs);
     this.updateLifts(deltaMs);
     this.updateDrag(deltaMs);
     this.updateEffects(deltaMs);
     this.ambience.setRound(this.state.round);
     this.ambience.update(deltaMs);
+    this.frameMs = deltaMs;
     this.render();
+    this.frameMs = 0;
+  }
+
+  /** Rechnet die Haltezeit eines Drucks auf eine Handkarte fort; ab der Schwelle öffnet die Detailansicht. */
+  private updatePress(deltaMs: number): void {
+    const held = this.handPress;
+    if (!held || held.press.status !== 'pending') return;
+    const at = this.pointer ?? { x: held.press.startX, y: held.press.startY };
+    const press = advancePress(held.press, deltaMs, at.x, at.y);
+    this.handPress = { ...held, press };
+    if (press.status !== 'open') return;
+    // Die Karte wird weder gezogen noch angetippt: Loslassen schließt nur die Ansicht.
+    this.detail = held.handIndex;
+    this.drag = null;
+  }
+
+  /** Schließt die Detailansicht; ein noch laufender Druck löst danach nichts mehr aus. */
+  private closeDetail(): void {
+    this.detail = null;
+    this.handPress = null;
   }
 
   /** Gleitet jede Handkarte zur Ziel-Anhebung (Hover oder Auswahl). */
@@ -385,6 +432,12 @@ export class MainScene extends Phaser.Scene {
   }
 
   private onPointerDown(x: number, y: number): void {
+    // Ein Tippen bei offener Detailansicht schließt sie, mehr nicht.
+    if (this.detail !== null) {
+      this.closeDetail();
+      this.drag = null;
+      return;
+    }
     const control = audioControlAt(x, y);
     if (control === 'mute') {
       this.audio.toggleMute();
@@ -410,8 +463,11 @@ export class MainScene extends Phaser.Scene {
       return;
     }
     const handIndex = this.cardIndexAt(x, y);
-    if (handIndex !== null && this.isDraggable(handIndex)) {
-      this.drag = { minionId: null, handIndex, startX: x, startY: y, x, y, dragging: false };
+    if (handIndex !== null) {
+      // Auf einer Handkarte entscheidet erst das Loslassen (Tippen) oder die Haltezeit (Detailansicht).
+      this.pointer = { x, y };
+      this.handPress = { handIndex, press: startPress(x, y) };
+      this.drag = this.isDraggable(handIndex) ? { minionId: null, handIndex, startX: x, startY: y, x, y, dragging: false } : null;
       return;
     }
     this.drag = null;
@@ -445,6 +501,8 @@ export class MainScene extends Phaser.Scene {
     }
     this.pointer = { x, y };
     this.hovered = this.drag?.dragging ? null : this.cardIndexAt(x, y);
+    // Bewegung über die Toleranz bricht das Langdrücken sofort ab (nicht erst im nächsten Bild).
+    if (this.handPress) this.handPress = { ...this.handPress, press: advancePress(this.handPress.press, 0, x, y) };
     const drag = this.drag;
     if (!drag) return;
     drag.x = x;
@@ -456,12 +514,25 @@ export class MainScene extends Phaser.Scene {
       this.selected = null;
     }
     drag.dragging = true;
+    this.handPress = null;
   }
 
   private onPointerUp(x: number, y: number): void {
     this.slider = null;
+    const held = this.handPress;
+    this.handPress = null;
+    if (this.detail !== null) {
+      // Loslassen nach dem Langdrücken schließt nur die Ansicht: keine Karte wird gespielt oder gewählt.
+      this.closeDetail();
+      this.drag = null;
+      return;
+    }
     const drag = this.drag;
-    if (!drag) return;
+    if (!drag) {
+      // Gedrückte Karte ohne Ziehen (z. B. Upgrade): das Antippen gilt erst beim Loslassen.
+      if (held) this.handleTap(held.press.startX, held.press.startY);
+      return;
+    }
     this.drag = null;
     if (!drag.dragging) {
       // Kurzes Antippen ohne Ziehen: wie bisher behandeln.
@@ -885,6 +956,13 @@ export class MainScene extends Phaser.Scene {
     this.cardViews.forEach((view, slot) => {
       if (slot >= shown) view.hide();
     });
+    const detailId = this.detail === null ? undefined : human.hand[this.detail];
+    if (detailId !== undefined && state.phase === 'planning') {
+      const def = getCardDef(detailId);
+      this.detailView.update(def, human.energy >= def.cost, this.frameMs);
+    } else {
+      this.detailView.hide();
+    }
 
     const matching = cards.filter(({ def }) => isCardVisible(def.type, this.handFilter)).length;
     const filterButton = LAYOUT.filterButton;
