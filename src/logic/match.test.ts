@@ -49,6 +49,7 @@ import {
   TICK_SECONDS,
   towersAlive,
 } from './combat';
+import { ENERGY_PER_ROUND, EVENT_ENERGY_BONUS, INCOME_PER_FORTRESS, INCOME_PER_LANE, START_FORTRESSES, START_LANES } from './balance-config';
 import { deriveEventSeed, EARLY_RESPAWN_TICKS, pickRoundEvent, type RoundEventId, TOWER_SHIELD } from './round-events';
 import { isLaneBuyable, LANE_COUNT, MAX_FIELD_LEVEL } from './lanes';
 import { isSlotFree, validSlots } from './placement';
@@ -406,10 +407,7 @@ describe('Spielstart', () => {
   it('gibt beiden Spielern exakt START_HAND identische Karten und gleiche Energie', () => {
     const state = createMatch(42);
     expect(state.players[0].hand).toHaveLength(START_HAND);
-    expect(START_HAND).toBe(5);
-    expect(DRAW_PER_ROUND).toBe(3);
     expect(state.deck).toHaveLength(START_HAND + DRAW_PER_ROUND * (MAX_ROUNDS - 1));
-    expect(state.deck).toHaveLength(26);
     expect(state.players[1].hand).toEqual(state.players[0].hand);
     expect(state.players[0].energy).toBe(BASE_ENERGY);
     expect(state.players[1].energy).toBe(BASE_ENERGY);
@@ -456,8 +454,8 @@ describe('Runden und Ziehen', () => {
     state = setReady(setReady(state, 0), 1);
     state = advance(state, COMBAT_TICKS * TICK_MS);
     expect(state.round).toBe(2);
-    expect(state.players[0].hand).toHaveLength(8);
-    expect(state.players[1].hand).toHaveLength(8);
+    expect(state.players[0].hand).toHaveLength(START_HAND + DRAW_PER_ROUND);
+    expect(state.players[1].hand).toHaveLength(START_HAND + DRAW_PER_ROUND);
     expect(state.drawn).toBe(START_HAND + DRAW_PER_ROUND);
   });
 
@@ -473,15 +471,14 @@ describe('Runden und Ziehen', () => {
   });
 
   it('wächst das Einkommen je Runde um 1, ohne Deckel', () => {
-    expect([1, 2, 3, 4, 5, 6].map(energyForRound)).toEqual([3, 4, 5, 6, 7, 8]);
-    expect(energyForRound(100)).toBe(102);
+    expect([1, 2, 3, 4, 5, 6].map(energyForRound)).toEqual([0, 1, 2, 3, 4, 5].map((n) => BASE_ENERGY + n * ENERGY_PER_ROUND));
+    expect(energyForRound(100)).toBe(BASE_ENERGY + 99 * ENERGY_PER_ROUND);
   });
 
   it('legt MAX_ENERGY so, dass es das höchste Einkommen nicht abschneidet', () => {
-    // Letzte Runde, voll ausgebaut (Feldstufe und alle Lanes) plus Energieschub: 3 + 7 + 2 + 4 + 1.
-    expect(MAX_ENERGY).toBe(17);
+    // Letzte Runde, voll ausgebaut (Feldstufe und alle Lanes) plus Energieschub.
     const income = incomeForRound(MAX_ROUNDS, MAX_FIELD_LEVEL, LANE_COUNT);
-    expect(income + 1).toBe(MAX_ENERGY);
+    expect(income + EVENT_ENERGY_BONUS).toBe(MAX_ENERGY);
   });
 
   it('gibt in keiner Runde eines Matches mehr als MAX_ENERGY Energie', () => {
@@ -1461,25 +1458,29 @@ describe('Wirtschaft', () => {
       expect(boughtLaneCount(player)).toBe(1);
       expect(player.lines.map((line) => line.bought)).toEqual([true, false, false, false, false]);
       expect(player.lines.map((line) => line.towers.length)).toEqual([3, 0, 0, 0, 0]);
-      expect(player.energy).toBe(3);
+      expect(player.energy).toBe(BASE_ENERGY);
     }
   });
 
-  it('berechnet das Einkommen als 3 + (Runde − 1) + Festungen + Lanes', () => {
-    expect(incomeForRound(1, 1, 1)).toBe(3);
-    expect(incomeForRound(2, 1, 1)).toBe(4);
-    expect(incomeForRound(2, 2, 1)).toBe(5);
-    expect(incomeForRound(2, 2, 2)).toBe(6);
-    expect(incomeForRound(5, 3, 5)).toBe(3 + 4 + 2 + 4);
+  it('berechnet das Einkommen als BASE_ENERGY + (Runde − 1) + Festungen + Lanes', () => {
+    expect(incomeForRound(1, START_FORTRESSES, START_LANES)).toBe(BASE_ENERGY);
+    expect(incomeForRound(2, START_FORTRESSES, START_LANES)).toBe(BASE_ENERGY + ENERGY_PER_ROUND);
+    expect(incomeForRound(2, START_FORTRESSES + 1, START_LANES)).toBe(BASE_ENERGY + ENERGY_PER_ROUND + INCOME_PER_FORTRESS);
+    expect(incomeForRound(2, START_FORTRESSES + 1, START_LANES + 1)).toBe(
+      BASE_ENERGY + ENERGY_PER_ROUND + INCOME_PER_FORTRESS + INCOME_PER_LANE,
+    );
+    expect(incomeForRound(5, START_FORTRESSES + 2, START_LANES + 4)).toBe(
+      BASE_ENERGY + 4 * ENERGY_PER_ROUND + 2 * INCOME_PER_FORTRESS + 4 * INCOME_PER_LANE,
+    );
   });
 
   it('bringt ein Upgrade in Runde 1 ab Runde 2 mit +1 Einkommen', () => {
     const upgraded = upgradeField(createMatch(1), 0);
     if (!upgraded.ok) throw new Error(upgraded.reason);
-    expect(energyOf(upgraded.state)).toBe(3 - UPGRADE_COST);
+    expect(energyOf(upgraded.state)).toBe(BASE_ENERGY - UPGRADE_COST);
     const next = advance(setReady(setReady(upgraded.state, 0), 1), COMBAT_TICKS * TICK_MS);
     expect(next.round).toBe(2);
-    expect(energyOf(next, 0)).toBe(energyForRound(2) + 1);
+    expect(energyOf(next, 0)).toBe(energyForRound(2) + INCOME_PER_FORTRESS);
     expect(energyOf(next, 1)).toBe(energyForRound(2));
   });
 
@@ -1487,7 +1488,7 @@ describe('Wirtschaft', () => {
     const state = buyBoth(withHand(createMatch(1), [], MAX_ENERGY), 0);
     const next = advance(setReady(setReady(state, 0), 1), COMBAT_TICKS * TICK_MS);
     expect(energyOf(next, 0)).toBe(incomeForRound(2, 2, 3));
-    expect(energyOf(next, 0)).toBe(energyForRound(2) + 1 + 2);
+    expect(energyOf(next, 0)).toBe(energyForRound(2) + INCOME_PER_FORTRESS + 2 * INCOME_PER_LANE);
   });
 
   it('erlaubt das Upgrade in jeder Planungsphase bis zur höchsten Feldstufe, danach max-level', () => {
@@ -1578,16 +1579,17 @@ describe('Wirtschaft', () => {
     expect(drawCard(setReady(withHand(createMatch(1), [], 3), 0), 0)).toMatchObject({ ok: false, reason: 'already-ready' });
   });
 
-  it('erlaubt in Runde 1 mit den 3 Startenergie drei Stufe-1-Zauber', () => {
-    expect(getCardDef('tower-hp').cost).toBe(1);
-    expect(energyOf(createMatch(1))).toBe(3);
-    let state = withHand(createMatch(1), ['tower-hp', 'tower-hp', 'tower-hp'], 3);
-    for (let index = 0; index < 3; index += 1) {
+  it('erlaubt in Runde 1 mit der Startenergie so viele Stufe-1-Zauber, wie sie bezahlt', () => {
+    const cost = getCardDef('tower-hp').cost;
+    const count = Math.floor(BASE_ENERGY / cost);
+    expect(energyOf(createMatch(1))).toBe(BASE_ENERGY);
+    let state = withHand(createMatch(1), Array(count).fill('tower-hp'), BASE_ENERGY);
+    for (let index = 0; index < count; index += 1) {
       const result = playCard(state, 0, 0, 0);
       if (!result.ok) throw new Error(result.reason);
       state = result.state;
     }
-    expect(energyOf(state)).toBe(0);
+    expect(energyOf(state)).toBe(BASE_ENERGY - count * cost);
   });
 });
 

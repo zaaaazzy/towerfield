@@ -6,8 +6,10 @@
  *   0 Start (Reihe 0) · 1 Lvl 2 oben (−1) · 2 Lvl 2 unten (+1) · 3 Lvl 3 oben (−2) · 4 Lvl 3 unten (+2)
  */
 
-/** Höchste Ausbaustufe des Feldes (Lvl 3 = Start-Lane plus zwei Lanes pro Seite). */
-export const MAX_FIELD_LEVEL = 3;
+import { MAX_FIELD_LEVEL } from './balance-config';
+
+// Die Höchststufe (Lvl 3 = Start-Lane plus zwei Lanes pro Seite) steht in `balance-config.ts`.
+export { MAX_FIELD_LEVEL };
 
 interface LaneDef {
   /** Reihe im Feld von oben nach unten: 0 Start, negativ oberhalb, positiv unterhalb. */

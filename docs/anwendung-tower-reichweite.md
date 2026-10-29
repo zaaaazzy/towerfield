@@ -5,7 +5,7 @@ Regel steht im [Designkonzept](designkonzept.md).
 
 ## Die Regel
 
-`TOWER_RANGE` (`src/logic/combat.ts`) ist jetzt `20` (vorher `25`). Die Zielwahl des Towers blieb **unverändert**:
+`TOWER_RANGE` (`src/logic/balance-config.ts`, per Re-Export auch aus `combat.ts`) ist jetzt `20` (vorher `25`). Die Zielwahl des Towers blieb **unverändert**:
 
 ```ts
 LINE_LENGTH - other.position > TOWER_RANGE // Minion außerhalb: kein Ziel

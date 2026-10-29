@@ -2,7 +2,7 @@
 
 Diese Seite beschreibt die Regeln, die der Auftrag „Neues Wirtschaftskonzept mit Upgrade, Lane-Kauf und Einkommen“
 umsetzt. Energie ist die einzige Währung (das „Gold“ der Idee ist dieselbe Ressource). Alle Werte stehen als Konstanten
-in `src/logic/match.ts`.
+in `src/logic/balance-config.ts` (`match.ts` führt sie per Re-Export weiter).
 
 ## Regeln
 

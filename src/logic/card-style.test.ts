@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { CARD_BALANCE } from './balance-config';
 import { CARD_DEFS, type CardDef, type CardType, getCardDef } from './cards';
 import { CARD_ART_IDS, CARD_TYPE_STYLES, cardArtKey, cardStats, cardTypeStyle, describeCard } from './card-style';
 
@@ -56,9 +57,18 @@ describe('cardArtKey', () => {
 
 describe('cardStats', () => {
   it('zeigt Leben und Schaden aus der Definition, bei Upgrades mit Plus', () => {
-    expect(cardStats(getCardDef('summon-brute'))).toEqual({ hp: 80, damage: 12, bonus: false });
-    expect(cardStats(getCardDef('tower-hp'))).toEqual({ hp: 30, damage: 0, bonus: true });
-    expect(cardStats(getCardDef('minion-upgrade-all'))).toEqual({ hp: 5, damage: 1, bonus: true });
+    const { hp, damage } = CARD_BALANCE['summon-brute'];
+    expect(cardStats(getCardDef('summon-brute'))).toEqual({ hp, damage, bonus: false });
+    expect(cardStats(getCardDef('tower-hp'))).toEqual({
+      hp: CARD_BALANCE['tower-hp'].hp,
+      damage: CARD_BALANCE['tower-hp'].damage,
+      bonus: true,
+    });
+    expect(cardStats(getCardDef('minion-upgrade-all'))).toEqual({
+      hp: CARD_BALANCE['minion-upgrade-all'].hp,
+      damage: CARD_BALANCE['minion-upgrade-all'].damage,
+      bonus: true,
+    });
   });
 
   it('hat für die Line-Karte und die Spezialisierungen keine Werte', () => {
@@ -70,9 +80,10 @@ describe('cardStats', () => {
 
 describe('cardStats mit leeren Werten', () => {
   it('zeigt Werte, sobald Leben oder Schaden gesetzt ist, und nichts, wenn beides 0 ist', () => {
-    expect(cardStats(getCardDef('tower-damage'))).toEqual({ hp: 0, damage: 4, bonus: true });
+    const { hp, damage } = CARD_BALANCE['tower-damage'];
+    expect(cardStats(getCardDef('tower-damage'))).toEqual({ hp, damage, bonus: true });
     expect(cardStats({ ...getCardDef('tower-hp'), hp: 0, damage: 0 } as CardDef)).toBeNull();
-    expect(cardStats({ ...getCardDef('tower-hp'), hp: 0, damage: 4 } as CardDef)).toEqual({ hp: 0, damage: 4, bonus: true });
+    expect(cardStats({ ...getCardDef('tower-hp'), hp: 0, damage } as CardDef)).toEqual({ hp: 0, damage, bonus: true });
   });
 });
 

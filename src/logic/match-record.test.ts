@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { botPlan } from './bot';
 import { CARD_DEFS, getCardDef } from './cards';
-import { createMatch, MAX_ROUNDS, playCard, setReady } from './match';
+import { createMatch, DISCARD_ENERGY, MAX_ROUNDS, playCard, setReady, UPGRADE_COST } from './match';
 import {
   applyAction,
   appendAction,
@@ -60,14 +60,14 @@ describe('Aufzeichnung und Nachspielen', () => {
   it('zeichnet das Abwerfen des Bots mit und spielt es nach', () => {
     const state = createMatch(4);
     state.players[1].hand = ['buff-minion', 'summon-brute'];
-    state.players[1].energy = 1;
+    state.players[1].energy = UPGRADE_COST - DISCARD_ENERGY;
     const planned = botPlanRecorded(state, createRecord(4), 1);
-    // Nach dem Abwerfen hat der Bot 2 Energie und baut das Feld aus (Upgrade steht in der Priorität vorn).
+    // Nach dem Abwerfen reicht die Energie für das Upgrade; der Bot baut das Feld aus (Upgrade steht in der Priorität vorn).
     expect(planned.record.actions.map((a) => a.type)).toEqual(['discard', 'upgrade', 'ready']);
     expect(planned.record.actions[0]).toMatchObject({ type: 'discard', cardId: 'buff-minion', player: 1 });
     const first = applyAction(state, planned.record.actions[0]!);
     expect(first.ok).toBe(true);
-    expect(first.state.players[1].energy).toBe(2);
+    expect(first.state.players[1].energy).toBe(UPGRADE_COST);
   });
 
   it('wendet „abwerfen“ an und lehnt eine Karte ab, die nicht auf der Hand ist', () => {
@@ -76,7 +76,7 @@ describe('Aufzeichnung und Nachspielen', () => {
     const cardId = state.players[0].hand[0]!;
     const done = applyAction(state, { type: 'discard', round: 1, player: 0, cardId });
     expect(done.ok).toBe(true);
-    expect(done.state.players[0].energy).toBe(3);
+    expect(done.state.players[0].energy).toBe(2 + DISCARD_ENERGY);
     expect(done.state.players[0].hand).toHaveLength(state.players[0].hand.length - 1);
     expect(applyAction(state, { type: 'discard', round: 1, player: 0, cardId: 'lane-buff' })).toMatchObject({
       ok: false,
@@ -314,7 +314,7 @@ describe('encodeMatch / decodeMatch', () => {
       '7.r10',
       `V${RECORD_VERSION}.r10`,
       `${v}.x10`,
-      `${v}.r90`,
+      `${v}.r${MAX_ROUNDS + 1}0`,
       `${v}.r00`,
       `${v}.r12`,
       `${v}.r10-1`,

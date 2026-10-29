@@ -1,8 +1,10 @@
 /**
  * Kartendefinitionen und Deck-Reihenfolge. Ohne Phaser: reine Daten und Funktionen.
  * Alle Spieler nutzen dasselbe Deck, das einmal per Seed gemischt wird.
+ * Kosten, Werte und Kopienzahl je Karte stehen in `balance-config.ts` (`CARD_BALANCE`); hier nur Name, Typ und Ziel.
  */
-import { type Explosion, type LaneEffect, MINION_SPEED, type Specialization } from './combat';
+import { CARD_BALANCE, type CardBalance, type CardBalanceId } from './balance-config';
+import { type Explosion, type LaneEffect, type Specialization } from './combat';
 import { nextRandom } from './game-state';
 
 export type CardType =
@@ -32,93 +34,87 @@ export type CardDef =
   /** Lane-Karte: wirkt in der Runde auf alle Minions der Lane; liegt im Lane-Slot hinter den Towern (höchstens eine je Lane). */
   | (CardBase & { type: 'lane-card'; effect: LaneEffect });
 
+/** Werte-Tabelle als lose typierte Sicht: der Zugriff über die ID liefert immer einen Eintrag. */
+const BALANCE: Readonly<Record<CardBalanceId, CardBalance>> = CARD_BALANCE;
+
+/** Kosten der Karte. */
+function costOf(id: CardBalanceId): number {
+  return BALANCE[id].cost;
+}
+
+/** Kosten und Zuwachs (HP, Schaden) eines Upgrades. */
+function upgradeStats(id: CardBalanceId): { cost: number; hp: number; damage: number } {
+  const { cost, hp, damage } = BALANCE[id];
+  return { cost, hp: hp!, damage: damage! };
+}
+
+/** Kosten und Werte einer Beschwörung; `range` fehlt bei Nahkämpfern (Standard-Reichweite). */
+function summonStats(id: CardBalanceId): { cost: number; hp: number; damage: number; speed: number; range?: number } {
+  const { cost, hp, damage, speed, range } = BALANCE[id];
+  return { cost, hp: hp!, damage: damage!, speed: speed!, ...(range === undefined ? {} : { range }) };
+}
+
 export const CARD_DEFS: readonly CardDef[] = [
-  { id: 'summon-minion', name: 'Minion', type: 'summon', cost: 1, target: 'line', hp: 30, damage: 6, speed: MINION_SPEED },
-  { id: 'summon-brute', name: 'Brocken', type: 'summon', cost: 2, target: 'line', hp: 80, damage: 12, speed: 8 },
-  { id: 'summon-archer', name: 'Bogenschütze', type: 'summon', cost: 2, target: 'line', hp: 20, damage: 7, range: 14, speed: 10 },
-  { id: 'summon-healer', name: 'Heiler', type: 'summon', cost: 2, target: 'line', hp: 20, damage: 5, range: 10, speed: MINION_SPEED, role: 'healer' },
+  { id: 'summon-minion', name: 'Minion', type: 'summon', target: 'line', ...summonStats('summon-minion') },
+  { id: 'summon-brute', name: 'Brocken', type: 'summon', target: 'line', ...summonStats('summon-brute') },
+  { id: 'summon-archer', name: 'Bogenschütze', type: 'summon', target: 'line', ...summonStats('summon-archer') },
+  { id: 'summon-healer', name: 'Heiler', type: 'summon', target: 'line', ...summonStats('summon-healer'), role: 'healer' },
   {
     id: 'summon-destroyer',
     name: 'Zerstörer',
     type: 'summon',
-    cost: 2,
     target: 'line',
-    hp: 40,
-    damage: 8,
-    speed: 8,
+    ...summonStats('summon-destroyer'),
     role: 'destroyer',
-    explodes: { radius: 10, damage: 15 },
+    explodes: { ...BALANCE['summon-destroyer'].explosion! },
   },
-  { id: 'line-upgrade', name: 'Lane +1', type: 'line-upgrade', cost: 2, target: 'none' },
-  { id: 'tower-hp', name: 'Tower Leben', type: 'tower-upgrade', cost: 1, target: 'line', hp: 30, damage: 0 },
-  { id: 'tower-damage', name: 'Tower Schaden', type: 'tower-upgrade', cost: 2, target: 'line', hp: 0, damage: 4 },
-  { id: 'tower-lightning', name: 'Blitz-Turm', type: 'tower-specialize', cost: 2, target: 'line', path: 'lightning' },
-  { id: 'tower-shield', name: 'Schild-Turm', type: 'tower-specialize', cost: 2, target: 'line', path: 'shield' },
+  { id: 'line-upgrade', name: 'Lane +1', type: 'line-upgrade', cost: costOf('line-upgrade'), target: 'none' },
+  { id: 'tower-hp', name: 'Tower Leben', type: 'tower-upgrade', target: 'line', ...upgradeStats('tower-hp') },
+  { id: 'tower-damage', name: 'Tower Schaden', type: 'tower-upgrade', target: 'line', ...upgradeStats('tower-damage') },
+  { id: 'tower-lightning', name: 'Blitz-Turm', type: 'tower-specialize', cost: costOf('tower-lightning'), target: 'line', path: 'lightning' },
+  { id: 'tower-shield', name: 'Schild-Turm', type: 'tower-specialize', cost: costOf('tower-shield'), target: 'line', path: 'shield' },
   {
     id: 'minion-upgrade-line',
     name: 'Minions Line',
     type: 'minion-upgrade',
-    cost: 1,
     target: 'line',
-    hp: 10,
-    damage: 2,
+    ...upgradeStats('minion-upgrade-line'),
     scope: 'line',
   },
   {
     id: 'minion-upgrade-all',
     name: 'Minions alle',
     type: 'minion-upgrade',
-    cost: 3,
     target: 'none',
-    hp: 5,
-    damage: 1,
+    ...upgradeStats('minion-upgrade-all'),
     scope: 'all',
   },
   // Muss am Ende der Liste stehen: `match-record.ts` kodiert Karten über ihre Position.
-  { id: 'buff-minion', name: 'Minion stärken', type: 'minion-buff', cost: 2, target: 'minion' },
+  { id: 'buff-minion', name: 'Minion stärken', type: 'minion-buff', cost: costOf('buff-minion'), target: 'minion' },
   // Neu mit Version 6 (Turm-Slots): Beschwörungen, Lane-Karten und Upgrades, ebenfalls nur am Ende anfügen.
-  { id: 'summon-scout', name: 'Späher', type: 'summon', cost: 1, target: 'line', hp: 20, damage: 4, speed: 14 },
-  { id: 'summon-guard', name: 'Wächter', type: 'summon', cost: 3, target: 'line', hp: 120, damage: 12, speed: 6 },
-  { id: 'summon-mage', name: 'Magier', type: 'summon', cost: 3, target: 'line', hp: 25, damage: 12, range: 12, speed: 9 },
-  { id: 'lane-buff', name: 'Lane-Buff', type: 'lane-card', cost: 2, target: 'line', effect: 'buff' },
-  { id: 'lane-shield', name: 'Lane-Schild', type: 'lane-card', cost: 2, target: 'line', effect: 'shield' },
-  { id: 'tower-armor', name: 'Tower Panzer', type: 'tower-upgrade', cost: 2, target: 'line', hp: 60, damage: 0 },
+  { id: 'summon-scout', name: 'Späher', type: 'summon', target: 'line', ...summonStats('summon-scout') },
+  { id: 'summon-guard', name: 'Wächter', type: 'summon', target: 'line', ...summonStats('summon-guard') },
+  { id: 'summon-mage', name: 'Magier', type: 'summon', target: 'line', ...summonStats('summon-mage') },
+  { id: 'lane-buff', name: 'Lane-Buff', type: 'lane-card', cost: costOf('lane-buff'), target: 'line', effect: 'buff' },
+  { id: 'lane-shield', name: 'Lane-Schild', type: 'lane-card', cost: costOf('lane-shield'), target: 'line', effect: 'shield' },
+  { id: 'tower-armor', name: 'Tower Panzer', type: 'tower-upgrade', target: 'line', ...upgradeStats('tower-armor') },
   {
     id: 'minion-upgrade-elite',
     name: 'Elite-Drill',
     type: 'minion-upgrade',
-    cost: 2,
     target: 'line',
-    hp: 20,
-    damage: 4,
+    ...upgradeStats('minion-upgrade-elite'),
     scope: 'line',
   },
 ];
 
-/** Wie oft jede Karte in einem Durchgang des Decks vorkommt. */
-const COPIES: Readonly<Record<string, number>> = {
-  'summon-minion': 4,
-  'summon-brute': 2,
-  'summon-archer': 2,
-  'summon-healer': 1,
-  'summon-destroyer': 1,
-  // Das Upgrade ist eine Aktion (`upgradeField`), keine Karte im Deck mehr; die Kartendefinition bleibt für Synergien.
-  'line-upgrade': 0,
-  'tower-hp': 2,
-  'tower-damage': 1,
-  'tower-lightning': 1,
-  'tower-shield': 1,
-  'minion-upgrade-line': 2,
-  'minion-upgrade-all': 1,
-  'buff-minion': 1,
-  'summon-scout': 2,
-  'summon-guard': 1,
-  'summon-mage': 1,
-  'lane-buff': 1,
-  'lane-shield': 1,
-  'tower-armor': 1,
-  'minion-upgrade-elite': 1,
-};
+/**
+ * Wie oft jede Karte in einem Durchgang des Decks vorkommt (aus `CARD_BALANCE`). Das Linien-Upgrade hat 0 Kopien: Es
+ * ist eine Aktion (`upgradeField`), keine Karte im Deck mehr; die Kartendefinition bleibt für Synergien.
+ */
+const COPIES: Readonly<Record<string, number>> = Object.fromEntries(
+  Object.entries(CARD_BALANCE).map(([id, balance]) => [id, balance.copies]),
+);
 
 /** Karten je Durchgang des Decks (Summe von `COPIES`). */
 export const DECK_CYCLE = Object.values(COPIES).reduce((sum, count) => sum + count, 0);

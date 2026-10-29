@@ -583,7 +583,6 @@ describe('Tower-Spezialisierungen', () => {
       const players = setup('lightning');
       combatTick(players, 1);
       const hp = players[0].minions.map((m) => m.hp);
-      expect(TOWER_RANGE).toBe(20);
       expect(hp[0]).toBeCloseTo(100 - 8 * LIGHTNING_FACTOR, 9);
       expect(hp[1]).toBeCloseTo(100 - 8 * LIGHTNING_FACTOR, 9);
       expect(hp[2]).toBeCloseTo(100 - 8 * LIGHTNING_FACTOR, 9);

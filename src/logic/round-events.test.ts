@@ -22,10 +22,11 @@ function toRound(seed: number, round: number): MatchState {
 }
 
 describe('isEventRound', () => {
-  it('trifft nur die Runden 3 und 6 von 1 bis MAX_ROUNDS', () => {
+  it('trifft nur jede EVENT_INTERVAL-te Runde von 1 bis MAX_ROUNDS', () => {
     const rounds = Array.from({ length: MAX_ROUNDS }, (_, index) => index + 1);
-    expect(rounds.filter(isEventRound)).toEqual([3, 6]);
-    expect(EVENT_INTERVAL).toBe(3);
+    const expected = rounds.filter((round) => round % EVENT_INTERVAL === 0);
+    expect(rounds.filter(isEventRound)).toEqual(expected);
+    expect(expected.length).toBeGreaterThan(0);
   });
 
   it('lehnt Runde 0, negative und gebrochene Runden ab', () => {
