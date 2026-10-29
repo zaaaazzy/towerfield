@@ -5,6 +5,30 @@
  * zwischen den Runden und über Seeds: die Deck-Reihenfolge und die Runden-Ereignisse (`round-events.ts`); der Kampf
  * bleibt zufallsfrei.
  */
+import {
+  BASE_ENERGY,
+  COMBAT_TICKS,
+  DISCARD_ENERGY,
+  DRAW_COST,
+  DRAW_PER_ROUND,
+  ENERGY_PER_ROUND,
+  EVENT_ENERGY_BONUS,
+  HAND_LIMIT,
+  INCOME_PER_FORTRESS,
+  INCOME_PER_LANE,
+  LANE_COST,
+  MAX_ENERGY,
+  MAX_FIELD_LEVEL,
+  MAX_ROUNDS,
+  MOVE_COST,
+  SPECIALIZE_MIN_LEVEL,
+  START_FORTRESSES,
+  START_HAND,
+  START_LANES,
+  TOWER_DAMAGE,
+  TOWER_HP,
+  UPGRADE_COST,
+} from './balance-config';
 import { applyMinionBuff } from './buff';
 import { buildDeck, getCardDef, summonCount } from './cards';
 import {
@@ -25,61 +49,39 @@ import { createStats, type MatchStats, recordDamage, recordMove, recordSummon, r
 import {
   deriveEventSeed,
   EARLY_RESPAWN_TICKS,
-  EVENT_ENERGY_BONUS,
   pickRoundEvent,
   type RoundEventId,
   TOWER_SHIELD,
 } from './round-events';
-import { LANE_COUNT, laneTowerOffsets, laneUnlockLevel, MAX_FIELD_LEVEL } from './lanes';
+import { LANE_COUNT, laneTowerOffsets, laneUnlockLevel } from './lanes';
 import { firstFreeSlot, freeSlots, isSlotFree, isValidSlot, slotPosition, validSlots } from './placement';
 import { type ActiveSynergy, activeSynergies, type PlayedCard, synergyBonus } from './synergies';
 
 /** Zahl der Lanes des voll ausgebauten Feldes (Lvl 3); `PlayerState.lines` hat immer so viele Einträge. */
 export const LINE_COUNT = LANE_COUNT;
-export const START_HAND = 5;
-export const DRAW_PER_ROUND = 3;
-/** Handlimit (bestätigt, siehe docs/designkonzept.md): Karten über dem Limit verfallen am Ende der Hand. */
-export const HAND_LIMIT = 10;
-export const MAX_ROUNDS = 8;
-
-// Wirtschaft (siehe docs/anwendung-wirtschaft.md): Energie ist die einzige Währung. Das Rundeneinkommen setzt sich
-// aus diesen Konstanten zusammen; zum Anpassen der Zählweise genügt es, sie oder die Start-Werte zu ändern.
-/** Einkommen in Runde 1 ohne Ausbau; die Start-Festung und die Start-Lane stecken schon darin. */
-export const BASE_ENERGY = 3;
-/** Einkommen, das mit jeder Runde dazukommt. */
-export const ENERGY_PER_ROUND = 1;
-/** Einkommen je Festung (Feldstufe) und je gekaufter Lane über den Start-Wert hinaus. */
-export const INCOME_PER_FORTRESS = 1;
-export const INCOME_PER_LANE = 1;
-/** Festungen (= Feldstufe) und Lanes zu Spielbeginn; sie bringen kein Zusatzeinkommen. */
-export const START_FORTRESSES = 1;
-export const START_LANES = 1;
-/** Energie für ein Upgrade der Feldstufe (bringt ab der nächsten Runde `INCOME_PER_FORTRESS` mehr). */
-export const UPGRADE_COST = 2;
-/** Energie für den Kauf einer Lane (ab der Feldstufe, die `laneUnlockLevel` verlangt). */
-export const LANE_COST = 5;
-/** Energie für das Ziehen einer zusätzlichen Karte. */
-export const DRAW_COST = 1;
-/**
- * Höchstes Rundeneinkommen (letzte Runde, voll ausgebautes Feld) plus Energieschub-Ereignis. Die Obergrenze liegt
- * genau dort, damit sie das Einkommen nie abschneidet; sie begrenzt nur die Energie aus dem Abwerfen.
- */
-export const MAX_ENERGY =
-  BASE_ENERGY +
-  (MAX_ROUNDS - 1) * ENERGY_PER_ROUND +
-  (MAX_FIELD_LEVEL - START_FORTRESSES) * INCOME_PER_FORTRESS +
-  (LANE_COUNT - START_LANES) * INCOME_PER_LANE +
-  EVENT_ENERGY_BONUS;
-/** Energie, die das Verschieben eines Minions auf einen anderen Turm-Slot kostet. */
-export const MOVE_COST = 1;
-/** Energie, die das Abwerfen einer Handkarte bringt; über `MAX_ENERGY` verfällt sie. */
-export const DISCARD_ENERGY = 1;
-export const TOWER_HP = 100;
-export const TOWER_DAMAGE = 8;
-/** Mindest-Level einer Lane (Ausbaustufe, ab der sie frei ist, siehe `laneUnlockLevel`) für eine Tower-Spezialisierung. */
-export const SPECIALIZE_MIN_LEVEL = 2;
-/** Dauer der Kampfphase in Ticks (20 Sekunden). */
-export const COMBAT_TICKS = 400;
+// Basiswerte stehen zentral in `balance-config.ts`; der Re-Export hält die bestehenden Importe aus `match` gültig.
+export {
+  BASE_ENERGY,
+  COMBAT_TICKS,
+  DISCARD_ENERGY,
+  DRAW_COST,
+  DRAW_PER_ROUND,
+  ENERGY_PER_ROUND,
+  HAND_LIMIT,
+  INCOME_PER_FORTRESS,
+  INCOME_PER_LANE,
+  LANE_COST,
+  MAX_ENERGY,
+  MAX_ROUNDS,
+  MOVE_COST,
+  SPECIALIZE_MIN_LEVEL,
+  START_FORTRESSES,
+  START_HAND,
+  START_LANES,
+  TOWER_DAMAGE,
+  TOWER_HP,
+  UPGRADE_COST,
+};
 
 /** Nur dieser Spieler (der eigene) wird in `MatchState.stats` erfasst. */
 const STATS_PLAYER: PlayerIndex = 0;

@@ -3,29 +3,31 @@
  * Der Schaden wird als Rate pro Sekunde angegeben und je Tick mit der Tick-Dauer verrechnet; beide Seiten werden
  * aus demselben Zustand berechnet und gleichzeitig angewendet, damit die Spielerreihenfolge nichts ändert.
  */
+import {
+  LANE_BUFF_FACTOR,
+  LANE_SHIELD_FACTOR,
+  LIGHTNING_FACTOR,
+  LINE_LENGTH,
+  MINION_RANGE,
+  MINION_SPEED,
+  SHIELD_REFLECT,
+  TICK_MS,
+  TOWER_RANGE,
+} from './balance-config';
 
-/**
- * Länge einer Lane in Einheiten. Die Lane läuft waagrecht: Position 0 liegt am eigenen (linken) Ende, `LINE_LENGTH`
- * am gegnerischen (rechten). Jeder Spieler zählt vom eigenen Ende aus.
- */
-export const LINE_LENGTH = 100;
-/** Feste Schrittweite der Simulation, unabhängig von der Bildwiederholrate. */
-export const TICK_MS = 50;
+// Die Basiswerte stehen zentral in `balance-config.ts`; der Re-Export hält die bestehenden Importe aus `combat` gültig.
+export {
+  LANE_BUFF_FACTOR,
+  LANE_SHIELD_FACTOR,
+  LIGHTNING_FACTOR,
+  LINE_LENGTH,
+  MINION_RANGE,
+  MINION_SPEED,
+  SHIELD_REFLECT,
+  TICK_MS,
+  TOWER_RANGE,
+};
 export const TICK_SECONDS = TICK_MS / 1000;
-/** Standard-Reichweite (Nahkämpfer); die Simulation nutzt `Minion.range`. */
-export const MINION_RANGE = 4;
-/** Standard-Tempo (Minions ohne eigene Rolle); die Simulation nutzt `Minion.speed`. */
-export const MINION_SPEED = 10;
-export const TOWER_RANGE = 20;
-/** Blitz-Turm: Anteil des Tower-Schadens, den jedes getroffene Minion erleidet (er trifft dafür alle in Reichweite). */
-export const LIGHTNING_FACTOR = 0.6;
-/** Schild-Turm: Anteil des Schadens, den ein Minion dem Tower zufügt und der als Rückwurf auf das Minion fällt. */
-export const SHIELD_REFLECT = 0.5;
-
-/** Lane-Buff: Faktor auf den Schaden der eigenen Minions der Lane. */
-export const LANE_BUFF_FACTOR = 1.25;
-/** Lane-Schild: Faktor auf den Schaden, den die eigenen Minions der Lane erleiden. */
-export const LANE_SHIELD_FACTOR = 0.7;
 
 /** Wirkung einer Lane-Karte auf alle Minions einer Lane (nur für die laufende Runde). */
 export type LaneEffect = 'buff' | 'shield';

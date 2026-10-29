@@ -18,10 +18,52 @@ Karten (Hochformat, Touch, `Scale.FIT`). Aktuell spielt man lokal gegen einen de
 - Sieg: alle drei gegnerischen Tower zerstört, oder nach der Rundengrenze (8) mehr Tower-Lebenspunkte. Gleichstand =
   Unentschieden.
 
-Basiswerte (in `src/logic/match.ts` und `combat.ts`, nur Startwerte, kein Balancing): `HAND_LIMIT = 10`
-(bestätigt, greift erst in Runde 3: 5 + 3 = 8, dann 11; überzählige Karten verfallen am Ende der Hand; es gilt die
-Reihenfolge der Ankunft), `MAX_ROUNDS = 8`,
-Energie 3 + 1 pro Runde (max. 8), Feld-Höchststufe 3, Kapazität je Lane 2 + Stufe, Tower 100 HP / 8 Schaden.
+### Basiswerte
+
+Alle Basiswerte stehen in `src/logic/balance-config.ts` (nur Startwerte, kein Balancing); `match.ts` und `combat.ts`
+führen die Namen per Re-Export weiter. Die Tabelle gibt den Stand der Konfiguration wieder, `balance-config.test.ts`
+vergleicht sie Zeile für Zeile mit den Konstanten. Die Werte je Karte (Kosten, HP, Schaden, Kopien) stehen als Tabelle
+`CARD_BALANCE` in derselben Datei.
+
+| Wert | Konstante | Zahl |
+|---|---|---|
+| Startkarten in Runde 1 | `START_HAND` | 5 |
+| Neue Karten ab Runde 2 | `DRAW_PER_ROUND` | 3 |
+| Handlimit | `HAND_LIMIT` | 10 |
+| Rundengrenze | `MAX_ROUNDS` | 8 |
+| Kampfphase in Ticks | `COMBAT_TICKS` | 400 |
+| Energie in Runde 1 | `BASE_ENERGY` | 3 |
+| Energie mehr je Runde | `ENERGY_PER_ROUND` | 1 |
+| Einkommen je Festung über Start | `INCOME_PER_FORTRESS` | 1 |
+| Einkommen je Lane über Start | `INCOME_PER_LANE` | 1 |
+| Festungen zu Spielbeginn | `START_FORTRESSES` | 1 |
+| Lanes zu Spielbeginn | `START_LANES` | 1 |
+| Kosten Feld-Upgrade | `UPGRADE_COST` | 2 |
+| Kosten Lane-Kauf | `LANE_COST` | 5 |
+| Kosten Karte ziehen | `DRAW_COST` | 1 |
+| Kosten Minion verschieben | `MOVE_COST` | 1 |
+| Energie fürs Abwerfen | `DISCARD_ENERGY` | 1 |
+| Bonus Energieschub | `EVENT_ENERGY_BONUS` | 1 |
+| Feld-Höchststufe | `MAX_FIELD_LEVEL` | 3 |
+| Lanes des vollen Feldes | `FIELD_LANE_COUNT` | 5 |
+| Mindest-Level Spezialisierung | `SPECIALIZE_MIN_LEVEL` | 2 |
+| Energie-Obergrenze (abgeleitet) | `MAX_ENERGY` | 17 |
+| Tower-HP | `TOWER_HP` | 100 |
+| Tower-Schaden | `TOWER_DAMAGE` | 8 |
+| Tower-Reichweite | `TOWER_RANGE` | 20 |
+| Blitz-Turm: Schadensanteil | `LIGHTNING_FACTOR` | 0.6 |
+| Schild-Turm: Rückwurf | `SHIELD_REFLECT` | 0.5 |
+| Länge einer Lane | `LINE_LENGTH` | 100 |
+| Tick-Dauer in ms | `TICK_MS` | 50 |
+| Lane-Buff: Schadensfaktor | `LANE_BUFF_FACTOR` | 1.25 |
+| Lane-Schild: Schadensfaktor | `LANE_SHIELD_FACTOR` | 0.7 |
+| Minion-HP (Standard) | `MINION_HP` | 30 |
+| Minion-Schaden (Standard) | `MINION_DAMAGE` | 6 |
+| Minion-Reichweite (Standard) | `MINION_RANGE` | 4 |
+| Minion-Tempo (Standard) | `MINION_SPEED` | 10 |
+
+Das Handlimit (bestätigt) greift erst in Runde 3: 5 + 3 = 8, dann 11; überzählige Karten verfallen am Ende der Hand, es
+gilt die Reihenfolge der Ankunft. Die Slots je Lane ergeben sich aus den lebenden Towern (zwei je Tower, `laneSlotCounts`).
 
 Das verbindliche Designkonzept (Karten, Minions, Slot-Platzierung, Iso-Karte, Mobile-Layout, Folgeaufträge) steht in
 [`docs/designkonzept.md`](docs/designkonzept.md). Die Anwendung der Iso-Umrechnung, der Kamera-Begrenzung und der
@@ -110,8 +152,9 @@ Der Smoke-Test braucht Chromium für Playwright: `npx playwright install chromiu
 src/
   logic/       Spiellogik ohne Phaser – mit Unit-Tests daneben (*.test.ts)
     cards.ts   Kartendefinitionen, Deck-Reihenfolge per Seed
-    match.ts   Zustand, Runden, Hand, Energie, Karten ausspielen, Siegbedingung
-    combat.ts  Minion-Bewegung und Tower-Schaden (feste Ticks aus delta)
+    balance-config.ts  alle Basiswerte an einer Stelle (von match.ts, combat.ts, cards.ts und lanes.ts gelesen)
+    match.ts   Zustand, Runden, Hand, Energie, Karten ausspielen, Siegbedingung (Basiswerte aus balance-config.ts)
+    combat.ts  Minion-Bewegung und Tower-Schaden (feste Ticks aus delta; Basiswerte aus balance-config.ts)
     bot.ts     deterministischer Gegner (Kartenreihenfolge optional einstellbar)
     balance-sim.ts  simulierte Bot-Matches und Kennzahlen (Dev-Szene)
     game-state.ts  nextRandom (Seed-Zufall); der alte „Sterne“-Code darin ist ungenutzt
