@@ -3,6 +3,7 @@
  * Alle Szenen nehmen Farben und Schriften nur von hier. Die Kartentyp-Farben stehen in `logic/card-style.ts`.
  */
 import Phaser from 'phaser';
+import type { LightStops } from '../logic/ambience';
 
 /** Palette: dunkles Fantasy-Blau/Violett, Gold- und Bronze-Akzente, kräftige Teamfarben. */
 export const PALETTE = {
@@ -36,6 +37,24 @@ export const PALETTE = {
   white: 0xffffff,
   black: 0x000000,
 } as const;
+
+/** Licht-Tokens der Abenddämmerung-Schicht (siehe `scenes/ambience-layer.ts`, Werte pro Runde in `logic/ambience.ts`). */
+export const LIGHT = {
+  eveningGold: 0xf2b84b,
+  duskViolet: 0x5b3a8e,
+  nightBlue: 0x0d1536,
+  torchOrange: 0xff8a2b,
+  fogGrey: 0xa9aec4,
+  fireflyYellow: 0xe8ff7a,
+} as const;
+
+/** Farbstützpunkte für `ambienceForRound`. */
+export const LIGHT_STOPS: LightStops = {
+  gold: LIGHT.eveningGold,
+  dusk: LIGHT.duskViolet,
+  night: LIGHT.nightBlue,
+  torch: LIGHT.torchOrange,
+};
 
 /** Seitenhintergrund hinter dem Canvas (gleich `PALETTE.bgDeep`, auch in `index.html`). */
 export const PAGE_BACKGROUND = '#0b0820';
