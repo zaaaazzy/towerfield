@@ -33,6 +33,7 @@ import {
   slotProximity,
   snapTarget,
 } from '../logic/placement';
+import { AmbienceLayer } from './ambience-layer';
 import { CardView } from './card-view';
 import { Effects, type Locator } from './effects';
 import {
@@ -68,6 +69,9 @@ export const BACKDROP_FIELD = {
   pathHalfHeight: FIELD.pathHalfHeight,
   handTop: 440,
 };
+
+/** Fläche der Glühwürmchen: das Spielfeld oberhalb der Hand; auch von der Replay-Szene genutzt. */
+export const AMBIENCE_BOUNDS = { width: VIEW.width, height: BACKDROP_FIELD.handTop };
 
 /** Wie Effekte Ereignisse auf Bildschirmpunkte abbilden; auch von der Replay-Szene genutzt. */
 export const FX_LOCATOR: Locator = {
@@ -161,6 +165,7 @@ export class MainScene extends Phaser.Scene {
   private graphics!: Phaser.GameObjects.Graphics;
   private pool!: LabelPool;
   private effects!: Effects;
+  private ambience!: AmbienceLayer;
   private audio!: AudioLayer;
   /** Regler, der gerade gezogen wird (nur Eingabezustand). */
   private slider: 'music' | 'effects' | null = null;
@@ -239,6 +244,7 @@ export class MainScene extends Phaser.Scene {
     this.fxState = this.state;
     this.minionAnim = newMinionAnim();
     addBackdrop(this, VIEW.width, VIEW.height, BACKDROP_FIELD);
+    this.ambience = new AmbienceLayer(this, this.state.seed, this.state.round, AMBIENCE_BOUNDS, VIEW);
     this.pool = new LabelPool(this);
     this.effects = new Effects(this, FX_LOCATOR);
     this.audio = new AudioLayer(this, this.state.seed);
@@ -285,6 +291,8 @@ export class MainScene extends Phaser.Scene {
     this.updateLifts(deltaMs);
     this.updateDrag(deltaMs);
     this.updateEffects(deltaMs);
+    this.ambience.setRound(this.state.round);
+    this.ambience.update(deltaMs);
     this.render();
   }
 
