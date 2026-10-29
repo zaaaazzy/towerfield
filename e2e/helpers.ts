@@ -233,6 +233,40 @@ export async function tapCard(page: Page, index: number): Promise<void> {
   await tap(page, point.x, point.y);
 }
 export const tapLine = (page: Page, line: number) => tap(page, LANE_TAP_X, LANE_Y[line]!);
+
+/**
+ * Zieht den eigenen Minion `minionId` auf den Punkt `to`. Der Startpunkt kommt aus dem Szenenzustand (`readState`,
+ * `minionPoint`). Nach dem ersten Move wartet die Hilfe, bis die Szene das Ziehen zeigt (grüne Punkte), erst dann
+ * geht es zum Ziel und wird losgelassen. Das Ergebnis prüft der Aufrufer mit `expect.poll` auf den Zustand.
+ */
+export async function dragMinion(page: Page, minionId: number, to: Point): Promise<void> {
+  const minion = (await readState(page)).players[0].minions.find((m) => m.id === minionId);
+  if (!minion) throw new Error(`Minion ${minionId} steht nicht im Zustand`);
+  const from = minionPoint(minion);
+  await pointerDown(page, from);
+  await pointerMove(page, { x: from.x + DRAG_THRESHOLD * 2, y: from.y });
+  await expect.poll(async () => (await readDots(page)).length, { message: 'Die Szene hat das Ziehen nicht begonnen' }).toBeGreaterThan(0);
+  await pointerMove(page, to);
+  await pointerUp(page);
+}
+
+/**
+ * Spielt die Spezialisierungskarte `tower-<kind>` auf den Tower der Lane `line` (Karte per `setHand` bereitgelegt,
+ * dann per Tippen auf Karte und Lane) und wartet per `expect.poll`, bis der Zustand den Tower so spezialisiert zeigt.
+ * Die Lane muss freigeschaltet sein (`unlockField`) und einen Tower tragen.
+ */
+export async function specializeTower(page: Page, line: number, kind: 'lightning' | 'shield'): Promise<void> {
+  const cardId = `tower-${kind}`;
+  const me = (await readState(page)).players[0];
+  await setHand(page, [cardId, ...me.hand], Math.max(me.energy, getCardDef(cardId).cost));
+  await expect.poll(async () => (await readState(page)).players[0].hand[0]).toBe(cardId);
+  await tapCard(page, 0);
+  await expect.poll(() => readSelected(page)).toBe(0);
+  await tapLine(page, line);
+  await expect
+    .poll(async () => (await readState(page)).players[0].lines[line]!.towers.map((tower) => tower.specialization))
+    .toContain(kind);
+}
 export const tapReady = (page: Page) => tap(page, READY_BUTTON.x, READY_BUTTON.y);
 
 /** Kopie des aktuellen Spielzustands (aus `scene.current`, nicht aus Pixeln). */

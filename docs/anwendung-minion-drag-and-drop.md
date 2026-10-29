@@ -96,10 +96,10 @@ if (target) {
 
 ## Worauf zu achten ist
 
-- **Der Drag-Browsertest wurde im Testlauf übersprungen.** Er startet nur, wenn die Starthand zufällig einen Minion
-  enthält (`test.skip` sonst). Das Ziehen ist deshalb nicht per Browser abgesichert. Abhilfe: fester Seed oder gezielt
-  gesetzte Hand. Die Prüfung nach „Bereit“ (`line` ungleich 2) ist schwach; besser ist ein Vergleich mit Line und
-  Position vor dem Drag. Die Testkoordinaten (400, 310) sind fest eingetragen.
+- **Der Drag-Browsertest ist abgesichert.** Die Tests „Drag: …“ in `gameplay.spec.ts` laufen ohne `skip` mit festem
+  Seed (`openGame(page, SEED)`). `dragMinion` (`e2e/helpers.ts`) liest den Startpunkt aus dem Szenenzustand, wartet
+  per `expect.poll`, bis die Szene das Ziehen zeigt, und das Ergebnis (Line, Slot) wird per `expect.poll` geprüft.
+  Feste Pixelkoordinaten gibt es dort nicht mehr.
 - **Ein Mensch sollte Ziehen mit Maus und Touch einmal von Hand prüfen**; echtes Touch-Verhalten auf einem Gerät ist
   nicht automatisch getestet.
 - `pointermove` und `pointerup` unterscheiden nicht nach Pointer-Id. Ein zweiter Finger kann einen laufenden Drag

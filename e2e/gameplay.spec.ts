@@ -28,6 +28,7 @@ import {
   DRAG_THRESHOLD,
   drag,
   dragCard,
+  dragMinion,
   fastForwardCombat,
   hasVisibleText,
   laneSlot,
@@ -43,6 +44,7 @@ import {
   sampleCombat,
   setHand,
   slotPoint,
+  specializeTower,
   tap,
   UPGRADE_TAP,
   DRAW_TAP,
@@ -177,27 +179,29 @@ const enemyMinion = (id: number, position: number, damage = 10): Minion => ({
 });
 
 /**
- * Lane 1 freischalten, einen Tower setzen und `cardId` per Tippen auf Karte und Lane ausspielen. Prüft die Energie,
- * der Gegner ohne Karten und Energie plant nichts. Danach läuft die Kampfphase.
+ * Lane 1 freischalten, einen Tower setzen und ihn mit `specializeTower` spezialisieren. Prüft die Energie, der Gegner
+ * ohne Karten und Energie plant nichts. Danach läuft die Kampfphase.
  */
-async function playSpecializationAndFight(page: Page, cardId: string): Promise<void> {
+async function playSpecializationAndFight(page: Page, kind: 'lightning' | 'shield'): Promise<void> {
   await unlockField(page, 2);
-  await page.evaluate((id) => {
+  // Eine Runde endet, sobald kein Minion lebt: ein Platzhalter hält sie offen, bis `sampleCombat` die Messminions setzt.
+  await page.evaluate((placeholder) => {
     const scene = window.game!.scene.getScene('main') as unknown as {
-      state: { players: { hand: string[]; lines: { towers: object[] }[]; energy: number }[] };
+      state: { players: { lines: { towers: object[] }[]; hand: string[]; energy: number; minions: object[] }[] };
     };
     const [me, bot] = scene.state.players as [(typeof scene.state.players)[0], (typeof scene.state.players)[0]];
-    me.hand.unshift(id);
     me.lines[1]!.towers = [{ offset: 0, hp: 1000, maxHp: 1000, damage: 10 }];
     bot.hand = [];
     bot.energy = 0;
-  }, cardId);
-  const before = await readState(page);
+    bot.minions = [placeholder];
+  }, enemyMinion(9000, 50));
 
-  await tapCard(page, 0);
-  await tapLine(page, 1);
-  await expect.poll(async () => (await readState(page)).players[0].lines[1]!.towers[0]?.specialization).toBeDefined();
-  expect((await readState(page)).players[0].energy).toBe(before.players[0].energy - getCardDef(cardId).cost);
+  const before = (await readState(page)).players[0];
+  await specializeTower(page, 1, kind);
+  const played = (await readState(page)).players[0];
+  expect(played.lines[1]!.towers[0]?.specialization).toBe(kind);
+  expect(played.energy).toBe(Math.max(before.energy, getCardDef(`tower-${kind}`).cost) - getCardDef(`tower-${kind}`).cost);
+  expect(played.hand).toEqual(before.hand);
 
   await startCombat(page);
 }
@@ -218,7 +222,10 @@ test('Blitz-Turm: nach dem Ausspielen per Tippen nehmen mehrere gegnerische Mini
 }) => {
   const errors = collectErrors(page);
   await openGame(page);
-  await playSpecializationAndFight(page, 'tower-lightning');
+  await playSpecializationAndFight(page, 'lightning');
+  await expect
+    .poll(async () => (await readState(page)).players[0].lines[1]!.towers[0]?.specialization)
+    .toBe('lightning');
 
   // Beide Minions stehen in TOWER_RANGE (Abstand 15 und 20), sie laufen im Messfenster nur näher heran.
   const { before, after } = await sampleCombat(page, [enemyMinion(9001, 85), enemyMinion(9002, 80)], DUEL_TICKS);
@@ -245,7 +252,10 @@ test('Schild-Turm: nach dem Ausspielen per Tippen erleidet der angreifende Minio
 }) => {
   const errors = collectErrors(page);
   await openGame(page);
-  await playSpecializationAndFight(page, 'tower-shield');
+  await playSpecializationAndFight(page, 'shield');
+  await expect
+    .poll(async () => (await readState(page)).players[0].lines[1]!.towers[0]?.specialization)
+    .toBe('shield');
 
   // Der Minion steht in seiner Reichweite zum Tower und greift ihn an, ohne sich zu bewegen.
   const attacker = enemyMinion(9001, 96);
@@ -526,7 +536,7 @@ test('Drag: ein Minion auf einen freien Turm-Slot einer anderen Lane gezogen kos
   const placed = await summonOn(page, 0);
   const before = await readState(page);
 
-  await drag(page, minionPoint(placed), slotPoint(1, 1));
+  await dragMinion(page, placed.id, slotPoint(1, 1));
   await expect.poll(async () => minionById(await readState(page), placed.id)?.line).toBe(1);
 
   const after = await readState(page);
@@ -548,7 +558,7 @@ test('Drag: ein Minion auf einen anderen Turm-Slot derselben Lane gezogen änder
   const before = await readState(page);
   expect(placed.slot).toBe(0);
 
-  await drag(page, minionPoint(placed), slotPoint(0, 3));
+  await dragMinion(page, placed.id, slotPoint(0, 3));
   await expect.poll(async () => minionById(await readState(page), placed.id)?.slot).toBe(3);
 
   const after = await readState(page);
