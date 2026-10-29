@@ -39,10 +39,10 @@ Szene bleiben, die bestehenden E2E-Tests mussten nicht angepasst werden. `e2e/gr
 - Die Karten sind klein (66×62 px), der Beschreibungstext hat etwa 6,5 px und ist bewusst auf zwei kurze Zeilen gekürzt.
   Die Lesbarkeit auf echten Geräten ist nicht per Screenshot geprüft.
 - Schriften sind Systemschriften mit Fallback, kein Webfont; das Spiel sieht auch offline gleich aus.
-- Es gibt keine Fremdassets, `public/assets/` bleibt leer; Texturen entstehen im Code. Neue Dateien müssten in
-  `grafik-stil.md` mit Lizenz eingetragen werden.
-- Offene, kosmetische Punkte aus dem Review: einzelne Farben und Maße in `card-view.ts` (z. B. `0x3a3068` fürs Textfeld)
-  stehen noch im Code statt in `theme.ts`; der Energie-Kristall in `main-scene.ts` ist mit Pixelkoordinaten verdrahtet.
+- Texturen entstehen im Code; Dateien unter `public/assets/` (Karten-SVGs, Audio) sind mit offener Quelle und Lizenz
+  in `grafik-stil.md` verzeichnet.
+- Erledigt (Review-Punkte): feste Farben aus `card-view.ts`, `field-view.ts` und `main-scene.ts` liegen als Rollen-Tokens
+  in `theme.ts`; der Energie-Kristall wird von `logic/energy-layout.ts` berechnet.
 
 ## Prüfung
 
