@@ -19,10 +19,22 @@ Dieses Projekt ist ein Browser-Spiel mit Phaser 3, TypeScript und Vite.
 ## Tests
 
 - Jede neue Regel bekommt einen Unit-Test neben der Datei (`src/logic/<name>.test.ts`).
-- Vor Abgabe neuer Regeln `npm run test:coverage` ausführen und Lücken in `src/logic/` schliessen.
+- Vor Abgabe neuer Regeln `npm run test:coverage` ausführen. Der Befehl prüft selbst die Grenzen aus `vite.config.ts`
+  (`test.coverage.thresholds`: Zeilen 99,5 %, Zweige 99 %, Funktionen 100 %, Anweisungen 99,5 %). Ein roter Lauf
+  (Exit-Code 1, die verletzte Metrik steht in der Ausgabe) blockiert die Abgabe: Lücken mit Tests in
+  `src/logic/*.test.ts` schliessen, die Grenzen nicht senken. `npm test` misst keine Abdeckung.
+- Maschinenlesbare Werte stehen nach dem Lauf in `coverage/coverage-summary.json` (`lines`, `branches`, `functions`,
+  `statements`).
 - `npm run build` (Typprüfung + Build), `npm test` und `npm run test:smoke` müssen grün sein.
-- Testbefehle je Dateityp: `src/**/*.test.ts` laufen mit `npx vitest run <datei>`; Playwright-Specs unter `e2e/`
-  laufen nur über `npm run test:smoke`. `npx vitest run e2e/...` ergibt „No test files found" (Exit-Code 1).
-- Der Smoke-Test (`e2e/smoke.spec.ts`) prüft, dass der Canvas zeichnet und keine Konsolenfehler auftreten. Neue
-  Szenen dort mit aufnehmen, wenn sie ohne Eingabe erreichbar sind.
+
+### Bereichsnamen
+
+Berichte und Doku verwenden nur diese drei Namen:
+
+| Bereich | Ort | Messung / Befehl |
+| --- | --- | --- |
+| **Logik** | `src/logic/` | Vitest-Coverage mit Grenzen: `npm run test:coverage`; Tests ohne Messung: `npm test` bzw. `npx vitest run <datei>` |
+| **Szenen-E2E** | Playwright-Specs unter `e2e/` mit Szenenabläufen | Playwright, keine Coverage; läuft über `npm run test:smoke` bzw. `npx playwright test`, nie über `vitest run` („No test files found", Exit-Code 1) |
+| **Smoke** | `e2e/smoke.spec.ts` | Canvas zeichnet, keine Konsolenfehler; `npm run test:smoke`. Neue Szenen dort aufnehmen, wenn sie ohne Eingabe erreichbar sind |
+
 - Keine Konsolenausgaben mit `console.error` für erwartete Fälle – der Smoke-Test wertet sie als Fehler.
