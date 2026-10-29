@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="134" height="72" viewBox="0 0 134 72">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4a2470"/><stop offset="1" stop-color="#0b0820"/></linearGradient>
+    <radialGradient id="glow"><stop offset="0" stop-color="#b06be0" stop-opacity="0.9"/><stop offset="1" stop-color="#b06be0" stop-opacity="0"/></radialGradient>
+  </defs>
+  <rect width="134" height="72" fill="url(#bg)"/>
+  <rect y="60" width="134" height="12" fill="#140f2e" opacity="0.7"/>
+  <circle cx="67" cy="28" r="30" fill="url(#glow)" opacity="0.18"/>
+  <ellipse cx="67" cy="60" rx="24" ry="4" fill="#000000" opacity="0.4"/>
+  <path d="M47 60 L51 50 H83 L87 60 Z" fill="#8a86a6" stroke="#4a4668" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M67 48 L40 24 L50 8 H84 L94 24 Z" fill="#b06be0" stroke="#4a2470" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M50 8 L58 24 L67 48 L40 24 Z" fill="#ffffff" opacity="0.2"/>
+  <path d="M84 8 L76 24 L67 48 L94 24 Z" fill="#4a2470" opacity="0.35"/>
+  <path d="M40 24 H94 M58 24 L50 8 M76 24 L84 8 M58 24 L67 48 L76 24" fill="none" stroke="#4a2470" stroke-width="1.5" stroke-linejoin="round"/>
+  <path d="M12 52 L20 44 L28 52 M12 62 L20 54 L28 62" fill="none" stroke="#c9cde0" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M106 52 L114 44 L122 52 M106 62 L114 54 L122 62" fill="none" stroke="#c9cde0" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
