@@ -104,6 +104,13 @@ describe('runSimulation', () => {
     expect(report.towerKillShare + report.roundLimitShare).toBeCloseTo(1, 10);
   });
 
+  it('spielt den Zerstörer und endet ohne Remis', () => {
+    const report = runSimulation({ startSeed: 1, count: 20 });
+    const destroyer = report.cards.find((card) => card.cardId === 'summon-destroyer');
+    expect(destroyer?.plays).toBeGreaterThan(0);
+    expect(report.drawRate).toBe(0);
+  });
+
   it('ist reproduzierbar und hängt vom Seed-Bereich ab', () => {
     const a = runSimulation({ startSeed: 10, count: 6 });
     expect(runSimulation({ startSeed: 10, count: 6 })).toEqual(a);
