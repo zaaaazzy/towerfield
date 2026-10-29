@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { parseReplayMoves, parseReplaySeed, parseSeed } from './seed';
+import { parseFast, parseReplayMoves, parseReplaySeed, parseSeed } from './seed';
+
+describe('parseFast', () => {
+  it('ist nur mit einem Wert ungleich leer und 0 aktiv', () => {
+    expect(parseFast('?fast=1')).toBe(true);
+    expect(parseFast('?seed=1&fast=1')).toBe(true);
+    expect(parseFast('')).toBe(false);
+    expect(parseFast('?fast=')).toBe(false);
+    expect(parseFast('?fast=0')).toBe(false);
+  });
+});
 
 describe('parseReplaySeed', () => {
   it('liest den Parameter replay', () => {

@@ -355,6 +355,29 @@ test('Nach Spielende zeigt die MainScene eine Teilen-URL, die dasselbe Match als
   expect(errors).toEqual([]);
 });
 
+test('Rundenstart-Banner: fährt ein, lässt sich antippen und blockiert die Planung nicht; Schnellvorlauf zeigt keins', async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  const bannerActive = () =>
+    page.evaluate(() => (window.game!.scene.getScene('main') as unknown as { bannerActive: boolean }).bannerActive);
+
+  // Ohne Schnellvorlauf: Banner beim Rundenstart, Tippen in den Streifen blendet es aus.
+  await page.goto('/?seed=1');
+  await page.waitForFunction(() => window.game?.scene.isActive('main') && window.game.loop.frame > 10);
+  await tapReady(page);
+  await expect.poll(bannerActive).toBe(true);
+  await tap(page, 180, 200);
+  await expect.poll(bannerActive).toBe(false);
+
+  // Mit Schnellvorlauf erscheint beim Rundenstart kein Banner.
+  await openGame(page);
+  await tapReady(page);
+  await expect.poll(async () => (await readState(page)).phase).toBe('combat');
+  expect(await bannerActive()).toBe(false);
+  expect(errors).toEqual([]);
+});
+
 // Das Verschieben von Minions per Drag-and-Drop prüfen die deterministischen Tests „Drag: …“ in gameplay.spec.ts.
 
 /** Was die Audio-Tests von der Szene lesen. */
