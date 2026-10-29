@@ -4,7 +4,7 @@
  */
 import type { BalanceReport, CardStats } from './balance-sim';
 
-export type BalanceFormat = 'table' | 'json' | 'both';
+export type BalanceFormat = 'table' | 'json';
 
 export interface BalanceCliOptions {
   seed: number;
@@ -21,7 +21,6 @@ export const DEFAULT_BALANCE_COUNT = 1000;
 /** Obergrenze, damit ein Tippfehler den Lauf nicht für Stunden blockiert. */
 export const MAX_BALANCE_COUNT = 1_000_000;
 
-const FORMATS: readonly BalanceFormat[] = ['table', 'json', 'both'];
 const MAX_SEED = 0xffffffff;
 
 /** Prozentdarstellung mit einer Nachkommastelle, z. B. `0.5` → `50.0 %`. */
@@ -59,6 +58,7 @@ export function formatBalanceTable(report: BalanceReport): string {
     `winRatePlayer0:  ${formatPercent(report.winRatePlayer0)}`,
     `winRatePlayer1:  ${formatPercent(report.winRatePlayer1)}`,
     `drawRate:        ${formatPercent(report.drawRate)}`,
+    `baselineWinRate: ${formatPercent(report.baselineWinRate)}`,
     `avgRounds:       ${report.avgRounds.toFixed(2)}`,
     `towerKillShare:  ${formatPercent(report.towerKillShare)}`,
     `roundLimitShare: ${formatPercent(report.roundLimitShare)}`,
@@ -86,31 +86,28 @@ function parseInteger(name: string, raw: string, min: number, max: number): numb
   return value;
 }
 
-/** Wertet `--seed`, `--count` und `--format` aus (Form `--name wert` oder `--name=wert`). */
+/** Wertet `--seed`, `--count` (Form `--name wert` oder `--name=wert`) und das Flag `--json` aus. */
 export function parseBalanceArgs(args: readonly string[]): ParseResult {
-  const options: BalanceCliOptions = { seed: DEFAULT_BALANCE_SEED, count: DEFAULT_BALANCE_COUNT, format: 'both' };
+  const options: BalanceCliOptions = { seed: DEFAULT_BALANCE_SEED, count: DEFAULT_BALANCE_COUNT, format: 'table' };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]!;
-    const match = /^--(seed|count|format)(?:=(.*))?$/.exec(arg);
-    if (!match) return { ok: false, error: `Unbekanntes Argument „${arg}“. Erlaubt: --seed, --count, --format.` };
-    const name = match[1]!;
+    if (arg === '--json') {
+      options.format = 'json';
+      continue;
+    }
+    const match = /^--(seed|count)(?:=(.*))?$/.exec(arg);
+    if (!match) return { ok: false, error: `Unbekanntes Argument „${arg}“. Erlaubt: --seed, --count, --json.` };
+    const name = match[1] as 'seed' | 'count';
     let raw = match[2];
     if (raw === undefined) {
       raw = args[index + 1];
       index += 1;
     }
     if (raw === undefined) return { ok: false, error: `--${name} braucht einen Wert.` };
-    if (name === 'format') {
-      if (!FORMATS.includes(raw as BalanceFormat)) {
-        return { ok: false, error: `--format erwartet table, json oder both, erhalten: „${raw}“.` };
-      }
-      options.format = raw as BalanceFormat;
-    } else {
-      const value =
-        name === 'seed' ? parseInteger(name, raw, 0, MAX_SEED) : parseInteger(name, raw, 1, MAX_BALANCE_COUNT);
-      if (typeof value === 'string') return { ok: false, error: value };
-      options[name as 'seed' | 'count'] = value;
-    }
+    const value =
+      name === 'seed' ? parseInteger(name, raw, 0, MAX_SEED) : parseInteger(name, raw, 1, MAX_BALANCE_COUNT);
+    if (typeof value === 'string') return { ok: false, error: value };
+    options[name] = value;
   }
   return { ok: true, options };
 }
