@@ -131,9 +131,17 @@ test('Kampf zeigt Schadenszahlen und Effekte ohne Konsolenfehler', async ({ page
 /**
  * Screenshot-Vergleiche im Handyformat 360×640. Der Loop steht still (`freezeGame`), die Zeit läuft nur über
  * `stepFrames`; so sind Licht, Nebel und Glanz in jedem Lauf gleich. Die Referenzbilder unter
- * `e2e/grafik.spec.ts-snapshots/` entstehen mit Chromium unter macOS (Dateisuffix `-chromium-darwin`); auf anderen
- * Plattformen mit `npx playwright test e2e/grafik.spec.ts --update-snapshots` neu erzeugen.
+ * `e2e/grafik.spec.ts-snapshots/` entstehen mit Chromium unter macOS (Dateisuffix `-chromium-darwin`). Der Vergleich
+ * läuft nur dort (Variante B, siehe docs/anwendung-ci-gate.md); in der Linux-CI entfällt er, alle übrigen
+ * Prüfungen der Tests laufen weiter.
  */
+const HAT_BASISBILDER = process.platform === 'darwin';
+
+async function vergleiche(page: Parameters<typeof openGame>[0], name: string): Promise<void> {
+  if (!HAT_BASISBILDER) return;
+  await expect(page).toHaveScreenshot(name);
+}
+
 test.describe('Screenshots 360×640', () => {
   test.use({ viewport: { width: 360, height: 640 }, deviceScaleFactor: 1 });
 
@@ -165,7 +173,7 @@ test.describe('Screenshots 360×640', () => {
 
   test('Planung', async ({ page }) => {
     const errors = await openFrozen(page);
-    await expect(page).toHaveScreenshot('planung.png');
+    await vergleiche(page, 'planung.png');
     expect(errors).toEqual([]);
   });
 
@@ -173,7 +181,7 @@ test.describe('Screenshots 360×640', () => {
     const errors = await openFrozen(page);
     await setHand(page, ['tower-lightning', 'summon-guard', 'lane-shield', 'tower-armor', 'minion-upgrade-elite'], 10);
     await stepFrames(page, 5);
-    await expect(page).toHaveScreenshot('hand-neue-karten.png');
+    await vergleiche(page, 'hand-neue-karten.png');
     expect(errors).toEqual([]);
   });
 
@@ -184,7 +192,7 @@ test.describe('Screenshots 360×640', () => {
     await stepFrames(page, 2);
     expect((await readState(page)).phase).toBe('combat');
     await stepFrames(page, 30, 50);
-    await expect(page).toHaveScreenshot('kampf.png');
+    await vergleiche(page, 'kampf.png');
     expect(errors).toEqual([]);
   });
 
@@ -199,10 +207,10 @@ test.describe('Screenshots 360×640', () => {
     expect((await readState(page)).phase).toBe('over');
     // Partikel der letzten Treffer streuen zufällig (Phaser-Zufall, kein Seed): warten, bis sie verschwunden sind.
     await stepFrames(page, 60, 50);
-    await expect(page).toHaveScreenshot('spielende-statistik.png');
+    await vergleiche(page, 'spielende-statistik.png');
     await tap(page, 180, 524);
     await stepFrames(page, 3);
-    await expect(page).toHaveScreenshot('spielende-teilen.png');
+    await vergleiche(page, 'spielende-teilen.png');
     expect(errors).toEqual([]);
   });
 
@@ -218,7 +226,7 @@ test.describe('Screenshots 360×640', () => {
     // Schwelle überschritten (ab dem 25. Bild), dazu ein Teil des Glanzdurchlaufs.
     await stepFrames(page, 30);
     expect(await detailCard(page)).toBe(index);
-    await expect(page).toHaveScreenshot('detailansicht.png');
+    await vergleiche(page, 'detailansicht.png');
 
     // Loslassen schließt die Ansicht; die Karte wird weder gespielt noch gewählt.
     await pointerUp(page);

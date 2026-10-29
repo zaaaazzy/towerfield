@@ -9,8 +9,12 @@ export default defineConfig({
   timeout: 30_000,
   // Screenshot-Vergleiche (e2e/grafik.spec.ts) brauchen bei ausgelasteter Maschine mehr als die üblichen 5 s.
   expect: { timeout: 20_000 },
-  reporter: process.env.CI ? 'line' : 'list',
-  use: { baseURL: `http://localhost:${port}` },  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  // Die Specs laufen parallel gegen zwei Server und schlagen bei hoher Last vereinzelt zeitabhängig fehl.
+  retries: process.env.CI ? 1 : 0,
+  // In der CI schreibt der HTML-Bericht nach playwright-report/ (wird bei Fehlern als Artefakt hochgeladen).
+  reporter: process.env.CI ? [['line'], ['html', { open: 'never' }]] : 'list',
+  use: { baseURL: `http://localhost:${port}` },
+  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: [
     {
       command: `npx vite preview --port ${port} --strictPort`,
