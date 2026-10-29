@@ -814,7 +814,7 @@ export class MainScene extends Phaser.Scene {
     const bot = state.players[BOT];
 
     const needsMinion = this.selectedNeedsMinion();
-    drawBoard(g, this.label, state, this.selected !== null && !needsMinion);
+    drawBoard(g, this.label, state, this.selected !== null && !needsMinion, this.minionAnim.timeMs);
 
     const phaseText =
       state.phase === 'planning' ? 'Planung' : state.phase === 'combat' ? 'Kampf' : 'Ende';
