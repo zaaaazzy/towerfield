@@ -649,8 +649,9 @@ Vor jeder Übergabe müssen `npm run build`, `npm test` und `npm run test:smoke`
   (laut Auftrag ausgeschlossen).
 - Teilen: „Zurücknehmen“ ist in der `MainScene` nicht bedienbar. Nach jeder Regeländerung `RECORD_VERSION` prüfen, sonst
   geben alte Links ein anderes Match wieder oder brechen ab.
-- Smoke-Test „Drag eines beschworenen Minions“: überspringt sich per `test.skip`, wenn die Starthand keinen Minion
-  enthält (`smoke.spec.ts`, ca. Zeile 384).
+- E2E-Hilfen `dragMinion` und `specializeTower` (`e2e/helpers.ts`): lesen Ziele aus dem Szenenzustand und warten nur
+  per `expect.poll`. Für Kampfmessungen mit `sampleCombat` braucht der Gegner einen lebenden Minion, sonst beendet der
+  Echtzeit-Loop die Runde vor der Messung.
 - Möglicher Code-Fehler (nicht geändert): `playCard` prüft bei `tower-upgrade` nicht, ob der Tower der Line noch lebt
   (`hp > 0`). `tower-hp` auf einen zerstörten Tower setzt dessen `hp` wieder auf 30; der Tower greift dann wieder an,
   und `towersAlive` zählt ihn erneut. Das betrifft nur Lines, deren Tower gefallen ist, während die anderen noch
