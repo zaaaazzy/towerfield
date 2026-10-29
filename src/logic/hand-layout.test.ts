@@ -1,7 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import type { CardType } from './cards';
 import { HAND_LIMIT } from './match';
-import { cardAt, fanLayout, HAND_FAN, liftedPose, type CardPose, poseContains, sortHand } from './hand-layout';
+import {
+  cardAt,
+  DETAIL_MARGIN,
+  DETAIL_MIN_SCALE,
+  DETAIL_VIEW,
+  DETAIL_WIDTH,
+  detailLayout,
+  fanLayout,
+  GLINT,
+  glintPolygon,
+  glintProgress,
+  HAND_FAN,
+  liftedPose,
+  type CardPose,
+  poseContains,
+  sortHand,
+} from './hand-layout';
 
 /** Waagerechter und senkrechter Rand der gedrehten Karte. */
 function bounds(pose: CardPose): { left: number; right: number; top: number; bottom: number } {
@@ -180,5 +196,97 @@ describe('cardAt', () => {
     const second = poses[1]!;
     const x = second.x - 20;
     expect(cardAt(poses, x, second.y, (slot) => slot !== 1)).toBe(0);
+  });
+});
+
+describe('detailLayout', () => {
+  it('ist mindestens doppelt so breit wie eine Handkarte', () => {
+    const detail = detailLayout();
+    expect(detail.width).toBeGreaterThanOrEqual(HAND_FAN.cardWidth * DETAIL_MIN_SCALE);
+    expect(detail.scale).toBeGreaterThanOrEqual(DETAIL_MIN_SCALE);
+    expect(detail.width).toBe(DETAIL_WIDTH);
+  });
+
+  it('behält das Seitenverhältnis der Handkarte', () => {
+    const detail = detailLayout();
+    expect(detail.width / detail.height).toBeCloseTo(HAND_FAN.cardWidth / HAND_FAN.cardHeight, 6);
+    expect(detail.height).toBeCloseTo(HAND_FAN.cardHeight * detail.scale, 6);
+  });
+
+  it('passt mit Rand vollständig in die Spielfläche und liegt waagerecht mittig', () => {
+    const detail = detailLayout();
+    expect(detail.x).toBe(DETAIL_VIEW.width / 2);
+    expect(detail.x - detail.width / 2).toBeGreaterThanOrEqual(DETAIL_MARGIN);
+    expect(detail.x + detail.width / 2).toBeLessThanOrEqual(DETAIL_VIEW.width - DETAIL_MARGIN);
+    expect(detail.y - detail.height / 2).toBeGreaterThanOrEqual(DETAIL_MARGIN);
+    expect(detail.y + detail.height / 2).toBeLessThanOrEqual(DETAIL_VIEW.height - DETAIL_MARGIN);
+  });
+
+  it('schrumpft auf einer kleinen Fläche, bleibt aber innerhalb der Ränder', () => {
+    const view = { width: 200, height: 400 };
+    const detail = detailLayout(view);
+    expect(detail.width).toBe(view.width - 2 * DETAIL_MARGIN);
+    expect(detail.y + detail.height / 2).toBeLessThanOrEqual(view.height - DETAIL_MARGIN);
+    const tall = detailLayout({ width: 360, height: 200 });
+    expect(tall.height).toBeLessThanOrEqual(200 - 2 * DETAIL_MARGIN);
+    expect(tall.width / tall.height).toBeCloseTo(HAND_FAN.cardWidth / HAND_FAN.cardHeight, 6);
+  });
+});
+
+describe('Glanzband', () => {
+  const sweepMs = GLINT.periodMs * GLINT.sweepFraction;
+
+  it('läuft von 0 bis 1 und pausiert danach', () => {
+    expect(glintProgress(0)).toBe(0);
+    expect(glintProgress(sweepMs / 2)).toBeCloseTo(0.5, 6);
+    expect(glintProgress(sweepMs)).toBeNull();
+    expect(glintProgress(GLINT.periodMs - 1)).toBeNull();
+    expect(glintProgress(GLINT.periodMs + sweepMs / 2)).toBeCloseTo(0.5, 6);
+    expect(glintProgress(-GLINT.periodMs + 10)).toBeCloseTo(10 / sweepMs, 6);
+  });
+
+  it('liefert in der Pause kein Vieleck', () => {
+    expect(glintPolygon(220, 308, sweepMs + 1)).toEqual([]);
+  });
+
+  it('beginnt und endet außerhalb der Karte', () => {
+    expect(glintPolygon(220, 308, 0)).toEqual([]);
+    // Kurz vor dem Ende ist nur noch ein Splitter am rechten Rand übrig.
+    const sliver = glintPolygon(220, 308, sweepMs - 1);
+    for (const p of sliver) expect(p.x).toBeGreaterThan(220 / 2 - 5);
+  });
+
+  it('bleibt in der Kartenfläche und wandert nach rechts', () => {
+    const width = 220;
+    const height = 308;
+    const centers = [0.25, 0.5, 0.75].map((share) => {
+      const polygon = glintPolygon(width, height, sweepMs * share);
+      expect(polygon.length).toBeGreaterThanOrEqual(3);
+      for (const p of polygon) {
+        expect(p.x).toBeGreaterThanOrEqual(-width / 2 - 1e-9);
+        expect(p.x).toBeLessThanOrEqual(width / 2 + 1e-9);
+        expect(Math.abs(p.y)).toBeLessThanOrEqual(height / 2 + 1e-9);
+      }
+      return polygon.reduce((sum, p) => sum + p.x, 0) / polygon.length;
+    });
+    expect(centers[0]!).toBeLessThan(centers[1]!);
+    expect(centers[1]!).toBeLessThan(centers[2]!);
+  });
+
+  it('ist ein schräges Band: oben und unten liegt es versetzt', () => {
+    const polygon = glintPolygon(220, 308, sweepMs * 0.5);
+    const top = polygon.filter((p) => p.y === -154);
+    const bottom = polygon.filter((p) => p.y === 154);
+    expect(top.length).toBeGreaterThan(0);
+    expect(bottom.length).toBeGreaterThan(0);
+    expect(Math.min(...bottom.map((p) => p.x))).toBeGreaterThan(Math.min(...top.map((p) => p.x)));
+  });
+
+  it('wird mit kleinerem Anteil schmaler', () => {
+    const area = (points: { x: number; y: number }[]): number =>
+      Math.abs(points.reduce((sum, p, i) => sum + p.x * points[(i + 1) % points.length]!.y - points[(i + 1) % points.length]!.x * p.y, 0)) / 2;
+    const wide = glintPolygon(220, 308, sweepMs * 0.5, 0.3);
+    const narrow = glintPolygon(220, 308, sweepMs * 0.5, 0.1);
+    expect(area(narrow)).toBeLessThan(area(wide));
   });
 });

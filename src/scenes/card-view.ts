@@ -1,12 +1,12 @@
 /**
  * Zeichnet eine Handkarte im Kartenspiel-Look: Rahmen in der Farbe des Kartentyps, Kopfzeile mit Namen,
- * Kosten-Kristall, Bildfläche mit Kartenbild (Rückfall: Typ-Symbol) und Werten, Textfeld und Typ-Banner.
- * Jede Karte ist ein eigener Container, der in lokalen Koordinaten um den Mittelpunkt zeichnet. Position,
+ * Kosten-Kristall und Bildfläche mit Kartenbild (Rückfall: Typ-Symbol). Regeltext und Werte stehen nur in der
+ * Detailansicht (`card-detail-view.ts`). Jede Karte ist ein eigener Container, der in lokalen Koordinaten um den Mittelpunkt zeichnet. Position,
  * Neigung, Skalierung und Tiefe kommen aus `CardPose` (`src/logic/hand-layout.ts`); so liegt auch der Text
  * zusammen mit seiner Karte in der richtigen Reihenfolge.
  */
 import Phaser from 'phaser';
-import { type CardSymbol, cardArtKey, cardStats, cardTypeStyle, describeCard } from '../logic/card-style';
+import { type CardSymbol, cardArtKey, cardTypeStyle } from '../logic/card-style';
 import type { CardDef } from '../logic/cards';
 import { type CardPose, HAND_FAN } from '../logic/hand-layout';
 import { LabelPool } from './labels';
@@ -27,8 +27,8 @@ const WIDTH = HAND_FAN.cardWidth;
 const HEIGHT = HAND_FAN.cardHeight;
 const RADIUS = 6;
 
-/** Kleines Typ-Symbol, zentriert auf (cx, cy) mit Radius r. */
-function drawSymbol(g: Phaser.GameObjects.Graphics, symbol: CardSymbol, cx: number, cy: number, r: number, color: number): void {
+/** Kleines Typ-Symbol, zentriert auf (cx, cy) mit Radius r; auch von der Detailansicht genutzt. */
+export function drawSymbol(g: Phaser.GameObjects.Graphics, symbol: CardSymbol, cx: number, cy: number, r: number, color: number): void {
   const dark = lerpColor(color, PALETTE.black, 0.55);
   g.lineStyle(Math.max(1, r * 0.55), dark, 0.8);
   switch (symbol) {
@@ -111,19 +111,28 @@ function drawSymbol(g: Phaser.GameObjects.Graphics, symbol: CardSymbol, cx: numb
   }
 }
 
-/** Wert-Plakette (Leben oder Schaden) mit kleinem Symbol; (x, y) ist die linke Mitte. */
-function drawStatPill(g: Phaser.GameObjects.Graphics, kind: 'hp' | 'damage', x: number, y: number): void {
-  const color = kind === 'hp' ? 0xc8283c : 0xd87a1e;
-  g.fillStyle(PALETTE.black, 0.55).fillRoundedRect(x, y - 6.5, 30, 13, 6);
-  g.lineStyle(1, color, 1).strokeRoundedRect(x, y - 6.5, 30, 13, 6);
-  const ix = x + 8;
-  if (kind === 'hp') {
-    g.fillStyle(0xff5a6a, 1).fillCircle(ix - 1.8, y - 1.5, 2.3).fillCircle(ix + 1.8, y - 1.5, 2.3);
-    g.fillTriangle(ix - 3.9, y - 0.5, ix + 3.9, y - 0.5, ix, y + 3.8);
-  } else {
-    g.lineStyle(2, 0xffd890, 1).lineBetween(ix - 3, y + 3, ix + 3, y - 3);
-    g.lineStyle(1.6, 0xffb040, 1).lineBetween(ix - 3.5, y - 0.5, ix - 0.5, y + 2.5);
-  }
+/** Kosten-Kristall (Raute) mit Zahl, zentriert auf (cx, cy) mit Radius cr; auch von der Detailansicht genutzt. */
+export function drawCostCrystal(
+  g: Phaser.GameObjects.Graphics,
+  pool: LabelPool,
+  cost: number,
+  cx: number,
+  cy: number,
+  cr: number,
+  affordable: boolean,
+  alpha: number,
+): void {
+  const diamond = [
+    new Phaser.Geom.Point(cx, cy - cr),
+    new Phaser.Geom.Point(cx + cr * 0.85, cy),
+    new Phaser.Geom.Point(cx, cy + cr),
+    new Phaser.Geom.Point(cx - cr * 0.85, cy),
+  ];
+  g.fillStyle(PALETTE.goldDark, 1).fillPoints(diamond, true);
+  const inner = diamond.map((p) => new Phaser.Geom.Point(cx + (p.x - cx) * 0.78, cy + (p.y - cy) * 0.78));
+  g.fillStyle(affordable ? PALETTE.energy : PALETTE.stoneDark, 1).fillPoints(inner, true);
+  g.fillStyle(PALETTE.white, 0.4).fillPoints([inner[0]!, inner[1]!, new Phaser.Geom.Point(cx, cy)], true);
+  pool.label(`${cost}`, cx, cy + cr * 0.05, { size: cr * 1.26, font: 'heading', bold: true, color: TEXT.main, alpha });
 }
 
 export class CardView {
@@ -204,64 +213,32 @@ export class CardView {
       alpha: textAlpha,
     });
 
-    // Bildfläche: eigenes Kartenbild, sonst Typ-Symbol.
+    // Bildfläche über den Rest der Karte: eigenes Kartenbild (mittig zugeschnitten, ohne Verzerrung), sonst Typ-Symbol.
+    // Den Regeltext zeigt erst die Detailansicht (langes Drücken).
     const artX = x + 3.5;
     const artY = y + 26;
     const artW = WIDTH - 7;
-    const artH = 36;
+    const artH = HEIGHT - 30;
     fillGradient(back, artX, artY, artW, artH, style.dark, lerpColor(style.accent, PALETTE.black, 0.25), 1, 6);
     const key = cardArtKey(def);
     if (key && this.scene.textures.exists(key)) {
-      art.setTexture(key).setPosition(artX + artW / 2, artY + artH / 2).setDisplaySize(artW, artH).setVisible(true);
+      const frame = this.scene.textures.getFrame(key);
+      const shownW = (artH * frame.width) / frame.height;
+      const cropW = Math.min(frame.width, (artW / shownW) * frame.width);
+      art
+        .setTexture(key)
+        .setCrop((frame.width - cropW) / 2, 0, cropW, frame.height)
+        .setPosition(artX + artW / 2, artY + artH / 2)
+        .setDisplaySize(shownW, artH)
+        .setVisible(true);
     } else {
-      back.fillStyle(PALETTE.white, 0.1).fillCircle(artX + artW / 2, artY + artH / 2, artH * 0.6);
-      drawSymbol(back, style.symbol, artX + artW / 2, artY + artH / 2, 12, style.accent);
+      back.fillStyle(PALETTE.white, 0.1).fillCircle(artX + artW / 2, artY + artH / 2, artH * 0.4);
+      drawSymbol(back, style.symbol, artX + artW / 2, artY + artH / 2, 18, style.accent);
     }
     front.lineStyle(1, PALETTE.goldDark, 1).strokeRect(artX, artY, artW, artH);
 
-    // Werte (Leben links, Schaden rechts) als Plaketten am unteren Bildrand.
-    const stats = cardStats(def);
-    if (stats) {
-      const pillY = artY + artH - 8.5;
-      const prefix = stats.bonus ? '+' : '';
-      if (stats.hp > 0) {
-        drawStatPill(front, 'hp', artX + 2, pillY);
-        pool.label(`${prefix}${stats.hp}`, artX + 2 + 21, pillY + 0.5, { size: 8, bold: true, stroke: 1.5, alpha: textAlpha });
-      }
-      if (stats.damage > 0) {
-        const pillX = artX + artW - 32;
-        drawStatPill(front, 'damage', pillX, pillY);
-        pool.label(`${prefix}${stats.damage}`, pillX + 21, pillY + 0.5, { size: 8, bold: true, stroke: 1.5, alpha: textAlpha });
-      }
-    }
-
-    // Textfeld mit dem Regeltext.
-    const textY = y + 64;
-    const textH = 25;
-    front.fillStyle(0x3a3068, 0.95).fillRect(x + 3.5, textY, WIDTH - 7, textH);
-    front.lineStyle(1, PALETTE.bronze, 0.8).strokeRect(x + 3.5, textY, WIDTH - 7, textH);
-    pool.label(describeCard(def), 0, textY + textH / 2, { size: 7.5, width: WIDTH - 10, stroke: 1, alpha: textAlpha });
-
-    // Typ-Banner.
-    const bannerY = y + 91;
-    fillGradient(front, x + 2.5, bannerY, WIDTH - 5, 10.5, style.accent, style.dark, 1, 4);
-    pool.label(style.banner, 0, bannerY + 5.5, { size: 6.5, bold: true, stroke: 1, alpha: textAlpha });
-
     // Kosten-Kristall (Raute, überlappt die Ecke).
-    const cx = x + 9;
-    const cy = y + 11;
-    const cr = 9.5;
-    const diamond = [
-      new Phaser.Geom.Point(cx, cy - cr),
-      new Phaser.Geom.Point(cx + cr * 0.85, cy),
-      new Phaser.Geom.Point(cx, cy + cr),
-      new Phaser.Geom.Point(cx - cr * 0.85, cy),
-    ];
-    front.fillStyle(PALETTE.goldDark, 1).fillPoints(diamond, true);
-    const inner = diamond.map((p) => new Phaser.Geom.Point(cx + (p.x - cx) * 0.78, cy + (p.y - cy) * 0.78));
-    front.fillStyle(look.affordable ? PALETTE.energy : PALETTE.stoneDark, 1).fillPoints(inner, true);
-    front.fillStyle(PALETTE.white, 0.4).fillPoints([inner[0]!, inner[1]!, new Phaser.Geom.Point(cx, cy)], true);
-    pool.label(`${def.cost}`, cx, cy + 0.5, { size: 12, font: 'heading', bold: true, color: TEXT.main, alpha: textAlpha });
+    drawCostCrystal(front, pool, def.cost, x + 9, y + 11, 9.5, look.affordable, textAlpha);
 
     // Nicht bezahlbar: Karte abdunkeln (deckend, damit keine Nachbarkarte durchscheint).
     if (!look.affordable) front.fillStyle(PALETTE.black, 0.38).fillRoundedRect(x, y, WIDTH, HEIGHT, RADIUS);
