@@ -12,6 +12,7 @@ import {
   pointerUp,
   readSelected,
   readState,
+  setHand,
   stepFrames,
   tap,
   tapCard,
@@ -165,6 +166,14 @@ test.describe('Screenshots 360×640', () => {
   test('Planung', async ({ page }) => {
     const errors = await openFrozen(page);
     await expect(page).toHaveScreenshot('planung.png');
+    expect(errors).toEqual([]);
+  });
+
+  test('Hand mit den neuen Kartenbildern', async ({ page }) => {
+    const errors = await openFrozen(page);
+    await setHand(page, ['tower-lightning', 'summon-guard', 'lane-shield', 'tower-armor', 'minion-upgrade-elite'], 10);
+    await stepFrames(page, 5);
+    await expect(page).toHaveScreenshot('hand-neue-karten.png');
     expect(errors).toEqual([]);
   });
 

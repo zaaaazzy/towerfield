@@ -48,7 +48,7 @@ Georgia/Palatino (Serife), Fließtext in Trebuchet/Segoe UI/Verdana.
 
 `public/assets/` enthält zwei Ordner:
 
-- `cards/`: 11 Karten-SVGs (siehe [Karten-SVGs](#karten-svgs)).
+- `cards/`: 20 Karten-SVGs (siehe [Karten-SVGs](#karten-svgs)).
 - `audio/`: Sounddateien (`.wav`, dazu zwei Schleifen als `.m4a`), geladen von der Audio-Steuerung, Details in [`anwendung-audio.md`](anwendung-audio.md).
 
 Alle übrigen Grafiken entstehen aus Phaser-Grafik-API und Canvas-Verläufen im Code. Fremde Bilder und Schriften werden
@@ -67,8 +67,12 @@ Autorenhinweis; die Git-Historie nennt nur den Agenten-Commit). Ob sie selbst er
   im gleichen Seitenverhältnis; beim Laden werden sie verdoppelt. Alle Maße unten beziehen sich auf die 134×72-Datei.
 - **Dateinamen:** entsprechen den Einträgen von `CARD_ART_IDS` in `src/logic/card-style.ts`: `summon-minion`,
   `summon-brute`, `summon-archer`, `summon-healer`, `summon-destroyer`, `line-upgrade`, `tower-hp`, `tower-damage`,
-  `minion-upgrade-line`, `minion-upgrade-all`, `buff-minion`. Karten ohne Eintrag zeigen das Typ-Symbol.
-- **Quelle und Lizenz:** unbekannt, siehe oben; hier nicht erfunden. Offen.
+  `minion-upgrade-line`, `minion-upgrade-all`, `buff-minion`, `tower-lightning`, `tower-shield`, `summon-scout`,
+  `summon-guard`, `summon-mage`, `lane-buff`, `lane-shield`, `tower-armor`, `minion-upgrade-elite`. Karten ohne Eintrag
+  zeigen das Typ-Symbol; ein Test in `card-style.test.ts` schlägt fehl, sobald eine Karte aus `CARD_DEFS` keinen Eintrag hat.
+- **Quelle und Lizenz:** Die ersten 11 Dateien: unbekannt, siehe oben; hier nicht erfunden, offen. Die 9 Dateien
+  `tower-lightning` bis `minion-upgrade-elite` sind selbst erzeugt; ihre Farben stammen ausschließlich aus
+  den Tokens in `theme.ts` (`SURFACE`, `LIGHT`, `MATERIAL`, `TEAM_COLOR`) und `CARD_TYPE_STYLES`.
 - Die Szene schneidet das Bild mittig zu (keine Verzerrung) und legt es in die Bildfläche der Karte.
 
 ## Bildsprache

@@ -1,6 +1,7 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { CARD_DEFS, type CardDef, type CardType, getCardDef } from './cards';
-import { CARD_TYPE_STYLES, cardArtKey, cardStats, cardTypeStyle, describeCard } from './card-style';
+import { CARD_ART_IDS, CARD_TYPE_STYLES, cardArtKey, cardStats, cardTypeStyle, describeCard } from './card-style';
 
 const TYPES: CardType[] = [
   'line-upgrade',
@@ -31,23 +32,21 @@ describe('cardTypeStyle', () => {
 });
 
 describe('cardArtKey', () => {
-  it('gibt den Karten der ersten Version ein eigenes Bild, Spezialisierungen und neuen Karten nur das Typ-Symbol', () => {
-    const symbolOnly = new Set([
-      'tower-lightning',
-      'tower-shield',
-      'summon-scout',
-      'summon-guard',
-      'summon-mage',
-      'lane-buff',
-      'lane-shield',
-      'tower-armor',
-      'minion-upgrade-elite',
-    ]);
-    const withArt = CARD_DEFS.filter((def) => !symbolOnly.has(def.id));
-    const keys = withArt.map((def) => cardArtKey(def));
-    expect(keys.every((key) => key !== null)).toBe(true);
-    expect(new Set(keys).size).toBe(withArt.length);
-    for (const id of symbolOnly) expect(cardArtKey(getCardDef(id))).toBeNull();
+  it('liefert für jede Karte aus CARD_DEFS einen eigenen Schlüssel der Form card-art-<id>', () => {
+    const missing = CARD_DEFS.filter((def) => cardArtKey(def) === null).map((def) => def.id);
+    expect(missing, `Karten ohne Bild: ${missing.join(', ')}`).toEqual([]);
+    const keys = CARD_DEFS.map((def) => cardArtKey(def));
+    expect(new Set(keys).size).toBe(CARD_DEFS.length);
+    for (const def of CARD_DEFS) expect(cardArtKey(def)).toBe(`card-art-${def.id}`);
+  });
+
+  it('listet jede Karten-ID genau einmal und hat zu jeder Karte eine SVG-Datei im Format 134×72', () => {
+    expect(new Set(CARD_ART_IDS).size).toBe(CARD_ART_IDS.length);
+    expect(CARD_ART_IDS).toHaveLength(CARD_DEFS.length);
+    for (const def of CARD_DEFS) {
+      const svg = readFileSync(`public/assets/cards/${def.id}.svg`, 'utf8');
+      expect(svg, `${def.id}.svg`).toContain('viewBox="0 0 134 72"');
+    }
   });
 
   it('kennt kein Bild für unbekannte Karten (Rückfall auf das Typ-Symbol)', () => {

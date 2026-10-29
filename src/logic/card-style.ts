@@ -47,6 +47,15 @@ export const CARD_ART_IDS: readonly string[] = [
   'minion-upgrade-line',
   'minion-upgrade-all',
   'buff-minion',
+  'tower-lightning',
+  'tower-shield',
+  'summon-scout',
+  'summon-guard',
+  'summon-mage',
+  'lane-buff',
+  'lane-shield',
+  'tower-armor',
+  'minion-upgrade-elite',
 ];
 
 /** Texturschlüssel des Kartenbilds oder `null`, wenn die Karte nur das Typ-Symbol zeigt. */
