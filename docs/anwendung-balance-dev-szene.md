@@ -116,7 +116,9 @@ weil `@vitest/coverage-v8` fehlt.
   für Skripte und Tests gedacht. Ändert sich die Ablauflogik (Seed-Zählung), beide Stellen angleichen.
 - **Laufzeit:** 200 Matches brauchen im Test rund 0,7 s, 1000 also grob 3,5 s Rechenzeit. Die Szene verteilt sie auf 250 Frames
   (etwa 4 s bei 60 fps; im Headless-Smoke-Test mit niedriger Bildrate länger, daher dort 40 s Poll- und 100 s Testtimeout), der Canvas bleibt bedienbar.
-- **Nicht gebaut:** Die optionale JSON-Ausgabe (Zwischenablage oder Konsole) fehlt.
+- **Ohne Browser:** `npm run balance` (auch `-- --json`) simuliert dieselben Matches in Node und prüft über
+  `checkGuardrails` die Leitplanken (Seite 40–60 %, Karte höchstens ±15 Punkte). Siehe
+  [`anwendung-balance-cli.md`](anwendung-balance-cli.md).
 - **Formatierung:** In `playwright.config.ts` stehen `use: { baseURL: ... }` und `projects: [...]` auf einer Zeile.
   Das hat keine Folgen.
 - **Unverändert:** Spielregeln, Kartenwerte, Basiswerte, Bot-Verhalten ohne Zusatzparameter und die Smoke-Prüfung der
