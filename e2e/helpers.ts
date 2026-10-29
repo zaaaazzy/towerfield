@@ -16,6 +16,8 @@ export const SEED = 1;
 /** Was die Tests von der Szene `main` lesen (nur Typ, der Code läuft im Browser). */
 export interface MainSceneView {
   current: MatchState;
+  botLevel: 'easy' | 'normal';
+  currentRecord: { botLevel?: 'easy' | 'normal'; actions: { player: 0 | 1; type: string }[] };
   selectedCard: number | null;
   update(time: number, deltaMs: number): void;
   children: { list: { type: string; visible: boolean; text?: string }[] };
@@ -34,9 +36,12 @@ export function collectErrors(page: Page): string[] {
 /** URL-Parameter für den Schnellvorlauf: keine Banner und keine Abschluss-Einblendung (siehe `parseFast`). */
 export const FAST = 'fast=1';
 
-/** Öffnet das Spiel mit festem Seed und Schnellvorlauf und wartet, bis die Szene läuft. */
-export async function openGame(page: Page, seed: number = SEED): Promise<void> {
-  await page.goto(`/?seed=${seed}&${FAST}`);
+/**
+ * Öffnet das Spiel mit festem Seed und Schnellvorlauf und wartet, bis die Szene läuft. `extra` hängt weitere
+ * URL-Parameter an, z. B. `bot=normal` für die Bot-Stufe „Normal“.
+ */
+export async function openGame(page: Page, seed: number = SEED, extra = ''): Promise<void> {
+  await page.goto(`/?seed=${seed}&${FAST}${extra === '' ? '' : `&${extra}`}`);
   await expect(page.locator('#game canvas')).toBeVisible();
   await page.waitForFunction(() => window.game?.scene.isActive('main') && window.game.loop.frame > 10);
 }
@@ -268,10 +273,40 @@ export async function specializeTower(page: Page, line: number, kind: 'lightning
     .toContain(kind);
 }
 export const tapReady = (page: Page) => tap(page, READY_BUTTON.x, READY_BUTTON.y);
-
 /** Kopie des aktuellen Spielzustands (aus `scene.current`, nicht aus Pixeln). */
 export function readState(page: Page): Promise<MatchState> {
   return page.evaluate(() => (window.game!.scene.getScene('main') as unknown as MainSceneView).current);
+}
+
+/** Bot-Stufe des laufenden Matches und die Stufe in der Aufzeichnung (fehlt bei „Leicht“). */
+export function readBotLevel(page: Page): Promise<{ level: 'easy' | 'normal'; recorded: 'easy' | 'normal' | undefined }> {
+  return page.evaluate(() => {
+    const scene = window.game!.scene.getScene('main') as unknown as MainSceneView;
+    return { level: scene.botLevel, recorded: scene.currentRecord.botLevel };
+  });
+}
+
+/** Aktionen des Bots (Spieler 1) in der Aufzeichnung des laufenden Matches. */
+export function readBotActions(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    (window.game!.scene.getScene('main') as unknown as MainSceneView).currentRecord.actions
+      .filter((action) => action.player === 1)
+      .map((action) => action.type),
+  );
+}
+
+/** Taste „Bot: …“ im oberen Rand (nur in Runde 1 vor der ersten Aktion des Menschen tippbar). */
+export const BOT_TAP = { x: 218, y: 44 };
+
+/** Ob ein sichtbarer Text mit diesem Anfang in der Szene steht. */
+export function hasVisibleTextStarting(page: Page, prefix: string): Promise<boolean> {
+  return page.evaluate(
+    (wanted) =>
+      (window.game!.scene.getScene('main') as unknown as MainSceneView).children.list.some(
+        (child) => child.type === 'Text' && child.visible && (child.text ?? '').startsWith(wanted),
+      ),
+    prefix,
+  );
 }
 
 export function readSelected(page: Page): Promise<number | null> {

@@ -15,7 +15,7 @@
  * Der Kartenindex ist die Position in `CARD_DEFS`. Ändern sich Regeln oder Kartenliste, muss `RECORD_VERSION` steigen,
  * damit alte Links als ungültig erkannt werden (der Test in `match-record.test.ts` hält die Kartenliste fest).
  */
-import { botStep } from './bot';
+import { type BotLevel, botStepFor } from './bot';
 import { CARD_DEFS, getCardDef } from './cards';
 import { TICK_MS } from './combat';
 import {
@@ -66,13 +66,20 @@ export interface RecordedMatch {
   version: number;
   seed: number;
   actions: RecordedAction[];
+  /**
+   * Stufe des Bots (Spieler 1), der die Aktionen gespielt hat; fehlt bei „Leicht“. Das Nachspielen braucht sie nicht
+   * (die Züge des Bots stehen in `actions`), sie wird mitgeführt, damit `botPlanRecorded` und die Anzeige dieselbe Stufe
+   * nutzen und `?bot=` beim Teilen erhalten bleibt (`shareQuery`).
+   */
+  botLevel?: BotLevel;
 }
 
 export type ActionError = PlayError | 'wrong-round';
 export type ActionResult = { ok: true; state: MatchState } | { ok: false; state: MatchState; reason: ActionError };
 
-export function createRecord(seed: number): RecordedMatch {
-  return { version: RECORD_VERSION, seed, actions: [] };
+/** Leere Aufzeichnung; die Stufe des Bots wird nur für „Normal“ eingetragen (siehe `RecordedMatch.botLevel`). */
+export function createRecord(seed: number, botLevel: BotLevel = 'easy'): RecordedMatch {
+  return { version: RECORD_VERSION, seed, actions: [], ...(botLevel === 'easy' ? {} : { botLevel }) };
 }
 
 export function appendAction(record: RecordedMatch, action: RecordedAction): RecordedMatch {
@@ -134,16 +141,20 @@ export function performAction(
   return { result, record: result.ok ? appendAction(record, action) : record };
 }
 
-/** Wie `botPlan` (gleiche Züge, gleicher Zustand), schreibt aber jede Karte und das „Bereit“ des Bots mit. */
+/**
+ * Wie `botPlanFor` (gleiche Züge, gleicher Zustand), schreibt aber jede Karte und das „Bereit“ des Bots mit. Die Stufe
+ * kommt aus `level`, sonst aus `record.botLevel`, sonst „Leicht“.
+ */
 export function botPlanRecorded(
   state: MatchState,
   record: RecordedMatch,
   player: PlayerIndex,
   priority?: readonly string[],
+  level: BotLevel = record.botLevel ?? 'easy',
 ): { state: MatchState; record: RecordedMatch } {
   let current = state;
   let recorded = record;
-  for (let move = botStep(current, player, priority); move; move = botStep(current, player, priority)) {
+  for (let move = botStepFor(level, current, player, priority); move; move = botStepFor(level, current, player, priority)) {
     const base = { round: current.round, player };
     const action: RecordedAction = move.economy
       ? move.economy === 'buy-lane'
@@ -310,9 +321,10 @@ export function decodeMatch(seed: number, text: string): RecordedMatch | null {
   return { version: RECORD_VERSION, seed, actions };
 }
 
-/** Query-String zum Teilen: `?replay=<seed>&moves=<kodiert>`. */
+/** Query-String zum Teilen: `?replay=<seed>&moves=<kodiert>`, bei „Normal“ mit angehängtem `&bot=normal`. */
 export function shareQuery(record: RecordedMatch): string {
-  return `?replay=${record.seed}&moves=${encodeMatch(record)}`;
+  const bot = record.botLevel && record.botLevel !== 'easy' ? `&bot=${record.botLevel}` : '';
+  return `?replay=${record.seed}&moves=${encodeMatch(record)}${bot}`;
 }
 
 /** Bricht einen langen Text ohne Leerzeichen (z. B. eine URL) in Zeilen zu höchstens `perLine` Zeichen. */

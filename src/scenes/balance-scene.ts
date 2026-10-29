@@ -1,5 +1,13 @@
 import Phaser from 'phaser';
-import { buildReport, type BalanceReport, type MatchResult, simulateMatch, strategiesForSeed } from '../logic/balance-sim';
+import {
+  buildReport,
+  type BalanceReport,
+  levelsForSeed,
+  type MatchResult,
+  simulateMatch,
+  strategiesForSeed,
+} from '../logic/balance-sim';
+import { BOT_LEVEL_NAMES, BOT_LEVELS } from '../logic/bot';
 import { getCardDef } from '../logic/cards';
 import { ROUND_EVENTS } from '../logic/round-events';
 import { VIEW } from './main-scene';
@@ -60,7 +68,7 @@ export class BalanceScene extends Phaser.Scene {
     this.text(
       8,
       ROWS_TOP + 7 * ROW_HEIGHT + 8,
-      'Bot-Statistik: beide Seiten spielen denselben Bot mit zufälliger Kartenreihenfolge, kein\nSpielerverhalten. Kartenwerte sind korreliert (gleiches Deck für beide).',
+      'Bot-Statistik: Leicht (zufällige Kartenreihenfolge) gegen Normal (Lagebewertung), Seiten\nwechseln je Seed. Kein Spielerverhalten; Kartenwerte sind korreliert (gleiches Deck).',
       9,
       TEXT.dim,
     );
@@ -72,7 +80,7 @@ export class BalanceScene extends Phaser.Scene {
     if (!this.done) {
       for (let index = 0; index < MATCHES_PER_FRAME && this.results.length < MATCH_COUNT; index += 1) {
         const seed = (this.startSeed + this.results.length) >>> 0;
-        this.results.push(simulateMatch(seed, strategiesForSeed(seed)));
+        this.results.push(simulateMatch(seed, strategiesForSeed(seed), levelsForSeed(seed)));
       }
       this.done = this.results.length >= MATCH_COUNT;
       if (this.done) {
@@ -149,9 +157,20 @@ export class BalanceScene extends Phaser.Scene {
     if (report) {
       add(8, 32, `Matches: ${report.totalMatches}   Seeds ${report.startSeed}–${end}`);
       add(8, 48, `Sieg Spieler 0: ${percent(report.winRatePlayer0)}   Spieler 1: ${percent(report.winRatePlayer1)}   Remis: ${percent(report.drawRate)}`);
-      add(8, 64, `Runden Ø ${report.avgRounds.toFixed(2)} (min ${report.minRounds}, max ${report.maxRounds})`);
+      add(
+        8,
+        64,
+        `Runden Ø ${report.avgRounds.toFixed(2)} (min ${report.minRounds}, max ${report.maxRounds})   Basis-Siegquote ${percent(report.baselineWinRate)}`,
+        10,
+      );
       add(8, 80, `Ende durch Tower: ${percent(report.towerKillShare)}   nach Rundengrenze: ${percent(report.roundLimitShare)}`);
-      add(8, 96, `Basis-Siegquote (je Spieler): ${percent(report.baselineWinRate)}`);
+      add(
+        8,
+        96,
+        `Sieg ${BOT_LEVELS.map((level) => `${BOT_LEVEL_NAMES[level]} ${percent(report.levelStats[level].winRate)}`).join('   ')}   (Leicht gegen Normal)`,
+        11,
+        TEXT.gold,
+      );
       add(8, 112, `Ereignisse: ${ROUND_EVENTS.map((def) => `${def.name} ${report.eventCounts[def.id]}`).join('   ')}`, 10, TEXT.dim);
 
       add(6, 144, 'Karte', 10, TEXT.dim);

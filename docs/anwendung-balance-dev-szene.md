@@ -54,6 +54,11 @@ zerstört wurde (`destroyedOutcome`), sonst `round-limit`. Endet ein Match nicht
 
 ### Änderung am Bot
 
+> Stand mit Bot-Stufen: Die Szene simuliert Leicht gegen Normal (Seitenwechsel je Seed, `levelsForSeed`) und zeigt die Zeile
+> „Sieg Leicht x % Normal y %“ aus `BalanceReport.levelStats`. `simulateMatch(seed, strategies, levels?)` ruft `botStepFor`
+> auf; ohne `levels` spielen beide Seiten „Leicht“ wie unten beschrieben, `runSimulation` ohne `compareLevels` ebenso.
+> Seed-Fortschritt und `MATCH_COUNT` sind gleich geblieben. Einzelheiten: [`anwendung-bot-stufen.md`](anwendung-bot-stufen.md).
+
 `botPlan(state, playerIndex, priority = PRIORITY)` hat einen dritten, optionalen Parameter für die Kartenreihenfolge.
 Ohne ihn verhält sich der Bot exakt wie vorher. Karten, die in der übergebenen Liste fehlen, spielt der Bot nicht. Das
 ist die einzige Änderung am Produktionscode; `match.ts`, `combat.ts` und `cards.ts` sind unverändert.
@@ -67,6 +72,8 @@ ist die einzige Änderung am Produktionscode; `match.ts`, `combat.ts` und `cards
 - `avgRounds`, `minRounds`, `maxRounds`
 - `towerKillShare` und `roundLimitShare` (zusammen 1)
 - `baselineWinRate`: Siege über alle Spieler-Matches (2 je Match)
+- `levelStats`: je Bot-Stufe (`easy`, `normal`) `matches`, `wins`, `winRate` aus den Matches mit verschiedenen Stufen; ohne
+  Stufenvergleich alle Werte 0
 
 `CardStats` (je Eintrag in `CARD_DEFS`, auch bei 0 Einsätzen):
 

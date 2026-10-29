@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { botPlan } from './bot';
+import { type BotLevel, botPlan, botPlanFor } from './bot';
 import { CARD_DEFS, getCardDef } from './cards';
-import { createMatch, DISCARD_ENERGY, MAX_ROUNDS, playCard, setReady, UPGRADE_COST } from './match';
+import {
+  advance,
+  createMatch,
+  DISCARD_ENERGY,
+  MAX_ROUNDS,
+  type MatchState,
+  playCard,
+  setReady,
+  UPGRADE_COST,
+} from './match';
 import {
   applyAction,
   appendAction,
@@ -22,6 +31,72 @@ import { playScriptedMatch } from './match-record-fixture';
 import { parseReplaySeed } from './seed';
 
 const SEEDS = [1, 5, 42];
+
+describe('Bot-Stufe in der Aufzeichnung', () => {
+  /** Spielt den Bot (Spieler 1) mit der Stufe des Records gegen einen Spieler 0, der nur „bereit“ meldet. */
+  function playWithBot(seed: number, level?: BotLevel): { state: MatchState; record: RecordedMatch } {
+    let state = createMatch(seed);
+    let record = createRecord(seed, level);
+    for (let guard = 0; guard < 1000 && state.phase !== 'over'; guard += 1) {
+      if (state.phase === 'planning') {
+        const human = performAction(state, record, 0, { type: 'ready' });
+        const planned = botPlanRecorded(human.result.state, human.record, 1);
+        state = planned.state;
+        record = planned.record;
+      } else {
+        state = advance(state, 1000);
+      }
+    }
+    return { state, record };
+  }
+
+  it('createRecord trägt die Stufe nur für „Normal“ ein', () => {
+    expect(createRecord(3)).toEqual({ version: RECORD_VERSION, seed: 3, actions: [] });
+    expect(createRecord(3, 'easy')).not.toHaveProperty('botLevel');
+    expect(createRecord(3, 'normal').botLevel).toBe('normal');
+  });
+
+  it('botPlanRecorded nutzt die Stufe des Records und spielt exakt wie botPlanFor', () => {
+    for (const seed of SEEDS) {
+      const state = createMatch(seed);
+      const normal = botPlanRecorded(state, createRecord(seed, 'normal'), 1);
+      expect(normal.state).toEqual(botPlanFor('normal', state, 1));
+      const easy = botPlanRecorded(state, createRecord(seed), 1);
+      expect(easy.state).toEqual(botPlan(state, 1));
+      expect(botPlanRecorded(state, createRecord(seed), 1, undefined, 'normal').state).toEqual(normal.state);
+    }
+  });
+
+  it('wählt mit „Normal“ andere Züge als mit „Leicht“', () => {
+    const differs = SEEDS.some((seed) => {
+      const state = createMatch(seed);
+      return (
+        encodeMatch(botPlanRecorded(state, createRecord(seed, 'normal'), 1).record) !==
+        encodeMatch(botPlanRecorded(state, createRecord(seed), 1).record)
+      );
+    });
+    expect(differs).toBe(true);
+  });
+
+  it('ein mit „Normal“ aufgezeichnetes Match lässt sich mit identischem Ergebnis nachspielen', () => {
+    for (const seed of [1, 2, 3, 4, 5, 42]) {
+      const original = playWithBot(seed, 'normal');
+      expect(original.state.phase).toBe('over');
+      expect(original.record.botLevel).toBe('normal');
+      const replayed = replayRecorded(decodeMatch(seed, encodeMatch(original.record))!);
+      expect(replayed.ok).toBe(true);
+      expect(replayed.state).toEqual(original.state);
+    }
+  });
+
+  it('shareQuery hängt die Stufe „Normal“ an; bei „Leicht“ bleibt die URL wie bisher', () => {
+    const easy = playWithBot(1).record;
+    const normal = playWithBot(1, 'normal').record;
+    expect(shareQuery(easy)).toBe(`?replay=1&moves=${encodeMatch(easy)}`);
+    expect(shareQuery(normal)).toBe(`?replay=1&moves=${encodeMatch(normal)}&bot=normal`);
+    expect(shareQuery({ ...easy, botLevel: 'easy' })).toBe(shareQuery(easy));
+  });
+});
 
 describe('Aufzeichnung und Nachspielen', () => {
   it('enthält alle acht Aktionstypen mit Runde und Spieler', () => {

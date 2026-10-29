@@ -3,6 +3,11 @@
 Diese Seite beschreibt, was der Auftrag „Bot-Strategie mit gezielten Unit-Tests absichern“ umgesetzt hat und worauf zu
 achten ist. Getestet wird `botPlan(state, playerIndex)` in `src/logic/bot.ts`.
 
+> Seit dem Auftrag „Bot-Stufe Normal“ gibt es zwei Stufen: Diese Seite beschreibt den Bot „Leicht“ (feste `PRIORITY`-Liste,
+> `botStep`/`botPlan`), dessen Tests unverändert gelten. Stufe „Normal“, Lagebewertung und ihre Tests in `bot.test.ts`
+> (Blöcke „Bot-Stufen“, „assessSituation“, „Bot „Normal““) stehen in
+> [`docs/anwendung-bot-stufen.md`](anwendung-bot-stufen.md).
+
 ## Ergebnis des Auftrags
 
 `src/logic/bot.test.ts` existierte schon (5 Tests) und wurde **ergänzt**, nicht neu angelegt. Die 5 Tests stehen

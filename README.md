@@ -1,7 +1,10 @@
 # TowerField
 
 Browser-Spiel mit [Phaser 3](https://phaser.io/), TypeScript und Vite: ein mobiles 1-gegen-1-Tower-Defense mit
-Karten (Hochformat, Touch, `Scale.FIT`). Aktuell spielt man lokal gegen einen deterministischen Bot.
+Karten (Hochformat, Touch, `Scale.FIT`). Aktuell spielt man lokal gegen einen deterministischen Bot in zwei Stufen:
+„Leicht“ (feste Kartenreihenfolge, Standard) und „Normal“ (bewertet die Lage). Die Stufe steht per `?bot=easy|normal` in
+der URL oder lässt sich in Runde 1 über den Schalter „Bot: …“ wechseln, siehe
+[`docs/anwendung-bot-stufen.md`](docs/anwendung-bot-stufen.md).
 
 ## Spielkonzept
 
@@ -139,9 +142,10 @@ Mit `npm run dev` zeigt http://localhost:5180/?scene=balance eine Tabelle aus 1.
 Rundengrenze). „Neu simulieren“ nimmt den nächsten Seed-Bereich, „Sieg“ in der Kopfzeile kehrt die Sortierung um,
 „Zurück“ öffnet das Spiel. Die Szene ist nur im Dev-Server registriert, nicht im Produktions-Build.
 
-Aussagekraft: Es sind Bot-Statistiken, kein Spielerverhalten. Beide Seiten nutzen denselben Bot, nur mit je Match
-zufällig gewürfelter Kartenreihenfolge (`botPlan(state, player, priority)`); Karten kommen aus demselben Deck, die
-Werte sind daher korreliert. Die Logik steht in `src/logic/balance-sim.ts`.
+Aussagekraft: Es sind Bot-Statistiken, kein Spielerverhalten. Die Szene spielt Leicht gegen Normal (Seitenwechsel je Seed)
+und zeigt die Siegquote je Stufe; „Leicht“ nutzt je Match eine zufällig gewürfelte Kartenreihenfolge
+(`botPlan(state, player, priority)`). Karten kommen aus demselben Deck, die Werte sind daher korreliert. Die Logik steht in
+`src/logic/balance-sim.ts`; `npm run balance` und der Regressionstest spielen weiter Leicht gegen Leicht.
 
 Der Smoke-Test braucht Chromium für Playwright: `npx playwright install chromium` (unter Linux einmalig zusätzlich
 `npx playwright install-deps chromium`).
@@ -155,7 +159,7 @@ src/
     balance-config.ts  alle Basiswerte an einer Stelle (von match.ts, combat.ts, cards.ts und lanes.ts gelesen)
     match.ts   Zustand, Runden, Hand, Energie, Karten ausspielen, Siegbedingung (Basiswerte aus balance-config.ts)
     combat.ts  Minion-Bewegung und Tower-Schaden (feste Ticks aus delta; Basiswerte aus balance-config.ts)
-    bot.ts     deterministischer Gegner (Kartenreihenfolge optional einstellbar)
+    bot.ts     Gegner in zwei Stufen: Leicht (feste Reihenfolge) und Normal (Lagebewertung, Zufall nur bei Gleichstand)
     balance-sim.ts  simulierte Bot-Matches und Kennzahlen (Dev-Szene)
     game-state.ts  nextRandom (Seed-Zufall); der alte „Sterne“-Code darin ist ungenutzt
   scenes/      Phaser-Szenen: Eingabe lesen, Logik aufrufen, Ergebnis zeichnen (balance-scene.ts nur im Dev-Server)

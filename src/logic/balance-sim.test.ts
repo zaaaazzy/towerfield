@@ -1,12 +1,81 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { buildReport, type MatchResult, runSimulation, shuffledPriority, simulateMatch, strategiesForSeed } from './balance-sim';
+import {
+  buildReport,
+  levelsForSeed,
+  type MatchResult,
+  runSimulation,
+  shuffledPriority,
+  simulateMatch,
+  strategiesForSeed,
+} from './balance-sim';
 import { ECONOMY_ACTIONS } from './bot';
 import { CARD_DEFS } from './cards';
 import { MAX_ROUNDS } from './match';
 import { EVENT_INTERVAL } from './round-events';
 
 const ids = CARD_DEFS.map((def) => def.id);
+
+describe('Stufenvergleich Leicht gegen Normal', () => {
+  it('wechselt die Seiten je Seed', () => {
+    expect(levelsForSeed(2)).toEqual(['easy', 'normal']);
+    expect(levelsForSeed(3)).toEqual(['normal', 'easy']);
+    expect(levelsForSeed(0)).toEqual(['easy', 'normal']);
+  });
+
+  it('simulateMatch ohne Stufen bleibt Leicht gegen Leicht und trägt keine Stufen ein', () => {
+    const plain = simulateMatch(5, strategiesForSeed(5));
+    expect(plain).not.toHaveProperty('levels');
+    expect(simulateMatch(5, strategiesForSeed(5), ['easy', 'easy']).played).toEqual(plain.played);
+  });
+
+  it('simuliert Matches mit beiden Stufen und ist reproduzierbar', () => {
+    const levels = levelsForSeed(4);
+    const match = simulateMatch(4, strategiesForSeed(4), levels);
+    expect(match.levels).toEqual(levels);
+    expect(simulateMatch(4, strategiesForSeed(4), levels)).toEqual(match);
+    expect(['player0', 'player1', 'draw']).toContain(match.outcome);
+  });
+
+  it('der Bericht enthält Siegquoten für Leicht und Normal aus Matches mit beiden Stufen', () => {
+    const report = runSimulation({ startSeed: 1, count: 40, compareLevels: true });
+    const { easy, normal } = report.levelStats;
+    expect(easy.matches).toBe(40);
+    expect(normal.matches).toBe(40);
+    expect(easy.wins + normal.wins).toBeLessThanOrEqual(40);
+    expect(easy.winRate).toBeCloseTo(easy.wins / 40, 10);
+    expect(normal.winRate).toBeCloseTo(normal.wins / 40, 10);
+    expect(easy.winRate + normal.winRate + report.drawRate).toBeCloseTo(1, 10);
+    expect(runSimulation({ startSeed: 1, count: 40, compareLevels: true })).toEqual(report);
+  });
+
+  it('beide Stufen kommen in den Ergebnissen vor, auf beiden Seiten', () => {
+    const results = [1, 2, 3, 4].map((seed) => simulateMatch(seed, strategiesForSeed(seed), levelsForSeed(seed)));
+    for (const index of [0, 1]) expect(new Set(results.map((r) => r.levels![index]))).toEqual(new Set(['easy', 'normal']));
+  });
+
+  it('zählt Siege und Remis je Stufe aus den Ergebnissen; gleiche Stufen und fehlende Stufen zählen nicht', () => {
+    const report = buildReport(
+      [
+        result({ outcome: 'player0', rounds: 5, levels: ['easy', 'normal'] }),
+        result({ outcome: 'player0', rounds: 5, levels: ['normal', 'easy'] }),
+        result({ outcome: 'player1', rounds: 5, levels: ['normal', 'easy'] }),
+        result({ outcome: 'draw', rounds: 5, levels: ['easy', 'normal'] }),
+        result({ outcome: 'player0', rounds: 5, levels: ['normal', 'normal'] }),
+        result({ outcome: 'player1', rounds: 5 }),
+      ],
+      0,
+    );
+    expect(report.levelStats.easy).toEqual({ matches: 4, wins: 2, winRate: 0.5 });
+    expect(report.levelStats.normal).toEqual({ matches: 4, wins: 1, winRate: 0.25 });
+  });
+
+  it('ohne Stufenvergleich sind alle Quoten 0', () => {
+    const empty = { easy: { matches: 0, wins: 0, winRate: 0 }, normal: { matches: 0, wins: 0, winRate: 0 } };
+    expect(buildReport([], 0).levelStats).toEqual(empty);
+    expect(runSimulation({ startSeed: 1, count: 5 }).levelStats).toEqual(empty);
+  });
+});
 
 function result(partial: Partial<MatchResult> & Pick<MatchResult, 'outcome' | 'rounds'>): MatchResult {
   return { seed: 0, endedBy: 'round-limit', played: [[], []], ...partial };

@@ -22,6 +22,7 @@ import {
   START_HAND,
 } from '../src/logic/match';
 import {
+  BOT_TAP,
   cardPointOf,
   collectErrors,
   DISCARD_BUTTON,
@@ -31,6 +32,7 @@ import {
   dragMinion,
   fastForwardCombat,
   hasVisibleText,
+  hasVisibleTextStarting,
   laneSlot,
   minionPoint,
   openGame,
@@ -39,8 +41,11 @@ import {
   pointerMove,
   pointerUp,
   readDots,
+  readBotActions,
+  readBotLevel,
   readSelected,
   readState,
+  SEED,
   sampleCombat,
   setHand,
   slotPoint,
@@ -66,6 +71,47 @@ async function startCombat(page: Parameters<typeof tapReady>[0]): Promise<void> 
   await tapReady(page);
   await expect.poll(async () => (await readState(page)).phase).toBe('combat');
 }
+
+test('?bot=normal startet das Match mit dem Bot „Normal“ und zeigt die Stufe an', async ({ page }) => {
+  const errors = collectErrors(page);
+  await openGame(page, SEED, 'bot=normal');
+  expect(await readBotLevel(page)).toEqual({ level: 'normal', recorded: 'normal' });
+  expect(await hasVisibleText(page, 'Bot: Normal')).toBe(true);
+  // Der Bot hat in Runde 1 schon geplant (er meldet sich zuletzt bereit).
+  expect((await readBotActions(page)).at(-1)).toBe('ready');
+
+  await startCombat(page);
+  await expect.poll(() => hasVisibleTextStarting(page, 'Bot Normal')).toBe(true);
+  expect(await readBotLevel(page)).toEqual({ level: 'normal', recorded: 'normal' });
+  expect(errors).toEqual([]);
+});
+
+test('ohne ?bot= spielt der Bot „Leicht“; der Schalter wechselt die Stufe vor der ersten Aktion und beginnt das Match neu', async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await openGame(page);
+  expect(await readBotLevel(page)).toEqual({ level: 'easy', recorded: undefined });
+  expect(await hasVisibleText(page, 'Bot: Leicht')).toBe(true);
+  const hand = (await readState(page)).players[0].hand;
+
+  await tap(page, BOT_TAP.x, BOT_TAP.y);
+  await expect.poll(() => readBotLevel(page)).toEqual({ level: 'normal', recorded: 'normal' });
+  await expect.poll(() => hasVisibleText(page, 'Bot: Normal')).toBe(true);
+  // Gleicher Seed: die Hand des Menschen bleibt, der Bot hat mit der neuen Stufe geplant.
+  expect((await readState(page)).players[0].hand).toEqual(hand);
+  await expect.poll(async () => (await readBotActions(page)).at(-1)).toBe('ready');
+
+  await tap(page, BOT_TAP.x, BOT_TAP.y);
+  await expect.poll(() => readBotLevel(page)).toEqual({ level: 'easy', recorded: undefined });
+
+  // Nach „Bereit“ ist die Stufe festgelegt: ein weiteres Tippen ändert sie nicht.
+  await startCombat(page);
+  await tap(page, BOT_TAP.x, BOT_TAP.y);
+  expect((await readBotLevel(page)).level).toBe('easy');
+  await expect.poll(() => hasVisibleTextStarting(page, 'Bot Leicht')).toBe(true);
+  expect(errors).toEqual([]);
+});
 
 test('Karte mit Ziel Line antippen wählt sie aus, erneutes Antippen hebt die Auswahl auf', async ({ page }) => {
   const errors = collectErrors(page);

@@ -1,6 +1,23 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { botPlan as planWith, botStep as stepWith, ECONOMY_ACTIONS, PRIORITY as BOT_PRIORITY } from './bot';
+import {
+  assessSituation,
+  BOT_LEVEL_NAMES,
+  BOT_LEVELS,
+  botPlan as planWith,
+  botPlanFor,
+  botSeed,
+  botStep as stepWith,
+  botStepFor,
+  ECONOMY_ACTIONS,
+  normalPriority,
+  PRIORITY as BOT_PRIORITY,
+  STRONG_LIMIT,
+  THREAT_LIMIT,
+} from './bot';
 import { getCardDef } from './cards';
+import { activeSynergies } from './synergies';
 import { isLaneBuyable, MAX_FIELD_LEVEL } from './lanes';
 import {
   BASE_ENERGY,
@@ -12,6 +29,7 @@ import {
   MAX_ENERGY,
   MAX_ROUNDS,
   type MatchState,
+  openLanes,
   type PlayerIndex,
   UPGRADE_COST,
 } from './match';
@@ -736,5 +754,310 @@ describe('Bot: Wirtschaft', () => {
     state = economyPlan(state);
     expect(state.players[1].level).toBeGreaterThanOrEqual(2);
     expect(state.players[1].energy).toBeLessThanOrEqual(MAX_ENERGY);
+  });
+});
+
+/** Legt `count` lebende Minions des Spielers 0 (Gegner des Bots) auf die Lane `line` (Ids ab 500). */
+function addFoes(state: MatchState, line: number, count: number, hp = 30): void {
+  const enemy = state.players[0];
+  for (let index = 0; index < count; index += 1) {
+    enemy.minions.push({ id: 500 + enemy.minions.length, line, position: index, hp, damage: 6, range: 4, speed: 10 });
+  }
+}
+
+/** Zustand mit gesetzter Hand und Energie; das Feld ist auf Stufe 2 ausgebaut (Lanes 0 bis 2 offen). */
+function normalState(hand: string[], energy = 6, seed = 4): MatchState {
+  const state = grow(withHand(hand, energy, seed), 2);
+  expect(openLanes(state.players[1])).toEqual([0, 1, 2]);
+  // Letzte Runde: Upgrade und Lane-Kauf lohnen sich nicht mehr, der Bot spielt dann nur Karten.
+  state.round = MAX_ROUNDS;
+  return state;
+}
+
+/** Karten der Prioritätsliste „Normal“ in ihrer Reihenfolge, ohne Wirtschaftsaktionen. */
+const cardOrder = (state: MatchState, seed: number): string[] =>
+  normalPriority(state, 1, seed).filter((id) => state.players[1].hand.includes(id));
+
+describe('Bot-Stufen', () => {
+  it('kennt die Stufen Leicht und Normal', () => {
+    expect(BOT_LEVELS).toEqual(['easy', 'normal']);
+    expect(BOT_LEVEL_NAMES).toEqual({ easy: 'Leicht', normal: 'Normal' });
+  });
+
+  it('botStepFor("easy") liefert denselben Zug wie botStep, auch mit eigener Reihenfolge', () => {
+    for (let seed = 1; seed <= 25; seed += 1) {
+      const state = createMatch(seed);
+      expect(botStepFor('easy', state, 1)).toEqual(stepWith(state, 1, BOT_PRIORITY));
+      expect(botStepFor('easy', state, 1, CARD_PRIORITY)).toEqual(stepWith(state, 1, CARD_PRIORITY));
+    }
+  });
+
+  it('botPlanFor("easy") liefert denselben Zustand wie botPlan', () => {
+    for (let seed = 1; seed <= 10; seed += 1) {
+      const state = createMatch(seed);
+      expect(botPlanFor('easy', state, 1)).toEqual(planWith(state, 1, BOT_PRIORITY));
+    }
+  });
+
+  it('botPlanFor("normal") meldet bereit, bleibt im Energierahmen und ist reproduzierbar', () => {
+    for (let seed = 1; seed <= 10; seed += 1) {
+      const state = createMatch(seed);
+      const planned = botPlanFor('normal', state, 1);
+      expect(planned.ready[1]).toBe(true);
+      expect(planned.players[1].energy).toBeGreaterThanOrEqual(0);
+      expect(botPlanFor('normal', state, 1)).toEqual(planned);
+    }
+  });
+
+  it('bot.ts nutzt weder Phaser noch DOM und keinen anderen Zufall als nextRandom', () => {
+    const source = readFileSync(fileURLToPath(new URL('./bot.ts', import.meta.url)), 'utf8');
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    expect(code).not.toMatch(/from 'phaser'|\bwindow\b|\bdocument\b|\bcanvas\b|Math\.random|Date\.now/i);
+    expect(code).toContain('nextRandom');
+  });
+});
+
+describe('assessSituation', () => {
+  it('markiert eine Lane erst als gefährdet, wenn die gegnerischen Minions die Schwelle überschreiten', () => {
+    const state = normalState([]);
+    addFoes(state, 0, 2);
+    const two = assessSituation(state, 1).lanes[0]!;
+    expect(two).toMatchObject({ open: true, enemyMinions: 2, endangered: false });
+    expect(two.threat).toBeLessThan(THREAT_LIMIT);
+    addFoes(state, 0, 1);
+    const three = assessSituation(state, 1).lanes[0]!;
+    expect(three).toMatchObject({ enemyMinions: 3, endangered: true });
+    expect(three.threat).toBeGreaterThanOrEqual(THREAT_LIMIT);
+    expect(three.danger).toBe(three.threat - three.towerHp);
+  });
+
+  it('gefährdet auch, wenn die Bedrohung die Tower-HP übersteigt, obwohl sie unter der Schwelle liegt', () => {
+    const state = normalState([]);
+    addFoes(state, 0, 2);
+    setLaneHp(state, 0, 50);
+    const lane = assessSituation(state, 1).lanes[0]!;
+    expect(lane.threat).toBeLessThan(THREAT_LIMIT);
+    expect(lane).toMatchObject({ towerHp: 50, endangered: true });
+  });
+
+  it('gefährdet nichts ohne Gegner, ignoriert Tote und fremde Lanes, zählt Schild zu den HP', () => {
+    const state = normalState([]);
+    setLaneHp(state, 0, 5);
+    expect(assessSituation(state, 1).lanes[0]).toMatchObject({ towerHp: 5, enemyMinions: 0, endangered: false });
+    addFoes(state, 0, 4, 0);
+    addFoes(state, 1, 1);
+    const lanes = assessSituation(state, 1).lanes;
+    expect(lanes[0]).toMatchObject({ enemyMinions: 0, endangered: false });
+    expect(lanes[1]).toMatchObject({ enemyMinions: 1, endangered: false });
+    state.players[1].lines[1]!.towers[0]!.shield = 25;
+    expect(assessSituation(state, 1).lanes[1]!.towerHp).toBe(laneHp(state, 1) + 25);
+  });
+
+  it('meldet gesperrte Lanes als nicht offen und nie als gefährdet', () => {
+    const state = withHand([], 3);
+    addFoes(state, 1, 5);
+    const lane = assessSituation(state, 1).lanes[1]!;
+    expect(lane).toMatchObject({ open: false, endangered: false, strong: false });
+  });
+
+  it('erkennt eine starke eigene Lane, aber nicht bei Gefährdung oder zu wenig Stärke', () => {
+    const state = normalState([]);
+    addMinions(state, 0, 1);
+    expect(assessSituation(state, 1).lanes[0]).toMatchObject({ ownMinions: 1, strong: false });
+    addMinions(state, 0, 1);
+    const strong = assessSituation(state, 1).lanes[0]!;
+    expect(strong).toMatchObject({ ownMinions: 2, strong: true });
+    expect(strong.ownPower).toBeGreaterThanOrEqual(STRONG_LIMIT);
+    addFoes(state, 0, 3);
+    expect(assessSituation(state, 1).lanes[0]).toMatchObject({ endangered: true, strong: false });
+  });
+
+  it('liest die Synergien: Auslöser, Erhalt und aktive Synergien aus player.played und player.synergies', () => {
+    const state = normalState([]);
+    expect(assessSituation(state, 1)).toMatchObject({ synergies: [], triggers: [], keeps: [] });
+    const player = state.players[1];
+    player.played = [{ cardId: 'summon-archer', line: 0 }];
+    expect(assessSituation(state, 1).triggers).toEqual(['line-upgrade']);
+    player.played = [{ cardId: 'line-upgrade' }];
+    expect(assessSituation(state, 1).triggers).toEqual(['summon-archer']);
+    player.played = [{ cardId: 'summon-archer', line: 0 }, { cardId: 'line-upgrade' }];
+    player.synergies = activeSynergies(player.played);
+    const situation = assessSituation(state, 1);
+    expect(situation.synergies).toEqual(player.synergies);
+    expect(situation.triggers).toEqual([]);
+    expect([...situation.keeps].sort()).toEqual(['line-upgrade', 'summon-archer']);
+  });
+
+  it('verändert den Zustand nicht', () => {
+    const state = normalState(['tower-hp']);
+    addFoes(state, 0, 3);
+    const before = structuredClone(state);
+    assessSituation(state, 1);
+    expect(state).toEqual(before);
+  });
+});
+
+describe('Bot „Normal“: Kartenwahl nach Lage', () => {
+  it('spielt bei gefährdeter Lane eine Verteidigungskarte vor einer Angriffskarte', () => {
+    for (let seed = 1; seed <= 20; seed += 1) {
+      const state = normalState(['tower-damage', 'tower-hp']);
+      addFoes(state, 0, 3);
+      expect(cardOrder(state, seed)).toEqual(['tower-hp', 'tower-damage']);
+      expect(botStepFor('normal', state, 1)?.cardId).toBe('tower-hp');
+    }
+  });
+
+  it('zählt Beschwörungen und Schilde zur Verteidigung', () => {
+    const state = normalState(['lane-buff', 'summon-minion', 'lane-shield', 'tower-damage']);
+    addFoes(state, 0, 3);
+    const order = cardOrder(state, 3);
+    expect(order.slice(0, 2).sort()).toEqual(['lane-shield', 'summon-minion']);
+    expect(order.slice(2).sort()).toEqual(['lane-buff', 'tower-damage']);
+  });
+
+  it('spielt bei starker eigener Lane Angriffs- und Buff-Karten vor Verteidigung', () => {
+    for (let seed = 1; seed <= 10; seed += 1) {
+      const state = normalState(['tower-hp', 'tower-damage', 'lane-buff']);
+      addMinions(state, 0, 2);
+      const order = cardOrder(state, seed);
+      expect(order.indexOf('tower-hp')).toBe(2);
+      expect(order.slice(0, 2).sort()).toEqual(['lane-buff', 'tower-damage']);
+    }
+  });
+
+  it('bevorzugt bei gleichen Karten die, die eine Synergie auslöst', () => {
+    for (let seed = 1; seed <= 20; seed += 1) {
+      const state = normalState(['summon-minion', 'summon-archer']);
+      state.players[1].played = [{ cardId: 'line-upgrade' }];
+      expect(cardOrder(state, seed)).toEqual(['summon-archer', 'summon-minion']);
+    }
+    const state = normalState(['summon-minion', 'summon-archer'], 2);
+    state.players[1].played = [{ cardId: 'line-upgrade' }];
+    expect(botStepFor('normal', state, 1)).toMatchObject({ cardId: 'summon-archer' });
+  });
+
+  it('gibt Karten bereits aktiver Synergien einen kleinen Bonus', () => {
+    for (let seed = 1; seed <= 20; seed += 1) {
+      const state = normalState(['summon-minion', 'summon-archer']);
+      state.players[1].played = [{ cardId: 'summon-archer', line: 0 }, { cardId: 'line-upgrade' }];
+      state.players[1].synergies = activeSynergies(state.players[1].played);
+      expect(cardOrder(state, seed)).toEqual(['summon-archer', 'summon-minion']);
+    }
+  });
+
+  it('lässt Wirtschaftsaktionen in der Liste: Upgrade vor neutralen Karten, Ziehen zuletzt', () => {
+    const state = normalState(['summon-minion', 'tower-hp', 'summon-minion']);
+    const order = normalPriority(state, 1, 9);
+    expect(order[0]).toBe('upgrade');
+    expect(order.at(-1)).toBe('draw');
+    expect(order.filter((id) => id === 'summon-minion')).toHaveLength(1);
+    expect(order).toContain('buy-lane');
+  });
+
+  it('führt Wirtschaftsaktionen über die bestehenden Regeln aus', () => {
+    const state = normalState([], 3);
+    state.round = 1;
+    const move = botStepFor('normal', state, 1);
+    expect(move).toMatchObject({ economy: 'upgrade', cardId: '' });
+    expect(move!.state.players[1].energy).toBe(3 - UPGRADE_COST);
+  });
+
+  it('wirft nutzlose Karten wie „Leicht“ ab, wenn die Energie dadurch eine Karte bezahlbar macht', () => {
+    const state = withHand(['buff-minion', 'summon-brute'], 1);
+    const move = botStepFor('normal', state, 1)!;
+    expect(move).toMatchObject({ cardId: 'buff-minion', discard: true, line: undefined });
+    expect(move.state.players[1].energy).toBe(2);
+    // Mit der Energie baut „Normal“ danach das Feld aus (Upgrade steht vor neutralen Karten).
+    const planned = botPlanFor('normal', state, 1);
+    expect(planned.players[1].hand).toEqual(['summon-brute']);
+    expect(planned.players[1].level).toBe(2);
+  });
+});
+
+describe('Bot „Normal“: Zielwahl', () => {
+  it('platziert Beschwörungen in der gefährdetsten Lane', () => {
+    const state = normalState(['summon-minion']);
+    addFoes(state, 1, 3);
+    addFoes(state, 0, 1);
+    expect(botStepFor('normal', state, 1)).toMatchObject({ cardId: 'summon-minion', line: 1 });
+    const other = normalState(['summon-minion']);
+    // Gleiche Tower-HP in beiden Lanes, damit nur die Zahl der Gegner entscheidet.
+    setLaneHp(other, 0, 100);
+    setLaneHp(other, 1, 100);
+    addFoes(other, 0, 4);
+    addFoes(other, 1, 3);
+    expect(botStepFor('normal', other, 1)).toMatchObject({ cardId: 'summon-minion', line: 0 });
+  });
+
+  it('wählt ohne Gegner die Lane mit den wenigsten Tower-HP und bei Gleichstand die mit weniger Minions', () => {
+    const state = normalState(['summon-minion']);
+    setLaneHp(state, 1, 60);
+    expect(botStepFor('normal', state, 1)).toMatchObject({ line: 1 });
+    const even = normalState(['summon-minion']);
+    addMinions(even, 0, 1);
+    expect(botStepFor('normal', even, 1)).toMatchObject({ line: 1 });
+  });
+
+  it('setzt Tower-Upgrades in die gefährdetste Lane', () => {
+    const state = normalState(['tower-hp']);
+    addFoes(state, 1, 3);
+    expect(botStepFor('normal', state, 1)).toMatchObject({ cardId: 'tower-hp', line: 1 });
+  });
+
+  it('legt ein Lane-Schild auf die gefährdetste Lane mit eigenen Minions, einen Buff auf die stärkste', () => {
+    const shield = normalState(['lane-shield']);
+    addMinions(shield, 0, 1);
+    addMinions(shield, 1, 1);
+    addFoes(shield, 1, 3);
+    expect(botStepFor('normal', shield, 1)).toMatchObject({ cardId: 'lane-shield', line: 1 });
+
+    const buff = normalState(['lane-buff']);
+    addMinions(buff, 0, 1);
+    addMinions(buff, 1, 2);
+    expect(botStepFor('normal', buff, 1)).toMatchObject({ cardId: 'lane-buff', line: 1 });
+  });
+
+  it('behält bei Spezialisierungen und Minion-Upgrades die Regeln von „Leicht“', () => {
+    const upgrade = normalState(['minion-upgrade-line']);
+    addFoes(upgrade, 1, 3);
+    expect(botStepFor('normal', upgrade, 1)).toMatchObject({ cardId: 'minion-upgrade-line', line: 0 });
+    const special = grow(withHand(['tower-shield'], 4), 3);
+    special.round = MAX_ROUNDS;
+    expect(botStepFor('normal', special, 1)).toEqual(stepWith(special, 1, ['tower-shield']));
+  });
+});
+
+describe('Bot „Normal“: Zufall nur für Gleichstände', () => {
+  it('liefert für denselben Zustand denselben Zug und dieselbe Liste', () => {
+    const state = normalState(['summon-minion', 'summon-brute', 'summon-scout'], 5);
+    addFoes(state, 0, 3);
+    expect(botStepFor('normal', state, 1)).toEqual(botStepFor('normal', structuredClone(state), 1));
+    expect(normalPriority(state, 1, 77)).toEqual(normalPriority(state, 1, 77));
+    expect(botSeed(state, 1)).toBe(botSeed(structuredClone(state), 1));
+  });
+
+  it('löst Gleichstände je nach Seed verschieden auf, ohne die Reihenfolge nach Punkten zu ändern', () => {
+    const state = normalState(['summon-minion', 'summon-brute', 'tower-damage']);
+    addFoes(state, 0, 3);
+    const firsts = new Set<string>();
+    for (let seed = 1; seed <= 40; seed += 1) {
+      const order = cardOrder(state, seed);
+      firsts.add(order[0]!);
+      expect(order.at(-1)).toBe('tower-damage');
+    }
+    expect([...firsts].sort()).toEqual(['summon-brute', 'summon-minion']);
+  });
+
+  it('leitet den Seed aus dem Zustand ab: Energie, Hand und Runde ändern ihn', () => {
+    const state = normalState(['summon-minion'], 4);
+    const base = botSeed(state, 1);
+    const less = structuredClone(state);
+    less.players[1].energy -= 1;
+    const later = structuredClone(state);
+    later.round += 1;
+    expect(botSeed(less, 1)).not.toBe(base);
+    expect(botSeed(later, 1)).not.toBe(base);
+    expect(botSeed(state, 0)).not.toBe(base);
+    expect(Number.isInteger(base) && base >= 0).toBe(true);
   });
 });

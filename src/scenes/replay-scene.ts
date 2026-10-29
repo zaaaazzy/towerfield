@@ -12,7 +12,7 @@ import {
   SLOWMO_FACTOR,
   stepReplay,
 } from '../logic/replay';
-import { parseReplayMoves, parseReplaySeed } from '../logic/seed';
+import { parseBotLevel, parseReplayMoves, parseReplaySeed } from '../logic/seed';
 import { diffFx } from '../logic/fx-events';
 import { advanceMinionAnim, newMinionAnim } from '../logic/minion-look';
 import { REPLAY_MUSIC_SCALE } from '../logic/audio-settings';
@@ -72,7 +72,10 @@ export class ReplayScene extends Phaser.Scene {
   create(): void {
     this.seed = parseReplaySeed(window.location.search) ?? 1;
     const moves = parseReplayMoves(window.location.search);
-    this.record = moves === null ? null : decodeMatch(this.seed, moves);
+    const decoded = moves === null ? null : decodeMatch(this.seed, moves);
+    // Die Stufe des Bots steht nicht in den Zügen, sondern als `&bot=` in der Teilen-URL (siehe `shareQuery`).
+    const botLevel = parseBotLevel(window.location.search);
+    this.record = decoded && botLevel !== 'easy' ? { ...decoded, botLevel } : decoded;
     this.replay =
       moves === null
         ? createReplay(this.seed)

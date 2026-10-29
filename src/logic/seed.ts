@@ -1,3 +1,5 @@
+import { BOT_LEVELS, type BotLevel } from './bot';
+
 /**
  * Fester Seed aus der URL (`?seed=123`), damit Browser-Tests reproduzierbar sind. Ohne Ziffern oder bei ungültigem Wert
  * kommt `null` zurück, dann wählt die Szene selbst einen Seed.
@@ -23,6 +25,12 @@ export function parseReplayMoves(search: string): string | null {
 export function parseFast(search: string): boolean {
   const value = new URLSearchParams(search).get('fast');
   return value !== null && value !== '' && value !== '0';
+}
+
+/** Bot-Stufe aus der URL (`?bot=easy|normal`); fehlt der Wert oder ist er ungültig, gilt `easy`. */
+export function parseBotLevel(search: string): BotLevel {
+  const value = new URLSearchParams(search).get('bot');
+  return BOT_LEVELS.find((level) => level === value) ?? 'easy';
 }
 
 function parseSeedParam(search: string, name: string): number | null {
