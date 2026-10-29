@@ -31,7 +31,8 @@ flowchart TD
 
 ## Anzeige und Balance
 
-- Die Match-Szene zeigt in Ereignisrunden Name und Kurzbeschreibung unter „Gegner: n Karten“, sonst nichts.
+- Die Match-Szene zeigt in Ereignisrunden Name und Kurzbeschreibung unter „Gegner: n Karten“. Beim Rundenstart nennt das Banner den Ereignisnamen
+  (siehe `anwendung-rundenwechsel-banner.md`).
 - `BalanceReport.eventCounts` zählt je Ereignis die Häufigkeit (reproduzierbar über den Startseed); die Balance-Szene
   gibt die Zähler in einer Zeile aus.
 

@@ -307,7 +307,8 @@ src/
     audio-settings.ts Lautstärken, Stumm, localStorage-Text (rein)
     placement.ts, iso.ts, bot.ts, balance-sim.ts
   scenes/  main-scene.ts (Spiel), replay-scene.ts (Replay), balance-scene.ts (Dev), share.ts (Teilen-URL)
-           theme.ts, textures.ts, card-view.ts, field-view.ts, effects.ts, labels.ts (Phaser-Code, nicht in logic/)
+           theme.ts, textures.ts, card-view.ts, field-view.ts, effects.ts, labels.ts, banner-view.ts (Banner, Wappen, Strahlen; Logik in
+           logic/phase-banner.ts, siehe anwendung-rundenwechsel-banner.md; `?fast=1` schaltet Banner ab) (Phaser-Code, nicht in logic/)
            audio.ts (Phaser-Ton: Laden, Musikschleife, Abspielen, Regler)
 tools/     generate-sfx.mjs (erzeugt die Soundeffekte unter public/assets/audio/)
   main.ts  wählt die Start-Szene
