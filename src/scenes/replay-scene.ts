@@ -24,7 +24,7 @@ import { AmbienceLayer } from './ambience-layer';
 import { AMBIENCE_BOUNDS, BACKDROP_FIELD, FX_LOCATOR, VIEW } from './main-scene';
 import { shareUrl, shareUrlLines } from './share';
 import { addBackdrop } from './textures';
-import { drawPanel, TEXT } from './theme';
+import { drawPanel, PALETTE, TEXT } from './theme';
 
 /** Zahl der Kommentare, die gleichzeitig im Band stehen. */
 const VISIBLE_COMMENTS = 6;
@@ -150,13 +150,13 @@ export class ReplayScene extends Phaser.Scene {
     }
 
     if (this.replay.aborted) {
-      g.fillStyle(0x000000, 0.6).fillRect(0, 0, VIEW.width, VIEW.height);
+      g.fillStyle(PALETTE.black, 0.6).fillRect(0, 0, VIEW.width, VIEW.height);
       drawPanel(g, 10, 200, 340, 200, { metal: 'gold' });
       label('Replay gestoppt', VIEW.width / 2, 235, { size: 22, font: 'heading', bold: true, color: TEXT.gold, stroke: 3 });
       label(describeAbort(this.replay.aborted), VIEW.width / 2, 300, { size: 13, width: VIEW.width - 60 });
       label('Taste oder Klick: neues Spiel', VIEW.width / 2, 365, { size: 13, color: TEXT.dim });
     } else if (match.phase === 'over') {
-      g.fillStyle(0x000000, 0.6).fillRect(0, 0, VIEW.width, VIEW.height);
+      g.fillStyle(PALETTE.black, 0.6).fillRect(0, 0, VIEW.width, VIEW.height);
       drawPanel(g, 10, 120, 340, 310, { metal: 'gold' });
       const text =
         match.outcome === 'draw' ? 'Unentschieden' : match.outcome === 'player0' ? 'Blau gewinnt' : 'Orange gewinnt';

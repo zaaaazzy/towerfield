@@ -10,7 +10,7 @@ import type { CardDef } from '../logic/cards';
 import { detailLayout, glintPolygon } from '../logic/hand-layout';
 import { drawCostCrystal, drawSymbol } from './card-view';
 import { LabelPool } from './labels';
-import { fillGradient, lerpColor, PALETTE, TEXT } from './theme';
+import { fillGradient, FX_COLOR, lerpColor, PALETTE, TEXT } from './theme';
 
 /** Tiefe: über Handkarten (ab 11), Beschriftungen und Effekten (ab 19). */
 const DETAIL_DEPTH = 40;
@@ -114,7 +114,7 @@ export class CardDetailView {
     const bannerH = 26 * unit;
     const bannerY = y + height - 8 * unit - bannerH;
     const textH = bannerY - 6 * unit - textY;
-    front.fillStyle(0x3a3068, 0.95).fillRect(artX, textY, artW, textH);
+    front.fillStyle(FX_COLOR.detailArt, 0.95).fillRect(artX, textY, artW, textH);
     front.lineStyle(2, PALETTE.bronze, 0.8).strokeRect(artX, textY, artW, textH);
     pool.label(describeCard(def), x + width / 2, textY + textH / 2, { size: 16 * unit, width: artW - 14 * unit, stroke: 2, alpha: textAlpha });
 

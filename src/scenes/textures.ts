@@ -4,7 +4,7 @@
  * ändert weder Regeln noch Seed.
  */
 import Phaser from 'phaser';
-import { PALETTE } from './theme';
+import { FX_COLOR, PALETTE, TEXTURE_COLOR } from './theme';
 
 export const TEXTURE_KEYS = {
   backdrop: 'backdrop',
@@ -92,9 +92,9 @@ function paintField(ctx: CanvasRenderingContext2D, field: FieldGeometry, random:
 
   // Boden mit Rahmen und Körnung.
   const ground = ctx.createLinearGradient(0, top, 0, bottom);
-  ground.addColorStop(0, css(0x2a2f5a));
+  ground.addColorStop(0, css(TEXTURE_COLOR.groundTop));
   ground.addColorStop(0.5, css(PALETTE.ground));
-  ground.addColorStop(1, css(0x1a2140));
+  ground.addColorStop(1, css(TEXTURE_COLOR.groundBottom));
   ctx.fillStyle = ground;
   ctx.beginPath();
   ctx.roundRect(left, top, right - left, bottom - top, 10);
@@ -132,9 +132,9 @@ function paintField(ctx: CanvasRenderingContext2D, field: FieldGeometry, random:
     const h = field.pathHalfHeight * 2;
     const y = center - field.pathHalfHeight;
     const path = ctx.createLinearGradient(0, y, 0, y + h);
-    path.addColorStop(0, css(0x2e2a4a));
+    path.addColorStop(0, css(TEXTURE_COLOR.path));
     path.addColorStop(0.5, css(PALETTE.path));
-    path.addColorStop(1, css(0x2e2a4a));
+    path.addColorStop(1, css(TEXTURE_COLOR.path));
     ctx.fillStyle = path;
     ctx.fillRect(x, y, w, h);
     ctx.strokeStyle = css(PALETTE.pathEdge, 0.7);
@@ -162,8 +162,8 @@ function paintField(ctx: CanvasRenderingContext2D, field: FieldGeometry, random:
   // Hand-Tisch aus Holz mit Maserung und Goldkante.
   const tableTop = field.handTop - 12;
   const wood = ctx.createLinearGradient(0, tableTop, 0, field.height);
-  wood.addColorStop(0, css(0x4a2f2a));
-  wood.addColorStop(1, css(0x24141c));
+  wood.addColorStop(0, css(TEXTURE_COLOR.tableTop));
+  wood.addColorStop(1, css(TEXTURE_COLOR.tableBottom));
   ctx.fillStyle = wood;
   ctx.fillRect(0, tableTop, field.width, field.height - tableTop);
   for (let index = 0; index < 46; index += 1) {
@@ -244,7 +244,7 @@ export function ensureTextures(scene: Phaser.Scene): void {
   });
   // Holzpfeil, Spitze nach rechts (Rotation 0 = Flug nach rechts): Federn, Schaft, Eisenspitze.
   createCanvasTexture(scene, TEXTURE_KEYS.arrow, 22, 6, (ctx) => {
-    ctx.fillStyle = css(0xe8dcc0);
+    ctx.fillStyle = css(FX_COLOR.paper);
     ctx.fillRect(0, 0, 4, 2);
     ctx.fillRect(0, 4, 4, 2);
     ctx.fillStyle = css(PALETTE.bronze);
@@ -272,14 +272,14 @@ export function ensureTextures(scene: Phaser.Scene): void {
     ctx.lineTo(8, 6.5);
     ctx.closePath();
     ctx.fill();
-    ctx.fillStyle = css(0xdfe6ee);
+    ctx.fillStyle = css(FX_COLOR.steel);
     ctx.fillRect(8, 2.5, 14, 3);
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = css(PALETTE.white);
     ctx.fillRect(9, 3, 12, 1);
   });
   // Weisser Splitter, wird beim Ausstoss holzfarben eingefärbt.
   createCanvasTexture(scene, TEXTURE_KEYS.splinter, 6, 2, (ctx) => {
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = css(PALETTE.white);
     ctx.fillRect(0, 0, 6, 2);
   });
 }

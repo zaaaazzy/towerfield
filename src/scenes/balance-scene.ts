@@ -4,7 +4,7 @@ import { getCardDef } from '../logic/cards';
 import { ROUND_EVENTS } from '../logic/round-events';
 import { VIEW } from './main-scene';
 import { addBackdrop } from './textures';
-import { drawBar, drawButton, FONTS, PALETTE, TEXT } from './theme';
+import { drawBar, drawButton, FONTS, FX_COLOR, PALETTE, TEXT } from './theme';
 
 /** Matches pro Simulation (Standard) und pro Frame, damit der Canvas nicht blockiert. */
 const MATCH_COUNT = 1000;
@@ -128,7 +128,7 @@ export class BalanceScene extends Phaser.Scene {
     const count = this.results.length;
     this.progressText.setText(`Seeds ${this.startSeed}–${this.startSeed + MATCH_COUNT - 1}   ${count}/${MATCH_COUNT} Matches`);
     this.barGraphics.clear();
-    drawBar(this.barGraphics, 8, 133, 344, 6, count / MATCH_COUNT, { top: 0x9af0a0, bottom: PALETTE.goodDark });
+    drawBar(this.barGraphics, 8, 133, 344, 6, count / MATCH_COUNT, { top: FX_COLOR.heal, bottom: PALETTE.goodDark });
   }
 
   private renderTable(): void {
@@ -161,7 +161,7 @@ export class BalanceScene extends Phaser.Scene {
       const sorted = [...report.cards].sort((a, b) => (this.sortDescending ? b.winRate - a.winRate : a.winRate - b.winRate));
       sorted.forEach((card, row) => {
         const y = ROWS_TOP + row * ROW_HEIGHT;
-        drawBar(g, 6, y + 15, 100, 4, card.winRate, { top: 0x8fdcff, bottom: PALETTE.humanDark }, 'bronze');
+        drawBar(g, 6, y + 15, 100, 4, card.winRate, { top: FX_COLOR.barHuman, bottom: PALETTE.humanDark }, 'bronze');
         add(6, y, getCardDef(card.cardId).name, 11);
         const delta = card.deltaToBaseline;
         const values = [

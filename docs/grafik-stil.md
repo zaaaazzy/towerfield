@@ -7,7 +7,9 @@ sind unberührt: Alle Werte, Reihenfolgen und der Seed bleiben gleich, Animation
 
 ## Palette und Schrift
 
-Zentral in `src/scenes/theme.ts` (`PALETTE`, `TEXT`, `FONTS`, `FRAME`); alle Szenen nehmen Farben und Schriften nur von dort.
+Zentral in `src/scenes/theme.ts` (`PALETTE`, `TEXT`, `FONTS`, `FRAME`, `FX_COLOR`, `TEXTURE_COLOR`); alle Szenen nehmen Farben und
+Schriften nur von dort, freie Hex-Werte in Szenenmodulen prüft `src/logic/palette-usage.test.ts`. Die Palette ist eine eigene
+des Projekts (keine Lospec-Palette, keine Fremdlizenz).
 
 | Rolle | Wert | Verwendung |
 | --- | --- | --- |
@@ -39,7 +41,7 @@ Georgia/Palatino (Serife), Fließtext in Trebuchet/Segoe UI/Verdana.
 - `field-view.ts`: Tower (Mauerwerk, Wimpel und Schild in Teamfarbe, Schatten, Bodenschein, Schadensstufen siehe oben), Minions (Schatten, Leuchten, Form nach Rolle: Kreis, Raute für Fernkämpfer, Kreuz für Heiler, Stachelkugel mit Zündschnur für Zerstörer, Größe nach Leben, Lebensbalken bei Schaden) und Bauplätze.
 - `effects.ts`: Treffer je Schadensquelle – Holzpfeile fliegen im Bogen heran (`arrow`), ein Schwert schwingt über
   das Ziel (`melee`), Blitze schlagen zickzack ein (`lightning`); Tower splittern wie Holz, Gefallene hinterlassen
-  Staub (Texturen `arrow`, `sword`, `splinter` in `textures.ts`). Dazu Partikel und Leuchtringe für Beschwörung, Kamerawackeln beim Tower-Fall, aufsteigende Schadenszahlen (Schaden je Ziel gesammelt, höchstens 20 Zahlen und 150 lebende Partikel je Emitter gleichzeitig), kurze Animation beim Ausspielen einer Karte.
+  Staub (Texturen `arrow`, `sword`, `splinter` in `textures.ts`). Dazu Partikel und Leuchtringe für Beschwörung, Heilung, Explosion und Tower-Fall (Kamerawackeln, Hit-Stop und Squash & Stretch siehe [`anwendung-grafik-politur.md`](anwendung-grafik-politur.md)), aufsteigende Schadenszahlen (Schaden je Ziel gesammelt, höchstens 20 Zahlen und 150 lebende Partikel je Emitter gleichzeitig), kurze Animation beim Ausspielen einer Karte.
 - `ambience-layer.ts` und `src/logic/ambience.ts`: Lichtschicht der Abenddämmerung, Details in [`anwendung-abenddaemmerung.md`](anwendung-abenddaemmerung.md). Licht-Tokens `LIGHT` und `LIGHT_STOPS` stehen in `theme.ts`, Texturen `light-cone` und `fog` in `textures.ts`.
 - `src/logic/fx-events.ts`: reine Funktion `diffFx`, die aus zwei Spielzuständen die Effekt-Ereignisse ableitet (mit Test).
 - `src/logic/card-style.ts`: Kartentyp-Stil und Kurztext (`describeCard`) aus den Kartenwerten (mit Test).
