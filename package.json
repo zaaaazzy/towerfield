@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "coverage:report": "node --import ./tools/register-ts.mjs tools/coverage-report.mjs",
     "test:smoke": "vite build && playwright test"
   },
   "dependencies": {
