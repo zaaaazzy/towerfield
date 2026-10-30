@@ -105,7 +105,7 @@ describe('runSimulation', () => {
     expect(report.towerKillShare + report.roundLimitShare).toBeCloseTo(1, 10);
   });
 
-  it('spielt den Zerstörer und endet ohne Remis', () => {
+  it('spielt über die Seeds 1..20 den Zerstörer mindestens einmal und hat die Remisquote 0', () => {
     const report = runSimulation({ startSeed: 1, count: 20 });
     const destroyer = report.cards.find((card) => card.cardId === 'summon-destroyer');
     expect(destroyer?.plays).toBeGreaterThan(0);
