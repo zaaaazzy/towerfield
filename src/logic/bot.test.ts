@@ -653,6 +653,42 @@ describe('Bot', () => {
       expect(botStep(state, 1)?.line).toBe(2);
     });
 
+    describe('Vorrang vor Beschwörungen', () => {
+      const order = ['summon-minion', 'tower-lightning'];
+
+      it('spielt die Spezialisierung zuerst, auch wenn die Beschwörung in der Reihenfolge davor steht', () => {
+        const state = grow(withHand(['summon-minion', 'tower-lightning'], 3), 2);
+        const first = botStep(state, 1, order);
+        expect(first).toMatchObject({ cardId: 'tower-lightning', line: 1 });
+        // Die übrige Energie reicht danach noch für die Beschwörung.
+        expect(botStep(first!.state, 1, order)).toMatchObject({ cardId: 'summon-minion' });
+      });
+
+      it('spielt zuerst die Beschwörung, wenn keine Lane das Mindest-Level hat (kein passendes Ziel)', () => {
+        const state = withHand(['tower-lightning', 'summon-minion'], 5);
+        expect(botStep(state, 1, order)).toMatchObject({ cardId: 'summon-minion' });
+      });
+
+      it('spielt zuerst die Beschwörung, wenn alle Tower der hohen Lanes schon spezialisiert sind', () => {
+        const state = grow(withHand(['tower-shield', 'summon-minion'], 5), MAX_FIELD_LEVEL);
+        for (const lane of [1, 2, 3, 4]) {
+          for (const tower of state.players[1].lines[lane]!.towers) tower.specialization = 'lightning';
+        }
+        expect(botStep(state, 1, ['summon-minion', 'tower-shield'])).toMatchObject({ cardId: 'summon-minion' });
+      });
+
+      it('spielt eine Spezialisierung nicht, die nicht in der Reihenfolge steht', () => {
+        const state = grow(withHand(['tower-lightning', 'summon-minion'], 5), 2);
+        const after = botPlan(state, 1, ['summon-minion']);
+        expect(after.players[1].hand).toEqual(['tower-lightning']);
+      });
+
+      it('zieht die Spezialisierung nicht vor, wenn die Energie nicht reicht', () => {
+        const state = grow(withHand(['tower-lightning', 'summon-minion'], 1), 2);
+        expect(botStep(state, 1, order)).toMatchObject({ cardId: 'summon-minion' });
+      });
+    });
+
     it('verursacht nie einen Fehler in playCard', () => {
       for (let seed = 1; seed <= 20; seed += 1) {
         const state = grow(withHand(hand, MAX_ENERGY, seed), 1 + (seed % MAX_FIELD_LEVEL));
