@@ -13,9 +13,4 @@ if (!parsed.ok) {
 const { seed, count, format } = parsed.options;
 const report = runSimulation({ startSeed: seed, count });
 
-if (format === 'table') process.stdout.write(`${formatBalanceTable(report)}\n`);
-else if (format === 'json') process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-else {
-  process.stderr.write(`${formatBalanceTable(report)}\n`);
-  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-}
+process.stdout.write(`${format === 'json' ? JSON.stringify(report, null, 2) : formatBalanceTable(report)}\n`);

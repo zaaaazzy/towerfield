@@ -67,6 +67,7 @@ describe('Tabelle', () => {
     expect(lines).toContain('winRatePlayer1:  25.0 %');
     expect(lines).toContain('drawRate:        25.0 %');
     expect(lines).toContain('avgRounds:       6.78');
+    expect(lines).toContain('baselineWinRate: 0.0 %');
     expect(lines).toContain('towerKillShare:  75.0 %');
     expect(lines).toContain('roundLimitShare: 25.0 %');
   });
@@ -88,17 +89,16 @@ describe('Argumente', () => {
   it('liefert ohne Argumente die Vorgaben', () => {
     expect(parseBalanceArgs([])).toEqual({
       ok: true,
-      options: { seed: DEFAULT_BALANCE_SEED, count: DEFAULT_BALANCE_COUNT, format: 'both' },
+      options: { seed: DEFAULT_BALANCE_SEED, count: DEFAULT_BALANCE_COUNT, format: 'table' },
     });
     expect(DEFAULT_BALANCE_COUNT).toBeGreaterThanOrEqual(1000);
   });
 
   it('liest beide Schreibweisen', () => {
-    expect(parseBalanceArgs(['--seed', '5', '--count=20', '--format', 'json'])).toEqual({
+    expect(parseBalanceArgs(['--seed', '5', '--count=20', '--json'])).toEqual({
       ok: true,
       options: { seed: 5, count: 20, format: 'json' },
     });
-    expect(parseBalanceArgs(['--format=table'])).toMatchObject({ ok: true, options: { format: 'table' } });
   });
 
   it.each([
@@ -110,7 +110,8 @@ describe('Argumente', () => {
     [['--seed', '-1']],
     [['--seed', 'x']],
     [['--seed', '4294967296']],
-    [['--format', 'xml']],
+    [['--json=1']],
+    [['--format', 'json']],
     [['--count']],
     [['--unbekannt', '1']],
     [['5']],
