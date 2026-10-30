@@ -8,7 +8,7 @@ import {
   type MatchState,
   MOVE_COST,
   moveMinion,
-  playCard,
+  playCard as playCardRule,
   type PlayResult,
   setReady,
   undoSummon,
@@ -40,6 +40,14 @@ import {
   validSlots,
   xToPosition,
 } from './placement';
+
+/** Wie `playCard`, aber ohne das Kartenlimit der Runde: Diese Tests setzen mehrere Karten in einer Runde. */
+const playCard: typeof playCardRule = (state, playerIndex, ...rest) => {
+  const free = structuredClone(state);
+  free.players[playerIndex].cardsPlayed = 0;
+  const result = playCardRule(free, playerIndex, ...rest);
+  return result.ok ? result : { ...result, state };
+};
 
 /** Match mit Beschwörungskarten und viel Energie, damit nur die Platzierung getestet wird; `level` = Ausbaustufe. */
 function setup(level = 1): MatchState {

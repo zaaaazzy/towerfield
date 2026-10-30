@@ -3,13 +3,14 @@
  * zurücknehmen, bereit) samt Runde, dazu ein kompaktes URL-Format und das Nachspielen mit Prüfung.
  * Ohne Phaser, DOM und Canvas. Die Regeln kommen unverändert aus `match.ts`; hier wird nur mitgeschrieben.
  *
- * Format (Version 7, nur Zeichen `0-9 a-z . -`, damit nichts maskiert werden muss):
- *   `v6` gefolgt von Aktionen, je mit `.` davor. Eine Aktion beginnt mit Typbuchstabe, Runde (1 Ziffer) und Spieler
+ * Format (Version 8, nur Zeichen `0-9 a-z . -`, damit nichts maskiert werden muss):
+ *   `v8` gefolgt von Aktionen, je mit `.` davor. Eine Aktion beginnt mit Typbuchstabe, Runde (1 Ziffer) und Spieler
  *   (0/1), danach Felder mit `-`:
  *   `p<R><P>-<Kartenindex>[-<Lane>[-<Slot>]]` Karte spielen (bei Karten mit Ziel-Minion steht an der Stelle der Lane
  *   die Minion-Id; der Turm-Slot einer Beschwörung steht nur, wenn er gewählt wurde, sonst gilt der erste freie) ·
  *   `m<R><P>-<Minion>-<Lane>-<Slot>` auf einen anderen Turm-Slot verschieben (kostet Energie) ·
- *   `u<R><P>-<Minion>` zurücknehmen · `d<R><P>-<Kartenindex>` Handkarte abwerfen (bringt Energie) · `r<R><P>` bereit ·
+ *   `u<R><P>-<Minion>` zurücknehmen · `s<R><P>-<Minion>` platzierte Figur verkaufen (bringt Energie) ·
+ *   `d<R><P>-<Kartenindex>` Handkarte abwerfen (bringt Energie) · `r<R><P>` bereit ·
  *   `g<R><P>` Feld-Upgrade · `b<R><P>-<Lane>` Lane kaufen · `w<R><P>` Karte ziehen (alle drei kosten Energie).
  *   Der Slot ist `2 * Tower-Index + Seite` (0 oben, 1 unten), siehe `placement.ts`.
  * Der Kartenindex ist die Position in `CARD_DEFS`. Ändern sich Regeln oder Kartenliste, muss `RECORD_VERSION` steigen,
@@ -32,19 +33,21 @@ import {
   type PlayError,
   type PlayerIndex,
   playCard,
+  sellMinion,
   setReady,
   undoSummon,
   upgradeField,
 } from './match';
 
 /**
- * Version 7: neues Wirtschaftskonzept (Einkommen, Upgrade, Lane-Kauf, Karte ziehen als eigene Aktionen; das Upgrade
+ * Version 8: neue Spielregeln (Turm-Spawn, Türme auf allen Lanes, eine Karte pro Runde, fünf neue Karten nach der
+ * Planung, Verkauf von Figuren als Aktion `sell`). Version 7: neues Wirtschaftskonzept (Einkommen, Upgrade, Lane-Kauf, Karte ziehen als eigene Aktionen; das Upgrade
  * ist keine Karte mehr im Deck). Version 6: Turm-Slots statt freier Positionen, Verschieben und Abwerfen kosten bzw. bringen Energie, Lane-Karten und
  * sieben neue Karten (Kartenliste und Deck ändern sich). Version 5 brachte die Tower-Spezialisierungen, Version 4
  * `buff-minion` (der Zug trägt statt der Lane die Minion-Id), Version 3 `summon-destroyer`, Version 2 das horizontale
  * Lane-Layout. Links aus älteren Versionen gelten nicht mehr, weil sie sonst ein anderes Match abspielten.
  */
-export const RECORD_VERSION = 7;
+export const RECORD_VERSION = 8;
 /** Obergrenze für Länge und Aktionszahl beim Dekodieren; ein Match mit 8 Runden bleibt weit darunter. */
 export const MAX_MOVES_LENGTH = 4000;
 const MAX_ACTIONS = 800;
@@ -54,6 +57,7 @@ export type ActionBody =
   | { type: 'play'; cardId: string; line: number | null; minionId?: number; slot?: number }
   | { type: 'move'; minionId: number; line: number; slot: number }
   | { type: 'undo'; minionId: number }
+  | { type: 'sell'; minionId: number }
   | { type: 'discard'; cardId: string }
   | { type: 'upgrade' }
   | { type: 'buy-lane'; line: number }
@@ -106,6 +110,8 @@ export function applyAction(state: MatchState, action: RecordedAction): ActionRe
       return moveMinion(state, player, action.minionId, action.line, action.slot);
     case 'undo':
       return undoSummon(state, player, action.minionId);
+    case 'sell':
+      return sellMinion(state, player, action.minionId);
     case 'upgrade':
       return upgradeField(state, player);
     case 'buy-lane':
@@ -199,7 +205,7 @@ export function replayRecorded(record: RecordedMatch): ReplayResult {
 }
 
 const VERSION_PREFIX = `v${RECORD_VERSION}`;
-const TYPE_LETTER = { play: 'p', move: 'm', undo: 'u', discard: 'd', ready: 'r', upgrade: 'g', 'buy-lane': 'b', draw: 'w' } as const;
+const TYPE_LETTER = { play: 'p', move: 'm', undo: 'u', sell: 's', discard: 'd', ready: 'r', upgrade: 'g', 'buy-lane': 'b', draw: 'w' } as const;
 
 function encodeAction(action: RecordedAction): string {
   const head = `${TYPE_LETTER[action.type]}${action.round}${action.player}`;
@@ -219,6 +225,7 @@ function encodeAction(action: RecordedAction): string {
     case 'move':
       return `${head}-${action.minionId}-${action.line}-${action.slot}`;
     case 'undo':
+    case 'sell':
       return `${head}-${action.minionId}`;
     case 'buy-lane':
       return `${head}-${action.line}`;
@@ -241,7 +248,7 @@ function parseNumber(text: string): number | null {
 
 function decodeAction(token: string): RecordedAction | null {
   const [head = '', ...fields] = token.split('-');
-  if (!/^[pmudrgbw][1-9][01]$/.test(head)) return null;
+  if (!/^[pmusdrgbw][1-9][01]$/.test(head)) return null;
   const round = Number(head[1]);
   const player = Number(head[2]) as PlayerIndex;
   if (round > MAX_ROUNDS) return null;
@@ -280,6 +287,8 @@ function decodeAction(token: string): RecordedAction | null {
       return { type: 'move', round, player, minionId: first, line: second, slot: third };
     case 'u':
       return numbers.length === 1 ? { type: 'undo', round, player, minionId: first } : null;
+    case 's':
+      return numbers.length === 1 ? { type: 'sell', round, player, minionId: first } : null;
     case 'b':
       return numbers.length === 1 && first < LINE_COUNT ? { type: 'buy-lane', round, player, line: first } : null;
     case 'g':

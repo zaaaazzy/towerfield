@@ -280,7 +280,8 @@ test('Wirtschaft: Start mit einer Lane, „Upgrade“ hebt die Feldstufe, gesper
   const errors = collectErrors(page);
   await openGame(page);
   const player = async () => (await readState(page)).players[0];
-  const towerCounts = async () => (await player()).lines.map((line) => line.towers.length);
+  // Gekaufte Lanes als 1/0; die Tower stehen auf allen Lanes schon von Beginn an (siehe Prüfung unten).
+  const towerCounts = async () => (await player()).lines.map((line) => (line.bought ? line.towers.length : 0));
   const setEnergy = (energy: number) =>
     page.evaluate((value) => {
       const scene = window.game!.scene.getScene('main') as unknown as { state: { players: { energy: number }[] } };
@@ -289,6 +290,7 @@ test('Wirtschaft: Start mit einer Lane, „Upgrade“ hebt die Feldstufe, gesper
 
   // Start: eine Lane, 3 Energie, Einkommen 3 (nächste Runde 4); die anderen Lanes nennen ihre Bedingung.
   expect(await towerCounts()).toEqual([3, 0, 0, 0, 0]);
+  expect((await player()).lines.map((line) => line.towers.length)).toEqual([3, 1, 1, 1, 1]);
   expect((await player()).energy).toBe(3);
   expect(await hasVisibleText(page, 'Start-Lane')).toBe(true);
   expect(await hasVisibleText(page, 'Feld Lvl 1 · Einkommen 3, nächste Runde 4')).toBe(true);
@@ -438,7 +440,9 @@ test('mehrere Runden: Runde steigt, Energie folgt energyForRound, es werden Kart
   expect(next.round).toBe(2);
   expect(next.players[0].energy).toBe(energyForRound(2));
   expect(next.drawn).toBe(start.drawn + DRAW_PER_ROUND);
-  expect(next.players[0].hand).toHaveLength(Math.min(HAND_LIMIT, handBefore + DRAW_PER_ROUND));
+  // „Ende der Planung“ legt die Resthand ab und zieht DRAW_PER_ROUND neue Karten.
+  expect(handBefore).toBe(DRAW_PER_ROUND);
+  expect(next.players[0].hand).toHaveLength(Math.min(HAND_LIMIT, DRAW_PER_ROUND));
 
   expect(errors).toEqual([]);
 });

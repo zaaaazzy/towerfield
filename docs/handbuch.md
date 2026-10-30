@@ -160,18 +160,21 @@ Minion-Tempo, Balance-Szene, E2E, Minion-Statistik, Replay, Kartenfilter, Heiler
 
 | Thema | Regel |
 |---|---|
-| Spielfeld | Waagrechte Lanes (`src/logic/lanes.ts`, Details in [anwendung-horizontale-lane.md](anwendung-horizontale-lane.md)): Lvl 1 nur die Start-Lane mit 3 Towern je Spieler, Lvl 2 je eine Lane oben und unten (1 Tower), Lvl 3 je eine weitere. Spieler 0 (Mensch) links, Spieler 1 (Bot) rechts. `PlayerState.lines` hat immer 5 Einträge, gesperrte Lanes haben keine Tower. |
+| Spielfeld | Waagrechte Lanes (`src/logic/lanes.ts`, Details in [anwendung-horizontale-lane.md](anwendung-horizontale-lane.md)): Lvl 1 nur die Start-Lane mit 3 Towern je Spieler, Lvl 2 je eine Lane oben und unten (1 Tower), Lvl 3 je eine weitere. Spieler 0 (Mensch) links, Spieler 1 (Bot) rechts. `PlayerState.lines` hat immer 5 Einträge; **alle Lanes haben von Beginn an Tower**, auch nicht gekaufte (`bought: false`: dort lassen sich keine Karten oder Minions platzieren, die Tower stehen und werden angegriffen). Siehe [anwendung-neue-spielregeln.md](anwendung-neue-spielregeln.md). |
 | Start | 5 identische Handkarten (`START_HAND`). |
-| Ziehen | Ab Runde 2 dieselben 3 Karten für beide (`DRAW_PER_ROUND`). |
-| Handlimit | `HAND_LIMIT = 10`; nach dem Ziehen werden die zuletzt gezogenen Karten am Ende der Hand abgeschnitten (keine Ablage). Sie zählen als gezogen. |
+| Ziehen | Mit „Ende der Planung“ (`setReady`) wird die Resthand abgelegt und `DRAW_PER_ROUND = 5` neue Karten werden gezogen (für beide dieselben). |
+| Eine Karte pro Runde | `CARDS_PER_ROUND = 1`: Eine zweite `playCard` derselben Runde liefert `card-limit`. Upgrade, Lane-Kauf, Ziehen, Verschieben und Verkaufen zählen nicht. `undoSummon` gibt die Karte wieder frei. |
+| Verkaufen | Handkarte: `discardCard` (+`DISCARD_ENERGY`). Platzierte Figur (auch aus früheren Runden): `sellMinion` (+`SELL_MINION_ENERGY`, Slot wird frei), nur in der Planung; sonst `PlayError`. |
+| Turm-Spawn | Jeder lebende Tower erzeugt in der Kampfphase alle `TOWER_SPAWN_MS = 1000` ms einen Minion mit `source: 'tower'` (Werte `TOWER_SPAWN_*`), `spawnTowerMinions` in `combat.ts`, aufgerufen von `advance` je Tick. Er lebt nur bis zum Rundenende. |
+| Handlimit | `HAND_LIMIT = 10`; die Hand wächst nur durch `drawCard`, das bei voller Hand `hand-full` liefert. |
 | Runden | Planung, dann Kampf, höchstens `MAX_ROUNDS = 8`. |
 | Energie | Einkommen `incomeForRound` = `3 + (Runde - 1) + Festungen + Lanes` (Festungen = Feldstufe − 1, Lanes = gekaufte Lanes − 1), höchstens `MAX_ENERGY` (17). Wird je Runde neu gesetzt; Unverbrauchtes verfällt. Upgrade (2), Lane-Kauf (5) und Ziehen (1) sind eigene Aktionen, siehe [Wirtschaft](anwendung-wirtschaft.md). |
-| Kampf | `COMBAT_TICKS = 400` Ticks à `TICK_MS = 50` ms (20 s), über `delta` in festen Ticks. Lebt nach einem Tick kein Minion (`hp > 0`) beider Spieler mehr (`anyMinionAlive`), endet die Kampfphase sofort: Runde + 1, nach Runde 8 `hpOutcome`. Das gilt auch, wenn von Anfang an keine Minions existieren. Zerstörte Tower haben Vorrang. |
+| Kampf | `COMBAT_TICKS = 400` Ticks à `TICK_MS = 50` ms (20 s), über `delta` in festen Ticks. Die Kampfphase endet nach 400 Ticks (Runde + 1, nach Runde 8 `hpOutcome`); vorzeitig nur, wenn weder ein Minion lebt noch ein Tower spawnt (`combatActive`), was bei lebenden Towern nie eintritt. Zerstörte Tower haben Vorrang. |
 | Bogenschütze | `summonCount` (`cards.ts`): `summon-archer` beschwört in Runde N genau N Bogenschützen für eine Karte und einmal Energie. Gewünschter Slot zuerst, dann die niedrigsten freien; reicht die Lane nicht, werden nur so viele gesetzt, wie Slots frei sind (kein freier Slot: `line-full`). Undo (`undoSummon`) nimmt alle Einheiten der Karte zurück (`placements[].group`) und erstattet Energie und Karte einmal. |
-| Überlebende | Zu Rundenbeginn (`respawnSurvivors`) auf die niedrigsten freien Slots ihrer Lane gesetzt, nach `id` aufsteigend; HP, Werte und Lane bleiben, Tote entfallen. Sie zählen zur Lane-Kapazität, aber nicht zu `placements` (nicht verschieb- oder zurücknehmbar). |
+| Überlebende | Platzierte Figuren bleiben bis Spielende. Zu Rundenbeginn (`respawnSurvivors`) stehen sie wieder auf ihrem Slot; steht dessen Tower nicht mehr, rücken sie auf den ersten freien Slot ihrer Lane (gibt es keinen, entfallen sie). HP, Werte und Lane bleiben, Tote und Spawn-Minions entfallen. Sie zählen zur Lane-Kapazität, aber nicht zu `placements` (nicht zurücknehmbar, aber verkaufbar). |
 | Sieg | Nach jedem Kampf-Tick: hat ein Spieler keinen lebenden Tower mehr, endet das Match sofort; der andere gewinnt. Haben beide in demselben Tick keinen mehr, ist es unentschieden. Nach den 400 Ticks von Runde 8 gewinnt, wer mehr Tower-LP (Summe aller Tower aller freien Lanes) hat; gleiche Summe ist unentschieden. Vor Runde 8 zählt der Tower-LP-Vergleich nie. |
 
-Deck-Länge: `START_HAND + DRAW_PER_ROUND * (MAX_ROUNDS - 1)` = 26 Karten, Mischung per Seed (Fisher-Yates). Der Vorrat
+Deck-Länge: `START_HAND + DRAW_PER_ROUND * MAX_ROUNDS` = 45 Karten, Mischung per Seed (Fisher-Yates). Der Vorrat
 besteht aus Durchgängen der Kopienzahlen (je 18 Karten); die 26 Karten sind ein voller Durchgang plus die ersten 8
 Karten des zweiten (Minion ×4, Brocken ×2, Bogenschütze ×2). Im Deck stecken daher Minion 8, Brocken 4,
 Bogenschütze 4, Heiler 1, Zerstörer 1, die übrigen Karten wie in der Tabelle. Beide Spieler ziehen dieselben Karten.

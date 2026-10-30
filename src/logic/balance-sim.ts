@@ -47,7 +47,7 @@ export interface MatchResult {
   played: [string[], string[]];
   /** Alle Einsätze und Abwürfe je Spieler in Spielreihenfolge. */
   log?: [PlayEvent[], PlayEvent[]];
-  /** Karten, die am Ende des Matches noch auf der Hand lagen, je Spieler. */
+  /** Karten, die in der letzten Runde ungespielt auf der Hand blieben (vor dem Ablegen), je Spieler. */
   held?: [string[], string[]];
   /** Ereignisse, die in diesem Match aufgetreten sind (eine Runde, ein Eintrag). */
   events?: RoundEventId[];
@@ -161,6 +161,7 @@ export function simulateMatch(seed: number, strategies: Strategies): MatchResult
   const played: [string[], string[]] = [[], []];
   const log: [PlayEvent[], PlayEvent[]] = [[], []];
   const events: RoundEventId[] = [];
+  const held: [string[], string[]] = [[], []];
   let eventRound = 0;
   // Sicherung gegen Endlosschleifen: je Runde ein Planungs- und ein Kampfschritt.
   for (let step = 0; step < MAX_ROUNDS * 4 && state.phase !== 'over'; step += 1) {
@@ -177,6 +178,8 @@ export function simulateMatch(seed: number, strategies: Strategies): MatchResult
           }
           state = move.state;
         }
+        // `setReady` legt die Resthand ab und zieht neu; gemessen wird, was vor dem Ablegen ungespielt blieb.
+        held[index] = [...state.players[index].hand];
         state = setReady(state, index);
       }
     } else {
@@ -193,7 +196,7 @@ export function simulateMatch(seed: number, strategies: Strategies): MatchResult
     endedBy: destroyedOutcome(state) !== null ? 'towers' : 'round-limit',
     played,
     log,
-    held: [[...state.players[0].hand], [...state.players[1].hand]],
+    held,
     events,
   };
 }
