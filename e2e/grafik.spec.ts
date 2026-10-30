@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { getCardDef } from '../src/logic/cards';
 import { MAX_ROUNDS } from '../src/logic/match';
@@ -131,14 +132,19 @@ test('Kampf zeigt Schadenszahlen und Effekte ohne Konsolenfehler', async ({ page
 /**
  * Screenshot-Vergleiche im Handyformat 360×640. Der Loop steht still (`freezeGame`), die Zeit läuft nur über
  * `stepFrames`; so sind Licht, Nebel und Glanz in jedem Lauf gleich. Die Referenzbilder unter
- * `e2e/grafik.spec.ts-snapshots/` entstehen mit Chromium unter macOS (Dateisuffix `-chromium-darwin`). Der Vergleich
- * läuft nur dort (Variante B, siehe docs/anwendung-ci-gate.md); in der Linux-CI entfällt er, alle übrigen
- * Prüfungen der Tests laufen weiter.
+ * `e2e/grafik.spec.ts-snapshots/` tragen das Suffix der Plattform (`-chromium-darwin`, `-chromium-linux`); die
+ * Linux-Bilder entstehen im CI-Container über den Workflow `basisbilder.yml`. Der Vergleich läuft, sobald für die
+ * aktuelle Plattform ein Basisbild existiert oder mit `--update-snapshots` Bilder erzeugt werden; sonst entfällt er
+ * (siehe docs/anwendung-ci-gate.md), alle übrigen Prüfungen der Tests laufen weiter.
  */
-const HAT_BASISBILDER = process.platform === 'darwin';
+function hatBasisbild(name: string): boolean {
+  const info = test.info();
+  const aktualisieren = info.config.updateSnapshots;
+  return aktualisieren === 'all' || aktualisieren === 'changed' || fs.existsSync(info.snapshotPath(name));
+}
 
 async function vergleiche(page: Parameters<typeof openGame>[0], name: string): Promise<void> {
-  if (!HAT_BASISBILDER) return;
+  if (!hatBasisbild(name)) return;
   await expect(page).toHaveScreenshot(name);
 }
 

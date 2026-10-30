@@ -22,28 +22,34 @@
 Der Tag (`v1.64.1`) muss zur gepinnten Version von `@playwright/test` in `package.json` passen. Bei einer
 Playwright-Anhebung beide Stellen gemeinsam ändern, sonst fehlen die passenden Browser-Binaries.
 
-## Entscheidung zu den Screenshots: Variante B
+## Screenshots (`e2e/grafik.spec.ts`)
 
-`e2e/grafik.spec.ts` vergleicht Screenshots nur auf macOS (`process.platform === 'darwin'`, Hilfsfunktion `vergleiche`).
-Auf anderen Plattformen laufen die Tests weiter, nur der `toHaveScreenshot`-Vergleich entfällt.
+Die Hilfsfunktion `vergleiche` ruft `toHaveScreenshot` auf, wenn für die aktuelle Plattform ein Basisbild existiert
+(`testInfo.snapshotPath`) oder wenn mit `--update-snapshots` Bilder erzeugt werden. Ohne Basisbild entfällt nur der
+Vergleich, die übrigen Prüfungen der Tests laufen weiter. Basisbilder liegen unter `e2e/grafik.spec.ts-snapshots/`:
+`*-chromium-darwin.png` (macOS, lokal) und `*-chromium-linux.png` (CI) für `planung`, `kampf`, `spielende-statistik`,
+`spielende-teilen`, `detailansicht` und `hand-neue-karten`. Eine Grafikabweichung macht `pruefen` im PR rot; der
+Bericht liegt im Artefakt `playwright-bericht`.
 
-**Begründung:** Die vorhandenen Basisbilder sind `*-chromium-darwin.png`. Linux-Basisbilder müssen im selben Playwright-Container
-erzeugt werden, den die CI nutzt. Die Entwicklungsumgebung des Agenten sperrt Docker, deshalb konnten sie nicht erzeugt werden.
-Falsch erzeugte Bilder würden die CI dauerhaft rot machen.
+### Linux-Bilder neu erzeugen
 
-**Lücke:** Die CI prüft keine Grafikregressionen. Diese werden nur lokal auf macOS gefunden (`npm run test:smoke`).
+Nach einer bewussten Grafikänderung (und einmalig, solange die Linux-Bilder fehlen):
 
-**Wechsel auf Variante A (bevorzugt, einmalige Aktion):**
+1. **Workflow `Basisbilder`** (`.github/workflows/basisbilder.yml`, nur `workflow_dispatch`) auf dem Branch der Änderung
+   starten. Er läuft im Container `mcr.microsoft.com/playwright:v1.64.1-noble` mit `npm ci`, `npm run build` und
+   `npx playwright test e2e/grafik.spec.ts --update-snapshots` und stellt die Bilder als Artefakt `basisbilder-linux`
+   bereit. Mit der Eingabe `committen` schreibt der Job `committen` sie zusätzlich auf den Branch (nur dieser Job hat
+   `contents: write`, der Rest `contents: read`). Auf geschützten Branches stattdessen das Artefakt entpacken und per PR einchecken.
+2. **Alternativ lokal mit Docker** (in der Agent-Umgebung gesperrt):
 
-```sh
-docker run --rm -v "$PWD":/work -w /work mcr.microsoft.com/playwright:v1.64.1-noble \
-  npx playwright test e2e/grafik.spec.ts --update-snapshots
-```
+   ```sh
+   docker run --rm -v "$PWD":/work -w /work mcr.microsoft.com/playwright:v1.64.1-noble \
+     sh -c "npm ci && npm run build && npx playwright test e2e/grafik.spec.ts --update-snapshots"
+   ```
 
-Danach die erzeugten `*-chromium-linux.png` unter `e2e/grafik.spec.ts-snapshots/` einchecken (`planung`, `kampf`,
-`spielende-statistik`, `spielende-teilen`, `detailansicht`, `hand-neue-karten`), `HAT_BASISBILDER` und `vergleiche`
-aus der Spec entfernen und `toHaveScreenshot` wieder direkt aufrufen. Das Basisbild muss dazu `npm ci` im Container
-vorher bekommen (`npm ci` zuerst ausführen, falls `node_modules` vom Host nicht passt).
+Die Bilder immer prüfen, bevor sie eingecheckt werden: Falsch erzeugte Bilder machen die CI dauerhaft rot. `ci.yml`
+aktualisiert nie selbst Bilder, sonst würde die CI Fehler überschreiben. Die macOS-Bilder bleiben unverändert und werden
+lokal auf macOS erneuert.
 
 ## Branch-Schutz (Repo-Einstellung, nicht im Code)
 
