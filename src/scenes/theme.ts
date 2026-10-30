@@ -1,6 +1,11 @@
 /**
  * Zentrales Farb- und Stilkonzept (siehe docs/grafik-stil.md): Palette, Schriften, Rahmenparameter und Zeichenhelfer.
  * Alle Szenen nehmen Farben und Schriften nur von hier. Die Kartentyp-Farben stehen in `logic/card-style.ts`.
+ *
+ * Herkunft der Palette: Eigene Palette dieses Projekts (dunkles Fantasy-Blau/Violett, Gold- und Bronze-Akzente,
+ * kräftige Teamfarben), entworfen für Towerfield. Sie ist keine Übernahme einer Lospec-Palette; es gibt daher keine
+ * Fremdquelle und keine Fremdlizenz, die Werte stehen unter der Lizenz des Projekts. Neue Farben kommen nur hier
+ * hinein (Gruppen unten); Szenenmodule enthalten keine freien Hex-Werte (geprüft von `logic/palette-usage.test.ts`).
  */
 import Phaser from 'phaser';
 import type { LightStops } from '../logic/ambience';
@@ -76,6 +81,34 @@ export const TEAM_COLOR = {
   /** Markierung im Schild des Towers: Blitz-Turm gelb, Schild-Turm blau. */
   markLightning: 0xffd23a,
   markShield: 0x5ab4ff,
+} as const;
+
+/** Effekte und Figuren: Partikel (Holz, Staub, Stahl, Blitz), Haut, Pergament und Balkenfüllungen. */
+export const FX_COLOR = {
+  wood: 0xa0703c,
+  dust: 0x8a7a66,
+  steel: 0xdfe6ee,
+  bolt: 0x9fd8ff,
+  heal: TEAM_COLOR.goodLight,
+  skin: 0xf1cfa5,
+  figureSteel: 0xdfe3f2,
+  figureWood: 0x8a5a2b,
+  bomb: 0x3a3a4e,
+  parchment: 0xe9d9a6,
+  parchmentDark: 0xc8b27a,
+  paper: 0xe8dcc0,
+  detailArt: 0x3a3068,
+  barHuman: 0x8fdcff,
+  buttonMuted: { top: 0x7a3a3a, bottom: 0x4a1f1f },
+} as const;
+
+/** Grundfarben der gezeichneten Hintergrundtexturen (`textures.ts`): Boden, Weg und Holztisch als Verlauf. */
+export const TEXTURE_COLOR = {
+  groundTop: 0x2a2f5a,
+  groundBottom: 0x1a2140,
+  path: 0x2e2a4a,
+  tableTop: 0x4a2f2a,
+  tableBottom: 0x24141c,
 } as const;
 
 /** Palette (flache Sicht auf die Rollen): dunkles Fantasy-Blau/Violett, Gold- und Bronze-Akzente, kräftige Teamfarben. */

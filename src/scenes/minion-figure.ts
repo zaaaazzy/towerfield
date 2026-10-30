@@ -6,7 +6,7 @@
  */
 import Phaser from 'phaser';
 import type { MinionShape } from '../logic/minion-look';
-import { PALETTE } from './theme';
+import { FX_COLOR, PALETTE } from './theme';
 
 /** Farben eines Teams (Hauptton, dunkle Kontur, aufgehellter Ton). */
 export interface TeamColors {
@@ -28,11 +28,13 @@ export interface FigurePose {
   /** Trefferblitz, 0 bis 1. */
   flash: number;
   alpha: number;
+  /** Squash & Stretch: Faktoren auf Breite und Höhe, die Füße bleiben am Boden; fehlt = unverformt. */
+  squash?: { x: number; y: number };
 }
 
-const SKIN = 0xf1cfa5;
-const STEEL = 0xdfe3f2;
-const WOOD = 0x8a5a2b;
+const SKIN = FX_COLOR.skin;
+const STEEL = FX_COLOR.figureSteel;
+const WOOD = FX_COLOR.figureWood;
 
 /** Schwingt von 0 über 1 zurück auf 0 (Mitte des Angriffs = Höhepunkt). */
 const pulse = (p: number): number => Math.sin(Math.PI * Math.min(1, Math.max(0, p)));
@@ -54,7 +56,7 @@ export function drawFigure(
   g.save();
   g.translateCanvas(x, feetY);
   g.rotateCanvas(-dir * pose.fall);
-  g.scaleCanvas(dir * scale, scale);
+  g.scaleCanvas(dir * scale * (pose.squash?.x ?? 1), scale * (pose.squash?.y ?? 1));
   const a = pose.alpha;
   const swing = pose.attack === null ? 0 : pulse(pose.attack);
   const up = pose.bob;
@@ -177,7 +179,7 @@ function drawDestroyer(g: Phaser.GameObjects.Graphics, t: TeamColors, pose: Figu
   g.translateCanvas(lunge, 0);
   legs(g, t.dark, pose.stride, -6, a);
   g.fillStyle(PALETTE.black, 0.9 * a).fillCircle(-5, -17 + up, 5.2);
-  g.fillStyle(0x3a3a4e, a).fillCircle(-5.4, -17.4 + up, 4);
+  g.fillStyle(FX_COLOR.bomb, a).fillCircle(-5.4, -17.4 + up, 4);
   g.fillStyle(PALETTE.white, 0.5 * a).fillCircle(-6.6, -18.8 + up, 1);
   const spark = 1 + 0.5 * Math.sin(pose.stride * 9 + (pose.attack ?? 0) * 12);
   g.lineStyle(1.2, STEEL, a).lineBetween(-5, -21.6 + up, -3.6, -24.5 + up);

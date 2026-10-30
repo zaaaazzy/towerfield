@@ -34,9 +34,9 @@ export function collectErrors(page: Page): string[] {
 /** URL-Parameter für den Schnellvorlauf: keine Banner und keine Abschluss-Einblendung (siehe `parseFast`). */
 export const FAST = 'fast=1';
 
-/** Öffnet das Spiel mit festem Seed und Schnellvorlauf und wartet, bis die Szene läuft. */
-export async function openGame(page: Page, seed: number = SEED): Promise<void> {
-  await page.goto(`/?seed=${seed}&${FAST}`);
+/** Öffnet das Spiel mit festem Seed und Schnellvorlauf und wartet, bis die Szene läuft. `extra`: weitere URL-Parameter, z. B. `shake=0`. */
+export async function openGame(page: Page, seed: number = SEED, extra = ''): Promise<void> {
+  await page.goto(`/?seed=${seed}&${FAST}${extra ? `&${extra}` : ''}`);
   await expect(page.locator('#game canvas')).toBeVisible();
   await page.waitForFunction(() => window.game?.scene.isActive('main') && window.game.loop.frame > 10);
 }

@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { CARD_ART_IDS, cardTypeStyle } from '../logic/card-style';
 import { getCardDef } from '../logic/cards';
 import { ENERGY_BAR, ENERGY_LABEL, ENERGY_MESSAGE, energyCrystalLayout } from '../logic/energy-layout';
-import { diffFx } from '../logic/fx-events';
+import { diffFx, type FxEvent } from '../logic/fx-events';
 import { type CardPose, cardAt, fanLayout, HAND_FAN, liftedPose, sortHand } from '../logic/hand-layout';
 import {
   advance,
@@ -22,6 +22,7 @@ import { LANE_COUNT, laneShortName, MAX_FIELD_LEVEL } from '../logic/lanes';
 import { type ActionBody, botPlanRecorded, createRecord, performAction, type RecordedMatch } from '../logic/match-record';
 import { HAND_FILTER_NAMES, type HandFilter, isCardVisible, nextHandFilter } from '../logic/hand-filter';
 import { advancePress, type PressState, startPress } from '../logic/long-press';
+import { easeOutBack, type JuiceSettings, type JuiceState, newJuice, parseJuiceSettings, stepJuice, triggerJuice } from '../logic/juice';
 import { advanceMinionAnim, newMinionAnim } from '../logic/minion-look';
 import { summarizeStats } from '../logic/match-stats';
 import { bannerFor } from '../logic/phase-banner';
@@ -61,6 +62,16 @@ import { type LabelFn, LabelPool } from './labels';
 import { copyToClipboard, shareUrl, shareUrlLines } from './share';
 import { addBackdrop } from './textures';
 import { drawButton, drawPanel, PALETTE, SURFACE, TEXT } from './theme';
+
+/** Post-Processing der Kamera (nur WebGL): Stärken der Vignette, Farbkorrektur und des Blooms. */
+const POST_FX = {
+  vignette: { radius: 0.85, strength: 0.4 },
+  saturation: 0.12,
+  contrast: 0.08,
+  bloom: { blur: 0.5, strength: 0.35 },
+};
+/** Größte Deckkraft des weißen Bildblitzes bei Stärke 1. */
+const SCREEN_FLASH_ALPHA = 0.35;
 
 /** Spielfläche im Hochformat; Phaser skaliert sie per `Scale.FIT` auf den Bildschirm. */
 export const VIEW = { width: 360, height: 640 };
@@ -221,6 +232,12 @@ export class MainScene extends Phaser.Scene {
   private banner!: BannerView;
   /** Zeit seit Spielende in ms (aus `delta`), treibt die Lichtstrahlen des Abschlussbildschirms. */
   private endClockMs = 0;
+  /** Feedback-Zustand (Shake, Blitz, Hit-Stop) und seine Schalter; Regeln in `logic/juice.ts`. */
+  private juice: JuiceState = newJuice();
+  private juiceSettings: JuiceSettings = parseJuiceSettings('', false);
+  private screenFlash!: Phaser.GameObjects.Rectangle;
+  /** Zeit für die Darstellung dieses Bilds: `delta` ohne Hit-Stop. Die Spiellogik bekommt das volle `delta`. */
+  private displayDeltaMs = 0;
 
   constructor() {
     super('main');
@@ -303,6 +320,7 @@ export class MainScene extends Phaser.Scene {
     this.detailView = new CardDetailView(this, VIEW);
     this.banner = new BannerView(this, VIEW, parseFast(window.location.search));
     this.endClockMs = 0;
+    this.setUpJuice();
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => this.onPointerDown(pointer.worldX, pointer.worldY));
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => this.onPointerMove(pointer.worldX, pointer.worldY));
     this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => this.onPointerUp(pointer.worldX, pointer.worldY));
@@ -337,7 +355,7 @@ export class MainScene extends Phaser.Scene {
     this.banner.update(deltaMs);
     if (this.state.phase === 'over') this.endClockMs += deltaMs;
     this.ambience.setRound(this.state.round);
-    this.ambience.update(deltaMs);
+    this.ambience.update(this.displayDeltaMs);
     this.frameMs = deltaMs;
     this.render();
     this.frameMs = 0;
@@ -384,7 +402,52 @@ export class MainScene extends Phaser.Scene {
     this.effects.update(deltaMs);
     this.audio.play([...this.pendingAudio, ...events], deltaMs);
     this.pendingAudio = [];
-    this.minionAnim = advanceMinionAnim(this.minionAnim, events, previous, this.state, deltaMs);
+    this.applyJuice(events, deltaMs);
+    this.minionAnim = advanceMinionAnim(this.minionAnim, events, previous, this.state, this.displayDeltaMs);
+    this.effects.glowTowers(this.lightningTowerPoints(), this.minionAnim.timeMs);
+  }
+
+  /** Schalter aus der URL und `prefers-reduced-motion`, Bildblitz und Post-Processing der Kamera. */
+  private setUpJuice(): void {
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+    this.juiceSettings = parseJuiceSettings(window.location.search, reduced);
+    this.juice = newJuice();
+    this.displayDeltaMs = 0;
+    this.screenFlash = this.add
+      .rectangle(VIEW.width / 2, VIEW.height / 2, VIEW.width, VIEW.height, PALETTE.white)
+      .setDepth(90)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setAlpha(0);
+    const camera = this.cameras.main;
+    camera.setScroll(0, 0);
+    if (this.renderer.type !== Phaser.WEBGL) return;
+    camera.postFX.clear();
+    if (!this.juiceSettings.postFx) return;
+    camera.postFX.addVignette(0.5, 0.5, POST_FX.vignette.radius, POST_FX.vignette.strength);
+    camera.postFX.addColorMatrix().colorMatrix.saturate(POST_FX.saturation).contrast(POST_FX.contrast);
+    camera.postFX.addBloom(PALETTE.white, 1, 1, POST_FX.bloom.blur, POST_FX.bloom.strength);
+  }
+
+  /** Setzt Shake, Bildblitz und Hit-Stop um; der Hit-Stop verkürzt nur `displayDeltaMs`, nie das Logik-`delta`. */
+  private applyJuice(events: readonly FxEvent[], deltaMs: number): void {
+    const step = stepJuice(triggerJuice(this.juice, events, this.juiceSettings), deltaMs);
+    this.juice = step.state;
+    this.displayDeltaMs = step.displayDeltaMs;
+    this.cameras.main.setScroll(step.shake.x, step.shake.y);
+    this.screenFlash.setAlpha(step.flash * SCREEN_FLASH_ALPHA);
+  }
+
+  /** Bildschirmpunkte aller lebenden Blitz-Türme beider Seiten (für das Dauerglühen). */
+  private lightningTowerPoints(): Point[] {
+    const points: Point[] = [];
+    this.state.players.forEach((player, owner) =>
+      player.lines.forEach((lane, line) =>
+        lane.towers.forEach((tower, index) => {
+          if (tower.specialization === 'lightning' && tower.hp > 0) points.push(FX_LOCATOR.tower(owner, line, index));
+        }),
+      ),
+    );
+    return points;
   }
 
   /** Id des eigenen, verschiebbaren Minions unter dem Punkt, sonst `null`. */
@@ -415,7 +478,8 @@ export class MainScene extends Phaser.Scene {
     const rest = fanLayout(order.length);
     const poses = order.map((handIndex, slot) => {
       const lift = target ? (this.selected === handIndex || this.hovered === handIndex ? 1 : 0) : (this.lifts[handIndex] ?? 0);
-      return liftedPose(rest[slot]!, lift, order.length);
+      // Die gleitende Anhebung federt kurz über (ease-out-back); die Endlage für Treffer bleibt exakt.
+      return liftedPose(rest[slot]!, target ? lift : easeOutBack(lift), order.length);
     });
     return { order, poses };
   }
