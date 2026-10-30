@@ -7,6 +7,7 @@
  */
 import {
   BASE_ENERGY,
+  CARDS_PER_ROUND,
   COMBAT_TICKS,
   DISCARD_ENERGY,
   DRAW_COST,
@@ -21,6 +22,7 @@ import {
   MAX_FIELD_LEVEL,
   MAX_ROUNDS,
   MOVE_COST,
+  SELL_MINION_ENERGY,
   SPECIALIZE_MIN_LEVEL,
   START_FORTRESSES,
   START_HAND,
@@ -36,9 +38,11 @@ import {
   type CombatPlayer,
   LINE_LENGTH,
   type LaneEffect,
+  isTowerMinion,
   type Minion,
   MINION_RANGE,
   MINION_SPEED,
+  spawnTowerMinions,
   TICK_MS,
   TICK_SECONDS,
   type Tower,
@@ -62,6 +66,7 @@ export const LINE_COUNT = LANE_COUNT;
 // Basiswerte stehen zentral in `balance-config.ts`; der Re-Export hält die bestehenden Importe aus `match` gültig.
 export {
   BASE_ENERGY,
+  CARDS_PER_ROUND,
   COMBAT_TICKS,
   DISCARD_ENERGY,
   DRAW_COST,
@@ -74,6 +79,7 @@ export {
   MAX_ENERGY,
   MAX_ROUNDS,
   MOVE_COST,
+  SELL_MINION_ENERGY,
   SPECIALIZE_MIN_LEVEL,
   START_FORTRESSES,
   START_HAND,
@@ -90,9 +96,12 @@ export type Phase = 'planning' | 'combat' | 'over';
 export type Outcome = 'player0' | 'player1' | 'draw';
 export type PlayerIndex = 0 | 1;
 
-/** Eine Lane (siehe `lanes.ts`). Ist sie noch nicht gekauft, hat sie keine Tower. */
+/** Eine Lane (siehe `lanes.ts`). Alle Lanes haben von Beginn an Tower, auch wenn sie noch nicht gekauft sind. */
 export interface LineState {
-  /** Gekauft (frei)? Die Start-Lane ist von Beginn an gekauft, die anderen kauft `buyLane` ab der nötigen Feldstufe. */
+  /**
+   * Gekauft (frei)? Die Start-Lane ist von Beginn an gekauft, die anderen kauft `buyLane` ab der nötigen Feldstufe.
+   * Nur auf gekauften Lanes lassen sich Karten und Minions platzieren; die Tower der anderen Lanes stehen und spawnen trotzdem.
+   */
   bought: boolean;
   towers: Tower[];
   /** Dauerhafter Bonus für künftig beschworene Minions dieser Lane. */
@@ -111,9 +120,11 @@ export interface PlayerState extends CombatPlayer {
   extraDrawn: number;
   /** Karten-IDs in der Reihenfolge, in der sie auf die Hand kamen. */
   hand: string[];
+  /** Aus der Hand gespielte Karten in dieser Runde (höchstens `CARDS_PER_ROUND`); `startRound` setzt sie zurück. */
+  cardsPlayed: number;
   lines: LineState[];
   nextMinionId: number;
-  /** In dieser Planungsphase beschworene Minions samt Karte; nur sie lassen sich verschieben oder zurücknehmen. */
+  /** In dieser Planungsphase beschworene Minions samt Karte; nur sie lassen sich zurücknehmen (`undoSummon`). */
   placements: { minionId: number; cardId: string; /** Id des ersten Minions derselben Karte: Einheiten einer Karte teilen sich die Gruppe (Undo). */ group: number }[];
   /** Alle in dieser Runde gespielten Karten mit Ziel-Lane; `startRound` leert die Liste. */
   played: PlayedCard[];
@@ -158,13 +169,14 @@ export type PlayError =
   | 'hand-full'
   | 'already-specialized'
   | 'invalid-target'
-  | 'lane-slot-taken';
+  | 'lane-slot-taken'
+  | 'card-limit';
 
 export type PlayResult = { ok: true; state: MatchState } | { ok: false; state: MatchState; reason: PlayError };
 
-/** Slot-Zahl je Lane-Index: zwei je lebendem Tower, 0 für gesperrte Lanes und Lanes ohne lebenden Tower. */
+/** Slot-Zahl je Lane-Index: zwei je lebendem Tower, 0 für nicht gekaufte Lanes und Lanes ohne lebenden Tower. */
 export function laneSlotCounts(player: PlayerState): number[] {
-  return player.lines.map((line) => validSlots(line.towers).length);
+  return player.lines.map((line) => (line.bought ? validSlots(line.towers).length : 0));
 }
 
 /** Frische Tower einer Lane (Start-Lane: drei nebeneinander, sonst einer). */
@@ -232,15 +244,16 @@ function createPlayer(): PlayerState {
     energy: 0,
     extraDrawn: 0,
     hand: [],
+    cardsPlayed: 0,
     nextMinionId: 1,
     placements: [],
     played: [],
     synergies: [],
     minions: [],
-    // Nur die Start-Lane (Index 0) ist von Beginn an gekauft.
+    // Nur die Start-Lane (Index 0) ist von Beginn an gekauft; die Tower stehen auf allen Lanes.
     lines: Array.from({ length: LANE_COUNT }, (_, lane) => ({
       bought: lane === 0,
-      towers: lane === 0 ? createLaneTowers(lane) : [],
+      towers: createLaneTowers(lane),
       bonus: { hp: 0, damage: 0 },
     })),
   };
@@ -248,9 +261,10 @@ function createPlayer(): PlayerState {
 
 /**
  * Stellt die überlebenden Minions eines Spielers (in unveränderter Reihenfolge) zurück auf ihre Turm-Slots (verändert
- * `player`): Sie kämpfen jede
- * Runde von demselben Tower aus und müssen nicht neu gesetzt werden. Tote Minions und Minions, deren Tower zerstört ist,
- * entfallen. Ein Minion ohne Slot (Altzustand) bekommt den ersten freien Slot seiner Lane oder entfällt, wenn keiner frei ist.
+ * `player`): Platzierte Figuren bleiben bis zum Spielende; sie kämpfen jede Runde von demselben Tower aus und müssen
+ * nicht neu gesetzt werden. Es entfallen nur tote Minions und die Spawn-Minions der Türme (nur eine Runde lang). Steht
+ * der Slot einer Figur nicht mehr (Tower zerstört) oder fehlt er (Altzustand), bekommt sie den ersten freien Slot ihrer
+ * Lane und entfällt nur, wenn dort keiner frei ist.
  */
 export function respawnSurvivors(player: PlayerState): void {
   const placed: Minion[] = [];
@@ -258,11 +272,10 @@ export function respawnSurvivors(player: PlayerState): void {
     const towers = player.lines[minion.line]!.towers;
     placed.push({ ...minion, slot, position: slotPosition(towers, slot) });
   };
-  const alive = player.minions.filter((m) => m.hp > 0);
-  for (const minion of alive.filter((m) => m.slot !== undefined)) {
-    if (isValidSlot(player.lines[minion.line]!.towers, minion.slot!)) keep(minion, minion.slot!);
-  }
-  for (const minion of alive.filter((m) => m.slot === undefined)) {
+  const alive = player.minions.filter((m) => m.hp > 0 && !isTowerMinion(m));
+  const settled = (m: Minion): boolean => m.slot !== undefined && isValidSlot(player.lines[m.line]!.towers, m.slot);
+  for (const minion of alive.filter(settled)) keep(minion, minion.slot!);
+  for (const minion of alive.filter((m) => !settled(m))) {
     const slot = firstFreeSlot(placed, minion.line, player.lines[minion.line]!.towers);
     if (slot !== undefined) keep(minion, slot);
   }
@@ -308,7 +321,8 @@ function refreshSynergies(player: PlayerState): void {
 
 /** Beginnt Runde `round` (verändert `state`): Energie setzen, dieselben Karten für beide ziehen, Planung öffnen. */
 function startRound(state: MatchState, round: number): void {
-  const count = round === 1 ? START_HAND : DRAW_PER_ROUND;
+  // Ab Runde 2 stehen die neuen Karten schon auf der Hand: `setReady` hat die Resthand abgelegt und nachgezogen.
+  const count = round === 1 ? START_HAND : 0;
   const drawn = state.deck.slice(state.drawn, state.drawn + count);
   state.drawn += count;
   state.round = round;
@@ -325,9 +339,11 @@ function startRound(state: MatchState, round: number): void {
     player.energy = roundEnergy(player, round, state.event);
     player.placements = [];
     player.played = [];
+    player.cardsPlayed = 0;
     for (const line of player.lines) {
       delete line.laneCard;
       delete line.laneEffect;
+      for (const tower of line.towers) delete tower.spawnMs;
     }
     respawnSurvivors(player);
     refreshSynergies(player);
@@ -341,7 +357,7 @@ export function createMatch(seed: number): MatchState {
     seed,
     round: 0,
     phase: 'planning',
-    deck: buildDeck(seed, START_HAND + DRAW_PER_ROUND * (MAX_ROUNDS - 1)),
+    deck: buildDeck(seed, START_HAND + DRAW_PER_ROUND * MAX_ROUNDS),
     drawn: 0,
     players: [createPlayer(), createPlayer()],
     ready: [false, false],
@@ -379,6 +395,7 @@ export function playCard(
   const current = state.players[playerIndex];
   const cardId = current.hand[handIndex];
   if (cardId === undefined) return reject(state, 'no-such-card');
+  if (current.cardsPlayed >= CARDS_PER_ROUND) return reject(state, 'card-limit');
   const def = getCardDef(cardId);
   if (current.energy < def.cost) return reject(state, 'not-enough-energy');
   let summonSlots: number[] = [];
@@ -416,6 +433,7 @@ export function playCard(
   const next = structuredClone(state);
   const player = next.players[playerIndex];
   player.energy -= def.cost;
+  player.cardsPlayed += 1;
   player.hand.splice(handIndex, 1);
   const line = def.target === 'line' ? player.lines[lineIndex!]! : undefined;
   const played: PlayedCard = { cardId };
@@ -514,8 +532,8 @@ export function moveMinion(
 }
 
 /**
- * Wirft die Handkarte `handIndex` ab: Sie verschwindet aus dem Spiel, der Spieler erhält `DISCARD_ENERGY` Energie
- * (höchstens bis `MAX_ENERGY`, der Rest verfällt).
+ * Verkauft die Handkarte `handIndex` (Abwerfen): Sie verschwindet aus dem Spiel, der Spieler erhält `DISCARD_ENERGY`
+ * Energie (höchstens bis `MAX_ENERGY`, der Rest verfällt). Das zählt nicht als gespielte Karte (`CARDS_PER_ROUND`).
  */
 export function discardCard(state: MatchState, playerIndex: PlayerIndex, handIndex: number): PlayResult {
   if (state.phase !== 'planning') return reject(state, 'not-planning');
@@ -538,7 +556,7 @@ function planningError(state: MatchState, playerIndex: PlayerIndex): PlayError |
 /**
  * Upgrade der Feldstufe für `UPGRADE_COST` Energie, in jeder Planungsphase bis `MAX_FIELD_LEVEL`. Es bringt ab der
  * nächsten Runde `INCOME_PER_FORTRESS` mehr Einkommen und schaltet den Lane-Kauf der nächsten Stufe frei (Lanes
- * kauft man mit `buyLane`). Für die Synergien zählt es wie die Karte `line-upgrade`.
+ * kauft man mit `buyLane`). Für die Synergien zählt es wie die Karte `line-upgrade`. Es zählt nicht als gespielte Karte.
  */
 export function upgradeField(state: MatchState, playerIndex: PlayerIndex): PlayResult {
   const error = planningError(state, playerIndex);
@@ -557,7 +575,8 @@ export function upgradeField(state: MatchState, playerIndex: PlayerIndex): PlayR
 
 /**
  * Kauft die Lane `lineIndex` für `LANE_COST` Energie. Die Feldstufe muss `laneUnlockLevel` erreicht haben (Stufe 2 für
- * die obere und die untere Lane); jede Lane lässt sich einzeln kaufen. Die neue Lane bekommt ihre Tower.
+ * die obere und die untere Lane); jede Lane lässt sich einzeln kaufen. Die Tower der Lane stehen schon (auch beschädigt);
+ * der Kauf macht die Lane nur für Karten und Minions frei.
  */
 export function buyLane(state: MatchState, playerIndex: PlayerIndex, lineIndex: number): PlayResult {
   const error = planningError(state, playerIndex);
@@ -570,9 +589,7 @@ export function buyLane(state: MatchState, playerIndex: PlayerIndex, lineIndex: 
   const next = structuredClone(state);
   const player = next.players[playerIndex];
   player.energy -= LANE_COST;
-  const lane = player.lines[lineIndex]!;
-  lane.bought = true;
-  lane.towers = createLaneTowers(lineIndex);
+  player.lines[lineIndex]!.bought = true;
   return { ok: true, state: next };
 }
 
@@ -595,8 +612,9 @@ export function drawCard(state: MatchState, playerIndex: PlayerIndex): PlayResul
 }
 
 /**
- * Nimmt eine in dieser Planungsphase gespielte Beschwörung zurück: der Minion verschwindet, die Energie wird erstattet
- * und die Karte kommt ans Ende der Hand. Upgrades lassen sich nicht zurücknehmen.
+ * Nimmt eine in dieser Planungsphase gespielte Beschwörung zurück: der Minion verschwindet, die Energie wird erstattet,
+ * die Karte kommt ans Ende der Hand und die Karte dieser Runde ist wieder frei. Upgrades lassen sich nicht zurücknehmen.
+ * Figuren aus früheren Runden verkauft man dagegen mit `sellMinion`.
  */
 export function undoSummon(state: MatchState, playerIndex: PlayerIndex, minionId: number): PlayResult {
   if (state.phase !== 'planning') return reject(state, 'not-planning');
@@ -615,15 +633,45 @@ export function undoSummon(state: MatchState, playerIndex: PlayerIndex, minionId
   refreshSynergies(player);
   player.energy += getCardDef(placement.cardId).cost;
   player.hand.push(placement.cardId);
+  player.cardsPlayed = Math.max(0, player.cardsPlayed - 1);
   return { ok: true, state: next };
 }
 
-/** Der Spieler beendet seine Planung. Sind beide bereit, beginnt die Kampfphase. */
+/**
+ * Verkauft eine eigene platzierte Figur in der Planungsphase: Sie verlässt das Feld, ihr Slot wird frei und der Spieler
+ * erhält `SELL_MINION_ENERGY` Energie (höchstens bis `MAX_ENERGY`). Gilt für jede lebende Figur einer Karte, auch aus
+ * früheren Runden; Spawn-Minions der Türme, fremde und unbekannte Figuren liefern `no-such-minion` ohne Zustandsänderung.
+ */
+export function sellMinion(state: MatchState, playerIndex: PlayerIndex, minionId: number): PlayResult {
+  const error = planningError(state, playerIndex);
+  if (error) return reject(state, error);
+  const sold = state.players[playerIndex].minions.find((m) => m.id === minionId);
+  if (!sold || sold.hp <= 0 || isTowerMinion(sold)) return reject(state, 'no-such-minion');
+  const next = structuredClone(state);
+  const player = next.players[playerIndex];
+  const placement = player.placements.find((p) => p.minionId === minionId);
+  player.minions = player.minions.filter((m) => m.id !== minionId);
+  player.placements = player.placements.filter((p) => p.minionId !== minionId);
+  // Der Eintrag der Karte in `played` (für Synergien) bleibt, solange noch eine Figur derselben Karte steht.
+  if (placement && !player.placements.some((p) => p.group === placement.group)) {
+    player.played = player.played.filter((p) => p.minionId !== placement.group);
+  }
+  refreshSynergies(player);
+  player.energy = Math.min(MAX_ENERGY, player.energy + SELL_MINION_ENERGY);
+  return { ok: true, state: next };
+}
+
+/**
+ * Der Spieler beendet seine Planung: Die Resthand wird abgelegt und `DRAW_PER_ROUND` neue Karten werden gezogen
+ * (für beide Spieler dieselben, Seed-reproduzierbar). Sind beide bereit, beginnt die Kampfphase.
+ */
 export function setReady(state: MatchState, playerIndex: PlayerIndex): MatchState {
   if (state.phase !== 'planning' || state.ready[playerIndex]) return state;
   const next = structuredClone(state);
   next.ready[playerIndex] = true;
+  next.players[playerIndex].hand = next.deck.slice(next.drawn, next.drawn + DRAW_PER_ROUND).slice(0, HAND_LIMIT);
   if (next.ready[0] && next.ready[1]) {
+    next.drawn += DRAW_PER_ROUND;
     next.phase = 'combat';
     next.accumulatorMs = 0;
     next.combatTicks = 0;
@@ -650,9 +698,14 @@ export function hpOutcome(state: MatchState): Outcome {
   return hp0 > hp1 ? 'player0' : 'player1';
 }
 
-/** Lebt noch ein Minion irgendeines Spielers? Ohne Minions endet die Kampfphase sofort. */
+/** Lebt noch ein Minion irgendeines Spielers? */
 export function anyMinionAlive(state: MatchState): boolean {
   return state.players.some((player) => player.minions.some((m) => m.hp > 0));
+}
+
+/** Kann in der Kampfphase noch etwas geschehen? Ja, solange ein Minion lebt oder ein Tower neue Minions spawnt. */
+export function combatActive(state: MatchState): boolean {
+  return anyMinionAlive(state) || state.players.some((player) => towersAlive(player) > 0);
 }
 
 function finish(state: MatchState, outcome: Outcome): void {
@@ -676,11 +729,12 @@ export function advance(state: MatchState, deltaMs: number): MatchState {
     combatTick(next.players, undefined, (side, minionId, kind, amount) => {
       if (side === STATS_PLAYER) recordDamage(next.stats, minionId, kind, amount);
     });
+    for (const player of next.players) spawnTowerMinions(player, TICK_MS);
     next.combatTicks += 1;
     const destroyed = destroyedOutcome(next);
     if (destroyed) {
       finish(next, destroyed);
-    } else if (next.combatTicks >= COMBAT_TICKS || !anyMinionAlive(next)) {
+    } else if (next.combatTicks >= COMBAT_TICKS || !combatActive(next)) {
       if (next.round >= MAX_ROUNDS) finish(next, hpOutcome(next));
       else startRound(next, next.round + 1);
     }

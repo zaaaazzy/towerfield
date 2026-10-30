@@ -4,6 +4,7 @@ import {
   combatTick,
   type CombatPlayer,
   explosionVictims,
+  isTowerMinion,
   LANE_BUFF_FACTOR,
   LANE_SHIELD_FACTOR,
   LIGHTNING_FACTOR,
@@ -11,12 +12,20 @@ import {
   MINION_RANGE,
   MINION_SPEED,
   SHIELD_REFLECT,
+  spawnTowerMinions,
   TICK_SECONDS,
   TOWER_RANGE,
+  TOWER_SPAWN_MS,
   totalTowerHp,
   towerDistance,
   towersAlive,
 } from './combat';
+import {
+  TOWER_SPAWN_DAMAGE,
+  TOWER_SPAWN_HP,
+  TOWER_SPAWN_RANGE,
+  TOWER_SPAWN_SPEED,
+} from './balance-config';
 
 function player(towerHp = 100, towerDamage = 8): CombatPlayer {
   return {
@@ -862,5 +871,76 @@ describe('Kampf mit gestärkten Minions', () => {
     const hp = (buffs: number, id: number, side: 0 | 1) => fight(buffs, 1)[side].minions.find((m) => m.id === id)!.hp;
     expect(hp(2, 1, 0)).toBeGreaterThan(hp(0, 1, 0));
     expect(hp(2, 10, 1)).toBeLessThan(hp(0, 10, 1));
+  });
+});
+
+describe('Turm-Spawn', () => {
+  const spawned = (p: CombatPlayer) => p.minions.filter((m) => m.source === 'tower');
+  /** Spieler mit einem Tower auf Lane 0 (Standort 8) und einem zerstörten Tower auf Lane 1. */
+  const spawner = (): CombatPlayer => ({
+    lines: [
+      { towers: [{ offset: 8, hp: 100, maxHp: 100, damage: 8 }] },
+      { towers: [{ hp: 0, maxHp: 100, damage: 8 }] },
+    ],
+    minions: [],
+  });
+
+  it('erzeugt in 1000 ms genau einen und in 3000 ms genau drei Minions je lebendem Tower', () => {
+    const one = spawner();
+    spawnTowerMinions(one, TOWER_SPAWN_MS - 1);
+    expect(spawned(one)).toHaveLength(0);
+    spawnTowerMinions(one, 1);
+    expect(spawned(one)).toHaveLength(1);
+    const three = spawner();
+    spawnTowerMinions(three, 3 * TOWER_SPAWN_MS);
+    expect(spawned(three)).toHaveLength(3);
+  });
+
+  it('setzt die Werte aus der Balance-Konfiguration und stellt den Minion an den Standort des Towers', () => {
+    const p = spawner();
+    spawnTowerMinions(p, TOWER_SPAWN_MS);
+    expect(spawned(p)[0]).toEqual({
+      id: 1,
+      line: 0,
+      position: 8,
+      hp: TOWER_SPAWN_HP,
+      maxHp: TOWER_SPAWN_HP,
+      damage: TOWER_SPAWN_DAMAGE,
+      range: TOWER_SPAWN_RANGE,
+      speed: TOWER_SPAWN_SPEED,
+      source: 'tower',
+    });
+    expect(isTowerMinion(spawned(p)[0]!)).toBe(true);
+    expect(isTowerMinion(minion(1, 0, 0))).toBe(false);
+  });
+
+  it('lässt zerstörte Tower nichts spawnen', () => {
+    const p = spawner();
+    spawnTowerMinions(p, 5 * TOWER_SPAWN_MS);
+    expect(spawned(p).every((m) => m.line === 0)).toBe(true);
+    p.lines[0]!.towers[0]!.hp = 0;
+    const before = p.minions.length;
+    spawnTowerMinions(p, 5 * TOWER_SPAWN_MS);
+    expect(p.minions).toHaveLength(before);
+  });
+
+  it('hängt nur von der Zeit ab, nicht von der Schrittweite', () => {
+    const counts = [1, 7, 50, 333, 1000].map((step) => {
+      const p = spawner();
+      for (let elapsed = 0; elapsed < 5 * TOWER_SPAWN_MS; elapsed += step) spawnTowerMinions(p, step);
+      return spawned(p).length;
+    });
+    expect(new Set(counts).size).toBe(1);
+    expect(counts[0]).toBe(5);
+  });
+
+  it('vergibt fortlaufende Ids nach den vorhandenen Minions und merkt sich die nächste Id', () => {
+    const p = spawner();
+    p.minions.push(minion(41, 0, 0));
+    spawnTowerMinions(p, 2 * TOWER_SPAWN_MS);
+    expect(spawned(p).map((m) => m.id)).toEqual([42, 43]);
+    expect(p.nextMinionId).toBe(44);
+    spawnTowerMinions(p, TOWER_SPAWN_MS);
+    expect(spawned(p).map((m) => m.id)).toEqual([42, 43, 44]);
   });
 });

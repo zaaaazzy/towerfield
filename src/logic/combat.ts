@@ -13,6 +13,11 @@ import {
   SHIELD_REFLECT,
   TICK_MS,
   TOWER_RANGE,
+  TOWER_SPAWN_DAMAGE,
+  TOWER_SPAWN_HP,
+  TOWER_SPAWN_MS,
+  TOWER_SPAWN_RANGE,
+  TOWER_SPAWN_SPEED,
 } from './balance-config';
 
 // Die Basiswerte stehen zentral in `balance-config.ts`; der Re-Export hält die bestehenden Importe aus `combat` gültig.
@@ -26,6 +31,7 @@ export {
   SHIELD_REFLECT,
   TICK_MS,
   TOWER_RANGE,
+  TOWER_SPAWN_MS,
 };
 export const TICK_SECONDS = TICK_MS / 1000;
 
@@ -46,7 +52,12 @@ export interface Tower {
   specialization?: Specialization;
   /** Schild-Punkte (Runden-Ereignis): absorbieren Schaden vor den HP; fehlt das Feld, gilt 0. Verfällt nach dem Kampf. */
   shield?: number;
+  /** Zeit in Millisekunden seit dem letzten Spawn (siehe `spawnTowerMinions`); fehlt das Feld, gilt 0. Gilt je Kampfphase. */
+  spawnMs?: number;
 }
+
+/** Herkunft eines Minions: von einer Karte beschworen oder vom Turm erzeugt (`TOWER_SPAWN_MS`). */
+export type MinionSource = 'card' | 'tower';
 
 export interface Minion {
   id: number;
@@ -74,6 +85,8 @@ export interface Minion {
    * `placement.ts`); fehlt er, steht es auf keinem Slot (nur in Tests und Altzuständen).
    */
   slot?: number;
+  /** Herkunft; fehlt das Feld, ist es ein Karten-Minion. Spawn-Minions eines Turms haben `'tower'` und keinen Slot. */
+  source?: MinionSource;
 }
 
 /** Flächenschaden eines Zerstörers beim Tod: Radius in Einheiten, fester Schaden je Opfer (unabhängig von `delta`). */
@@ -86,6 +99,13 @@ export interface Explosion {
 export interface CombatPlayer {
   lines: { towers: Tower[]; laneEffect?: LaneEffect }[];
   minions: Minion[];
+  /** Nächste freie Minion-Id für Spawn-Minions; fehlt sie, gilt die höchste vorhandene Id plus 1. */
+  nextMinionId?: number;
+}
+
+/** Ist der Minion vom Turm erzeugt (und nicht von einer Karte beschworen)? */
+export function isTowerMinion(minion: Minion): boolean {
+  return minion.source === 'tower';
 }
 
 /** Reichweite im Kampf: Basiswert plus temporärer Bonus. */
@@ -341,6 +361,40 @@ export function combatTick(
   // Tote Zerstörer stehen noch in der Liste, damit Todesposition und Lane bekannt sind.
   resolveExplosions(players, collector);
   for (const player of players) player.minions = player.minions.filter((minion) => minion.hp > 1e-9);
+}
+
+/**
+ * Lässt die Spawn-Uhr jedes lebenden Towers um `deltaMs` weiterlaufen (verändert `player`). Jede volle
+ * `TOWER_SPAWN_MS` erzeugt am Standort des Towers einen Minion mit `source: 'tower'` (Werte `TOWER_SPAWN_*`). Der Rest
+ * bleibt in `spawnMs`; das Ergebnis hängt so nur von der Summe der Zeit ab, nicht von der Schrittweite. Ein zerstörter
+ * Tower erzeugt nichts mehr. Getrennt von `combatTick`: `match.advance` ruft sie nach jedem Tick auf, der Schadenstick
+ * bleibt davon unberührt.
+ */
+export function spawnTowerMinions(player: CombatPlayer, deltaMs: number): void {
+  for (const [lane, line] of player.lines.entries()) {
+    for (const tower of line.towers) {
+      if (tower.hp <= 0) continue;
+      let clock = (tower.spawnMs ?? 0) + deltaMs;
+      // Kleine Toleranz gegen Rundungsfehler beim Aufsummieren vieler Bruchteile.
+      while (clock >= TOWER_SPAWN_MS - 1e-6) {
+        clock -= TOWER_SPAWN_MS;
+        const id = player.nextMinionId ?? player.minions.reduce((max, m) => Math.max(max, m.id), 0) + 1;
+        player.nextMinionId = id + 1;
+        player.minions.push({
+          id,
+          line: lane,
+          position: tower.offset ?? 0,
+          hp: TOWER_SPAWN_HP,
+          maxHp: TOWER_SPAWN_HP,
+          damage: TOWER_SPAWN_DAMAGE,
+          range: TOWER_SPAWN_RANGE,
+          speed: TOWER_SPAWN_SPEED,
+          source: 'tower',
+        });
+      }
+      tower.spawnMs = Math.max(0, clock);
+    }
+  }
 }
 
 export function towersAlive(player: CombatPlayer): number {

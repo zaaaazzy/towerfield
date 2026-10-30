@@ -14,7 +14,7 @@ Level-Ausbau umgestellt; wo dieses Dokument „Line“, „3 Lines“ oder `MAX_
 | Heroes of the Storm | Minions laufen automatisch in Wellen über Lines, kämpfen mit Reichweite, greifen Tower an |
 | Mechabellum | Planungsphase: Einheiten platzieren, danach läuft der Kampf ohne Eingriff ab |
 
-Sieg: alle drei gegnerischen Tower zerstört, oder nach der letzten Runde mehr Tower-Lebenspunkte. Gleichstand =
+Sieg: alle gegnerischen Tower (alle Lanes, auch nicht gekaufte) zerstört, oder nach der letzten Runde mehr Tower-Lebenspunkte. Gleichstand =
 Unentschieden. Kein Zufall im Kampf; Zufall nur in der Deck-Reihenfolge und in den Runden-Ereignissen (beides über Seeds, siehe
 [Anwendung: Runden-Ereignisse](anwendung-rundenereignisse.md)). Jede dritte Runde (3 und 6) wirkt ein Ereignis für beide
 Spieler gleich: Energie +1, früherer Respawn der Überlebenden oder Tower-Schild. Es steht beim Rundenstart fest und ist
@@ -46,7 +46,7 @@ flowchart LR
 ## 3. Kartenhandling
 
 - **Deck:** ein per Seed gemischtes Deck, für beide Spieler gleich (`buildDeck`); gleiche Reihenfolge, daher fair und
-  testbar. Länge = `START_HAND + DRAW_PER_ROUND × (MAX_ROUNDS − 1)`.
+  testbar. Länge = `START_HAND + DRAW_PER_ROUND × MAX_ROUNDS`.
 - **Hand:** Reihenfolge = Ankunft. Beim Ziehen über `HAND_LIMIT` hinaus verfallen die zuletzt gezogenen Karten (am Ende der Hand abgeschnitten, es gibt keine Ablage dafür). Verfallene
   Karten zählen als gezogen.
 - **Ablage:** gespielte Karten (verfallene kommen nicht hinein; eine Ablage für sie wäre ein Folgeauftrag). Ist nur Anzeige (kein Nachmischen); Datenfeld folgt in Folgeauftrag 4.

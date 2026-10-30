@@ -7,6 +7,7 @@ import { laneUnlockLevel } from './lanes';
 import type { Minion } from './combat';
 import {
   buyLane,
+  CARDS_PER_ROUND,
   DISCARD_ENERGY,
   discardCard,
   DRAW_COST,
@@ -147,7 +148,8 @@ function tryEconomy(state: MatchState, playerIndex: PlayerIndex, id: string): Bo
       return lane < 0 ? null : done('buy-lane', buyLane(state, playerIndex, lane), lane);
     }
     case 'draw':
-      return player.energy > DRAW_COST && player.hand.length < HAND_LIMIT
+      // Ist die Karte der Runde schon gespielt, wäre eine gezogene Karte nutzlos: `setReady` legt die Hand ab.
+      return player.cardsPlayed < CARDS_PER_ROUND && player.energy > DRAW_COST && player.hand.length < HAND_LIMIT
         ? done('draw', drawCard(state, playerIndex))
         : null;
     default:

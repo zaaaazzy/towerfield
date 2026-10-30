@@ -7,7 +7,10 @@
 
 // Match-Ablauf
 export const START_HAND = 5;
-export const DRAW_PER_ROUND = 3;
+/** Karten, die nach „Ende der Planung“ neu gezogen werden (die Resthand wird vorher abgelegt). */
+export const DRAW_PER_ROUND = 5;
+/** Karten, die pro Runde aus der Hand gespielt werden dürfen. */
+export const CARDS_PER_ROUND = 1;
 /** Handlimit (bestätigt, siehe docs/designkonzept.md): Karten über dem Limit verfallen am Ende der Hand. */
 export const HAND_LIMIT = 10;
 export const MAX_ROUNDS = 8;
@@ -35,6 +38,8 @@ export const DRAW_COST = 1;
 export const MOVE_COST = 1;
 /** Energie, die das Abwerfen einer Handkarte bringt; über `MAX_ENERGY` verfällt sie. */
 export const DISCARD_ENERGY = 1;
+/** Energie, die der Verkauf einer platzierten Figur in der Planungsphase bringt; über `MAX_ENERGY` verfällt sie. */
+export const SELL_MINION_ENERGY = 1;
 /** Zusätzliche Energie beim Runden-Ereignis „Energieschub“ (gedeckelt durch `MAX_ENERGY`). */
 export const EVENT_ENERGY_BONUS = 1;
 
@@ -86,6 +91,14 @@ export const MINION_DAMAGE = 6;
 export const MINION_RANGE = 4;
 /** Standard-Tempo (Minions ohne eigene Rolle); die Simulation nutzt `Minion.speed`. */
 export const MINION_SPEED = 10;
+
+// Turm-Spawn: Jeder lebende Turm erzeugt in der Kampfphase regelmässig einen eigenen Minion (`source: 'tower'`).
+/** Zeit zwischen zwei Spawns eines Turms in Millisekunden (Kampfzeit, nicht Frames). */
+export const TOWER_SPAWN_MS = 1000;
+export const TOWER_SPAWN_HP = 12;
+export const TOWER_SPAWN_DAMAGE = 3;
+export const TOWER_SPAWN_RANGE = MINION_RANGE;
+export const TOWER_SPAWN_SPEED = MINION_SPEED;
 
 /** Balancing-Werte einer Karte. Fehlende Felder gelten als nicht vorhanden (`range`/`speed`: Minion-Standard). */
 export interface CardBalance {

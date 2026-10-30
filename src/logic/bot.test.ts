@@ -4,7 +4,6 @@ import { getCardDef } from './cards';
 import { isLaneBuyable, MAX_FIELD_LEVEL } from './lanes';
 import {
   BASE_ENERGY,
-  createLaneTowers,
   createMatch,
   HAND_LIMIT,
   LANE_COST,
@@ -31,15 +30,12 @@ const botStep = (state: MatchState, player: PlayerIndex, priority: readonly stri
 const botPlan = (state: MatchState, player: PlayerIndex, priority: readonly string[] = CARD_PRIORITY) =>
   planWith(state, player, priority);
 
-/** Baut das Feld von Spieler 1 auf `level` aus (mit den Towern der frisch freien Lanes). */
+/** Baut das Feld von Spieler 1 auf `level` aus und kauft die damit freien Lanes (die Tower stehen schon). */
 function grow(state: MatchState, level: number): MatchState {
   const player = state.players[1];
   player.level = level;
   player.lines.forEach((lane, index) => {
-    if (isLaneBuyable(level, index) && lane.towers.length === 0) {
-      lane.bought = true;
-      lane.towers = createLaneTowers(index);
-    }
+    if (isLaneBuyable(level, index)) lane.bought = true;
   });
   return state;
 }
@@ -772,5 +768,27 @@ describe('Bot: Wirtschaft', () => {
     state = economyPlan(state);
     expect(state.players[1].level).toBeGreaterThanOrEqual(2);
     expect(state.players[1].energy).toBeLessThanOrEqual(MAX_ENERGY);
+  });
+});
+
+describe('Eine Karte pro Runde', () => {
+  it('spielt höchstens eine Karte aus der Hand und meldet sich danach bereit', () => {
+    const state = withHand(['summon-minion', 'summon-minion', 'tower-hp'], 5);
+    let current = state;
+    let played = 0;
+    for (let move = stepWith(current, 1); move; move = stepWith(current, 1)) {
+      if (move.cardId !== '' && !move.discard) played += 1;
+      current = move.state;
+    }
+    expect(played).toBe(1);
+    expect(current.players[1].cardsPlayed).toBe(1);
+    expect(botPlan(state, 1).ready[1]).toBe(true);
+  });
+
+  it('zieht keine Karte mehr, wenn die Karte der Runde schon gespielt ist', () => {
+    const state = withHand(['summon-minion', 'summon-mage'], 5);
+    const first = stepWith(state, 1, ['summon-minion', 'draw'])!;
+    expect(first.cardId).toBe('summon-minion');
+    expect(stepWith(first.state, 1, ['summon-minion', 'draw'])).toBeNull();
   });
 });

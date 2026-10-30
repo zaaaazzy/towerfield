@@ -7,6 +7,7 @@ import { type CardPose, cardAt, fanLayout, HAND_FAN, liftedPose, sortHand } from
 import {
   advance,
   boughtLaneCount,
+  CARDS_PER_ROUND,
   createMatch,
   DISCARD_ENERGY,
   DRAW_COST,
@@ -15,6 +16,7 @@ import {
   type MatchState,
   MAX_ROUNDS,
   MOVE_COST,
+  SELL_MINION_ENERGY,
   UPGRADE_COST,
 } from '../logic/match';
 import { getRoundEventDef } from '../logic/round-events';
@@ -115,6 +117,8 @@ const DISCARD_BUTTON = { x: 6, y: 32, width: 96, height: 24 };
 /** Tasten für die Wirtschaft im oberen Rand: eine Karte ziehen (links neben dem Gegner-Text) und das Feld ausbauen. */
 const DRAW_BUTTON = { x: 106, y: 32, width: 64, height: 24 };
 const UPGRADE_BUTTON = { x: 266, y: 32, width: 88, height: 24 };
+/** Taste „Figur verkaufen“ zwischen Ziehen und Upgrade: sichtbar, solange eine eigene Figur angetippt ist. */
+const SELL_BUTTON = { x: 174, y: 32, width: 88, height: 24 };
 /** Zeitkonstanten (ms) der weichen Animationen: Punkte-Nähe, Einblenden, Einrasten der gezogenen Karte, Rückflug. */
 const PROXIMITY_TIME_MS = 70;
 const FADE_TIME_MS = 110;
@@ -191,6 +195,8 @@ export class MainScene extends Phaser.Scene {
   private minionAnim: MinionAnim = newMinionAnim();
   /** Index der angetippten Karte, die auf eine Line wartet. */
   private selected: number | null = null;
+  /** Id der angetippten eigenen Figur, die „Verkaufen“ treffen würde (nur Eingabezustand). */
+  private sellId: number | null = null;
   /** Karte unter dem Mauszeiger (nur Darstellung). */
   private hovered: number | null = null;
   /** Anhebung je Handkarte (0 bis 1), gleitet über `delta`. */
@@ -706,6 +712,7 @@ export class MainScene extends Phaser.Scene {
     if (this.state.phase !== 'planning') return;
     if (inside(LAYOUT.button, x, y)) {
       this.selected = null;
+      this.sellId = null;
       this.message = '';
       const done = performAction(this.state, this.record, HUMAN, { type: 'ready' });
       this.state = done.result.state;
@@ -714,6 +721,10 @@ export class MainScene extends Phaser.Scene {
     }
     if (this.selected !== null && inside(DISCARD_BUTTON, x, y)) {
       this.discard(this.selected);
+      return;
+    }
+    if (this.sellId !== null && inside(SELL_BUTTON, x, y)) {
+      this.sell(this.sellId);
       return;
     }
     if (inside(LAYOUT.filterButton, x, y)) {
@@ -730,9 +741,18 @@ export class MainScene extends Phaser.Scene {
       this.economy({ type: 'draw' });
       return;
     }
+    // Antippen einer eigenen Figur wählt sie zum Verkaufen (nochmals antippen hebt die Wahl auf).
+    const tapped = this.selectedNeedsMinion() ? null : this.grabbableMinionAt(x, y);
+    if (tapped !== null) {
+      this.message = '';
+      this.selected = null;
+      this.sellId = this.sellId === tapped ? null : tapped;
+      return;
+    }
     const index = this.cardIndexAt(x, y);
     if (index !== null) {
       this.message = '';
+      this.sellId = null;
       const def = getCardDef(this.state.players[HUMAN].hand[index]!);
       if (def.target === 'none') {
         this.play(index);
@@ -782,7 +802,17 @@ export class MainScene extends Phaser.Scene {
     if (done.result.ok) this.pendingAudio.push({ kind: 'card-play' });
   }
 
-  /** Wirft die Handkarte ab (bringt `DISCARD_ENERGY` Energie, siehe `discardCard`). */
+  /** Verkauft die angetippte Figur (bringt `SELL_MINION_ENERGY` Energie, siehe `sellMinion`). */
+  private sell(minionId: number): void {
+    const done = performAction(this.state, this.record, HUMAN, { type: 'sell', minionId });
+    this.state = done.result.state;
+    this.record = done.record;
+    this.sellId = null;
+    this.message = done.result.ok ? '' : this.explain(done.result.reason);
+    if (done.result.ok) this.pendingAudio.push({ kind: 'card-play' });
+  }
+
+  /** Verkauft die Handkarte (Abwerfen, bringt `DISCARD_ENERGY` Energie, siehe `discardCard`). */
   private discard(handIndex: number): void {
     const cardId = this.state.players[HUMAN].hand[handIndex];
     if (cardId === undefined) return;
@@ -847,6 +877,10 @@ export class MainScene extends Phaser.Scene {
         return 'Turm-Slot ist belegt';
       case 'invalid-target':
         return 'Wähle einen eigenen Minion';
+      case 'card-limit':
+        return 'Karte gespielt: nur eine pro Runde';
+      case 'no-such-minion':
+        return 'Diese Figur lässt sich nicht verkaufen';
       case 'invalid-slot':
       case 'invalid-line':
         return 'Hier ist kein Platz';
@@ -879,7 +913,7 @@ export class MainScene extends Phaser.Scene {
       hover ? SURFACE.buttonDiscardHover : SURFACE.buttonDiscard,
     );
     this.label(
-      `Abwerfen +${DISCARD_ENERGY}`,
+      `Verkaufen +${DISCARD_ENERGY}`,
       DISCARD_BUTTON.x + DISCARD_BUTTON.width / 2,
       DISCARD_BUTTON.y + DISCARD_BUTTON.height / 2,
       { size: 11, font: 'heading', bold: true },
@@ -899,6 +933,13 @@ export class MainScene extends Phaser.Scene {
         enabled: planning && !maxLevel && human.energy >= UPGRADE_COST,
       },
     ];
+    const sellable = planning && this.sellId !== null && human.minions.some((m) => m.id === this.sellId);
+    if (sellable) {
+      buttons.push({ rect: SELL_BUTTON, text: `Figur verkaufen +${SELL_MINION_ENERGY}`, enabled: true });
+      const sold = human.minions.find((m) => m.id === this.sellId)!;
+      const point = playerMinionPoint(HUMAN, human, sold);
+      this.graphics.lineStyle(2, PALETTE.gold, 0.95).strokeCircle(point.x, point.y, GRAB_RADIUS * 0.8);
+    }
     for (const { rect, text, enabled } of buttons) {
       drawButton(this.graphics, rect, { enabled });
       this.label(text, rect.x + rect.width / 2, rect.y + rect.height / 2, { size: 11, font: 'heading', bold: true });
@@ -957,6 +998,14 @@ export class MainScene extends Phaser.Scene {
     if (this.ghost) this.drawGhost(this.ghost);
     this.drawDiscardButton(state, drag?.handIndex != null);
     this.drawEconomyButtons(state);
+    const cardPlayed = state.phase === 'planning' && !state.ready[HUMAN] && human.cardsPlayed >= CARDS_PER_ROUND;
+    if (cardPlayed) {
+      this.label('Karte gespielt · Rest wird beim Bereit abgelegt', VIEW.width / 2, LAYOUT.handTop - 8, {
+        size: 10,
+        color: TEXT.gold,
+        stroke: 2,
+      });
+    }
     if (needsMinion) {
       // Mögliche Ziele der gewählten Karte: alle eigenen lebenden Minions mit grünem Ring.
       for (const minion of human.minions) {
@@ -978,7 +1027,7 @@ export class MainScene extends Phaser.Scene {
       this.cardViews[slot]!.update(visible ? pose : { ...pose, z: pose.z + FADED_Z_OFFSET }, def, {
         lift: this.lifts[handIndex] ?? 0,
         selected: this.selected === handIndex,
-        affordable: human.energy >= def.cost,
+        affordable: human.energy >= def.cost && !cardPlayed,
         visible,
       });
     });

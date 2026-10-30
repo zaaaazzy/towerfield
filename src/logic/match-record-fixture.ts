@@ -67,6 +67,13 @@ export function playScriptedMatch(seed: number): PlayedMatch {
       if (state.round % 2 === 0 && placements.length > 1) {
         act({ type: 'undo', minionId: placements[placements.length - 1]!.minionId });
       }
+      // In Runde 4 verkauft der Mensch einen Überlebenden früherer Runden (falls es einen gibt).
+      if (state.round === 4) {
+        const sold = state.players[0].minions.find(
+          (m) => m.hp > 0 && !state.players[0].placements.some((p) => p.minionId === m.id),
+        );
+        if (sold) act({ type: 'sell', minionId: sold.id });
+      }
       act({ type: 'ready' });
       const planned = botPlanRecorded(state, record, 1);
       state = planned.state;

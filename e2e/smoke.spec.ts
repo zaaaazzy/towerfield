@@ -50,7 +50,7 @@ test('das Spiel startet, zeichnet in den Canvas und meldet keine Fehler', async 
   // Hintergrund, Raster, Figur, Stern und Text: ein leerer oder einfarbiger Canvas fällt hier auf.
   expect(colors).toBeGreaterThan(3);
 
-  // Ohne Eingabe: je Spieler genau eine freie Lane (die Start-Lane) mit drei Towern, START_HAND Handkarten, Planung.
+  // Ohne Eingabe: je Spieler genau eine gekaufte Lane (die Start-Lane), aber Tower auf allen Lanes, START_HAND Handkarten, Planung.
   const view = () =>
     page.evaluate(() => {
       const state = (window.game!.scene.getScene('main') as unknown as MainSceneView).current;
@@ -62,10 +62,8 @@ test('das Spiel startet, zeichnet in den Canvas und meldet keine Fehler', async 
     });
   const start = await view();
   expect(start.phase).toBe('planning');
-  // Der Gegner baut Lanes nur mit seinen eigenen Ausbaukarten aus; der Bot kann sie schon im ersten Zug spielen.
-  expect(start.towers[0]).toEqual([3, 0, 0, 0, 0]);
-  expect(start.towers[1]![0]).toBe(3);
-  expect(start.towers[1]!.slice(3)).toEqual([0, 0]);
+  expect(start.towers[0]).toEqual([3, 1, 1, 1, 1]);
+  expect(start.towers[1]).toEqual([3, 1, 1, 1, 1]);
   expect(start.hands[0]).toBe(START_HAND);
 
   // Tippen auf „Bereit“ (unten rechts; Spielkoordinaten 360x640) startet die Kampfphase.

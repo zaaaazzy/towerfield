@@ -15,7 +15,7 @@ Karten (Hochformat, Touch, `Scale.FIT`). Aktuell spielt man lokal gegen einen de
 - Eine Runde = Planung (beide spielen gleichzeitig Karten, begrenzt durch Energie) und Kampf (Minions und Tower,
   Zeit nur über `delta`).
 - Kartentypen: Lane ausbauen (Feld +1 Stufe, ohne Ziel), Tower ausbauen, Minion beschwören, Minion verbessern (wirkt nur auf künftige Minions).
-- Sieg: alle drei gegnerischen Tower zerstört, oder nach der Rundengrenze (8) mehr Tower-Lebenspunkte. Gleichstand =
+- Sieg: alle gegnerischen Tower (alle Lanes) zerstört, oder nach der Rundengrenze (8) mehr Tower-Lebenspunkte. Gleichstand =
   Unentschieden.
 
 ### Basiswerte
@@ -28,7 +28,8 @@ vergleicht sie Zeile für Zeile mit den Konstanten. Die Werte je Karte (Kosten, 
 | Wert | Konstante | Zahl |
 |---|---|---|
 | Startkarten in Runde 1 | `START_HAND` | 5 |
-| Neue Karten ab Runde 2 | `DRAW_PER_ROUND` | 3 |
+| Neue Karten nach „Ende der Planung“ | `DRAW_PER_ROUND` | 5 |
+| Gespielte Karten je Runde | `CARDS_PER_ROUND` | 1 |
 | Handlimit | `HAND_LIMIT` | 10 |
 | Rundengrenze | `MAX_ROUNDS` | 8 |
 | Kampfphase in Ticks | `COMBAT_TICKS` | 400 |
@@ -43,6 +44,7 @@ vergleicht sie Zeile für Zeile mit den Konstanten. Die Werte je Karte (Kosten, 
 | Kosten Karte ziehen | `DRAW_COST` | 1 |
 | Kosten Minion verschieben | `MOVE_COST` | 1 |
 | Energie fürs Abwerfen | `DISCARD_ENERGY` | 1 |
+| Energie fürs Verkaufen einer Figur | `SELL_MINION_ENERGY` | 1 |
 | Bonus Energieschub | `EVENT_ENERGY_BONUS` | 1 |
 | Feld-Höchststufe | `MAX_FIELD_LEVEL` | 3 |
 | Lanes des vollen Feldes | `FIELD_LANE_COUNT` | 5 |
@@ -61,9 +63,17 @@ vergleicht sie Zeile für Zeile mit den Konstanten. Die Werte je Karte (Kosten, 
 | Minion-Schaden (Standard) | `MINION_DAMAGE` | 6 |
 | Minion-Reichweite (Standard) | `MINION_RANGE` | 4 |
 | Minion-Tempo (Standard) | `MINION_SPEED` | 10 |
+| Turm-Spawn: Zeit in ms | `TOWER_SPAWN_MS` | 1000 |
+| Turm-Spawn: HP | `TOWER_SPAWN_HP` | 12 |
+| Turm-Spawn: Schaden | `TOWER_SPAWN_DAMAGE` | 3 |
+| Turm-Spawn: Reichweite | `TOWER_SPAWN_RANGE` | 4 |
+| Turm-Spawn: Tempo | `TOWER_SPAWN_SPEED` | 10 |
 
-Das Handlimit (bestätigt) greift erst in Runde 3: 5 + 3 = 8, dann 11; überzählige Karten verfallen am Ende der Hand, es
-gilt die Reihenfolge der Ankunft. Die Slots je Lane ergeben sich aus den lebenden Towern (zwei je Tower, `laneSlotCounts`).
+Rundenablauf: Pro Runde darf eine Karte gespielt werden (`CARDS_PER_ROUND`). Mit „Ende der Planung“ wird die Resthand
+abgelegt und `DRAW_PER_ROUND` neue Karten werden gezogen; das Handlimit greift daher nur bei zusätzlich gezogenen Karten.
+Jeder lebende Turm (auch auf noch nicht gekauften Lanes) erzeugt in der Kampfphase alle `TOWER_SPAWN_MS` einen Minion
+(`source: 'tower'`, nur für diese Runde). Platzierte Figuren bleiben bis Spielende; in der Planung lassen sie sich für
+`SELL_MINION_ENERGY` verkaufen (`sellMinion`). Die Slots je Lane ergeben sich aus den lebenden Towern (zwei je Tower, `laneSlotCounts`).
 
 Das verbindliche Designkonzept (Karten, Minions, Slot-Platzierung, Iso-Karte, Mobile-Layout, Folgeaufträge) steht in
 [`docs/designkonzept.md`](docs/designkonzept.md). Die Anwendung der Iso-Umrechnung, der Kamera-Begrenzung und der

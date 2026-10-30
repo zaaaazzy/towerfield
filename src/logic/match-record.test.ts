@@ -358,28 +358,39 @@ describe('encodeMatch / decodeMatch', () => {
   });
 
   it('lehnt Links aus älteren Versionen ab, nimmt aber alle fünf Lane-Indizes an', () => {
-    expect(RECORD_VERSION).toBe(7);
+    expect(RECORD_VERSION).toBe(8);
     expect(decodeMatch(1, 'v1.p10-0-0.r10')).toBeNull();
-    // Ältere Versionen kennen weder Turm-Slots noch das neue Wirtschaftskonzept: Deck und Regeln wären andere.
-    for (const old of ['v2', 'v3', 'v4', 'v5', 'v6']) expect(decodeMatch(1, `${old}.p10-0-0.r10`)).toBeNull();
+    // Ältere Versionen kennen weder Turm-Spawn noch die Karte pro Runde: Deck und Regeln wären andere.
+    for (const old of ['v2', 'v3', 'v4', 'v5', 'v6', 'v7']) expect(decodeMatch(1, `${old}.p10-0-0.r10`)).toBeNull();
     for (const lane of [0, 1, 2, 3, 4]) {
-      expect(decodeMatch(1, `v7.p10-0-${lane}`)?.actions).toEqual([
+      expect(decodeMatch(1, `v8.p10-0-${lane}`)?.actions).toEqual([
         { type: 'play', round: 1, player: 0, cardId: 'summon-minion', line: lane },
       ]);
-      expect(decodeMatch(1, `v7.p10-0-${lane}-3`)?.actions).toEqual([
+      expect(decodeMatch(1, `v8.p10-0-${lane}-3`)?.actions).toEqual([
         { type: 'play', round: 1, player: 0, cardId: 'summon-minion', line: lane, slot: 3 },
       ]);
-      expect(decodeMatch(1, `v7.m10-1-${lane}-0`)?.actions).toEqual([
+      expect(decodeMatch(1, `v8.m10-1-${lane}-0`)?.actions).toEqual([
         { type: 'move', round: 1, player: 0, minionId: 1, line: lane, slot: 0 },
       ]);
-      expect(decodeMatch(1, `v7.b10-${lane}`)?.actions).toEqual([{ type: 'buy-lane', round: 1, player: 0, line: lane }]);
+      expect(decodeMatch(1, `v8.b10-${lane}`)?.actions).toEqual([{ type: 'buy-lane', round: 1, player: 0, line: lane }]);
     }
-    expect(decodeMatch(1, 'v7.p10-0-5')).toBeNull();
-    expect(decodeMatch(1, 'v7.g11.w20')?.actions).toEqual([
+    expect(decodeMatch(1, 'v8.p10-0-5')).toBeNull();
+    expect(decodeMatch(1, 'v8.g11.w20')?.actions).toEqual([
       { type: 'upgrade', round: 1, player: 1 },
       { type: 'draw', round: 2, player: 0 },
     ]);
-    expect(decodeMatch(1, 'v7.d20-3')?.actions).toEqual([{ type: 'discard', round: 2, player: 0, cardId: 'summon-healer' }]);
+    expect(decodeMatch(1, 'v8.d20-3')?.actions).toEqual([{ type: 'discard', round: 2, player: 0, cardId: 'summon-healer' }]);
+  });
+
+  it('kodiert und liest den Verkauf einer Figur (`s`) zurück und lehnt falsche Felder ab', () => {
+    const record: RecordedMatch = {
+      ...createRecord(4),
+      actions: [{ type: 'sell', round: 3, player: 1, minionId: 12 }],
+    };
+    expect(encodeMatch(record)).toBe('v8.s31-12');
+    expect(decodeMatch(4, 'v8.s31-12')).toEqual(record);
+    expect(decodeMatch(4, 'v8.s31')).toBeNull();
+    expect(decodeMatch(4, 'v8.s31-1-2')).toBeNull();
   });
 
   it('kodiert die Ziel-Minion-ID der Karte „Minion stärken“ und liest sie zurück', () => {
@@ -389,7 +400,7 @@ describe('encodeMatch / decodeMatch', () => {
     ];
     const record: RecordedMatch = { ...createRecord(9), actions };
     const text = encodeMatch(record);
-    expect(text).toBe('v7.p20-12-7.p31-12-0');
+    expect(text).toBe('v8.p20-12-7.p31-12-0');
     expect(decodeMatch(9, text)).toEqual(record);
   });
 
@@ -440,7 +451,7 @@ describe('encodeMatch / decodeMatch', () => {
   });
 
   it('manipulierte, aber lesbare Daten bricht erst das Nachspielen ab', () => {
-    const text = encodeMatch(playScriptedMatch(5).record).replace(/^v7\./, 'v7.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0.');
+    const text = encodeMatch(playScriptedMatch(5).record).replace(/^v8\./, 'v8.p10-0.p10-0.p10-0.p10-0.p10-0.p10-0.');
     const decoded = decodeMatch(5, text);
     expect(decoded).not.toBeNull();
     const result = replayRecorded(decoded!);
@@ -484,7 +495,7 @@ describe('encodeMatch / decodeMatch', () => {
       'tower-armor',
       'minion-upgrade-elite',
     ]);
-    expect(RECORD_VERSION).toBe(7);
+    expect(RECORD_VERSION).toBe(8);
   });
 });
 
