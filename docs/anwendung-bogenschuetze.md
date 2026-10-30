@@ -41,7 +41,7 @@ trifft er aus 14 Einheiten, ein Nahkämpfer erst ab 4.
 | `src/logic/bot.ts` | `summon-archer` in `PRIORITY` hinter `summon-minion`; der `summon`-Zweig der Zielwahl gilt auch für die neue Karte |
 | `src/logic/combat.test.ts` | Fernkämpfer trifft Minion aus 10 und Tower aus 14, Nahkämpfer nicht bzw. erst ab 4; Stehenbleiben und Weiterlaufen |
 | `src/logic/cards.test.ts` | Kartenwerte des Bogenschützen, 2 Kopien pro Deck |
-| `src/logic/match.test.ts` | `range` 14 (Bogenschütze) bzw. 4 (Minion, Brocken) nach dem Beschwören |
+| `src/logic/match.test.ts` | `range` aus `CARD_BALANCE` (Bogenschütze) bzw. `MINION_RANGE` (Minion, Brocken) nach dem Beschwören |
 | `src/logic/bot.test.ts` | Bot kann `summon-archer` spielen |
 | `src/logic/placement.test.ts` | Fixtures um `range` ergänzt |
 | `docs/designkonzept.md` | Bogenschütze „vorhanden“; Konstanten-Abschnitt nennt `range`; Folgeauftrag 5 umgesetzt |
@@ -58,8 +58,11 @@ erscheint automatisch.
 
 - **Neue Minions:** Wer einen `Minion` direkt anlegt (Tests, Fixtures), muss `range` setzen (Standard `MINION_RANGE`);
   sonst schlägt die Typprüfung fehl. Erwartungswerte bestehender Tests blieben unverändert.
-- **Deckreihenfolge:** Das Deck ist um 2 Karten länger, die Reihenfolge nach Seed ändert sich. Tests mit fester
-  Deckreihenfolge müssen darauf geprüft werden.
+- **Deckreihenfolge:** Das Deck ist um 2 Karten länger, die Reihenfolge nach Seed ändert sich. Die Logik-Tests in
+  `match`, `combat`, `bot` und `placement` hängen seit dem Auftrag „Test-Fixtures statt fester Balance-Zahlen“ nicht
+  mehr davon ab: Sie bauen Deck und Hand mit `fixedDeck`, `createMatchWithDeck` und `withHand` aus
+  `src/logic/test-fixtures.ts` aus einer expliziten Kartenliste und leiten Werte aus `balance-config.ts`
+  (`CARD_BALANCE`) ab. Der Seed bestimmt dort nur noch die Runden-Ereignisse und die Bot-Simulationen ganzer Matches.
 - **Balance:** `TOWER_RANGE` (20) gegen Reichweite 14 ist ein eigener Schritt im Designkonzept. Es wurde keine neue
   Balance-Simulation durchgeführt.
 - **E2E-Test:** Das Ziehen eines beschworenen Minions läuft ohne `skip` mit festem Seed über `dragMinion`
