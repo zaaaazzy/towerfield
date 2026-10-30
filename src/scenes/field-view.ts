@@ -28,6 +28,7 @@ import {
   strideSwing,
   walkCycle,
 } from '../logic/minion-look';
+import { squashScale } from '../logic/juice';
 import {
   LANE_SLOT_GAP,
   type LineGeometry,
@@ -219,6 +220,8 @@ export interface MinionLook {
   flash: number;
   /** Restzeit der Angriffsbewegung in ms (0 = kein Angriff). */
   attackRemainingMs?: number;
+  /** Squash & Stretch (Faktoren auf Breite und Höhe, `squashScale`); fehlt = unverformt. */
+  squash?: { x: number; y: number };
 }
 
 /** Figur im Maßstab 1 ist 24 Einheiten hoch; `FIGURE_UNIT` rechnet den Radius (`minionRadius`) in diesen Maßstab um. */
@@ -258,6 +261,7 @@ export function drawMinionBody(
     fall: 0,
     flash: look?.flash ?? 0,
     alpha,
+    squash: look?.squash,
   });
 
   // Lebensbalken über dem Kopf.
@@ -420,8 +424,10 @@ export function drawMinions(g: Phaser.GameObjects.Graphics, state: MatchState, s
     for (const minion of player.minions) {
       if (owner === HUMAN && skipHumanId === minion.id) continue;
       const point = playerMinionPoint(owner, player, minion);
+      const squashRun = anim?.squashes.get(flashKey(owner, minion.id));
       const look = anim
         ? {
+            squash: squashRun && squashScale(squashRun),
             id: minion.id,
             timeMs: anim.timeMs,
             moving,

@@ -18,7 +18,7 @@ import {
   volumeAtPosition,
 } from '../logic/audio-settings';
 import type { LabelFn } from './labels';
-import { drawButton, PALETTE, TEXT } from './theme';
+import { drawButton, FX_COLOR, PALETTE, SURFACE, TEXT } from './theme';
 
 /** Schlüssel des ersten Musikstücks im Audio-Cache. */
 export const MUSIC_KEY = 'tavern-loop';
@@ -222,7 +222,7 @@ export function sliderValueAt(control: 'music' | 'effects', x: number): number {
 /** Zeichnet Stumm-Schalter und die beiden Regler. */
 export function drawAudioControls(g: Phaser.GameObjects.Graphics, label: LabelFn, settings: AudioSettings): void {
   const mute = AUDIO_UI.mute;
-  drawButton(g, mute, settings.muted ? { top: 0x7a3a3a, bottom: 0x4a1f1f } : { top: 0x4a4570, bottom: 0x2a2548 });
+  drawButton(g, mute, settings.muted ? FX_COLOR.buttonMuted : SURFACE.buttonFilterAll);
   label(settings.muted ? 'Stumm' : 'Ton an', mute.x + mute.width / 2, mute.y + mute.height / 2, { size: 11 });
   (['music', 'effects'] as const).forEach((control) => {
     const row = AUDIO_UI[control];

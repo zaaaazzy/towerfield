@@ -1,7 +1,8 @@
 import Phaser from 'phaser';
 import { type Banner, type BannerRun, advanceBanner, bannerSlide, type BannerTone, skipBanner, startBanner } from '../logic/phase-banner';
 import { LabelPool } from './labels';
-import { lerpColor, PALETTE, TEXT } from './theme';
+import { easeInOutCubic, easeOutCubic } from '../logic/juice';
+import { FX_COLOR, lerpColor, PALETTE, TEXT } from './theme';
 
 /** Tiefe über Beschriftungen und Effekten, unter nichts: das Banner liegt oben. */
 const BANNER_DEPTH = 60;
@@ -17,8 +18,8 @@ const TONE_COLOR: Record<BannerTone, number> = {
   draw: PALETTE.stone,
 };
 
-const PARCHMENT = 0xe9d9a6;
-const PARCHMENT_DARK = 0xc8b27a;
+const PARCHMENT = FX_COLOR.parchment;
+const PARCHMENT_DARK = FX_COLOR.parchmentDark;
 
 /**
  * Animiertes Pergament-/Gold-Banner. Hält den Ablauf (`BannerRun`, Zeit aus `delta`), zeichnet ihn in einen eigenen
@@ -83,7 +84,10 @@ export class BannerView {
     const { width } = this.view;
     const { y, height } = BANNER_BAND;
     const accent = TONE_COLOR[run.banner.tone];
-    this.container.setPosition(-(1 - slide) * width, 0).setAlpha(slide);
+    // Einfahren bremst weich ab (ease-out), Ausfahren beschleunigt und bremst (ease-in-out).
+    const entering = run.elapsedMs < run.banner.durationMs / 2;
+    const travel = (entering ? easeOutCubic : easeInOutCubic)(slide);
+    this.container.setPosition(-(1 - travel) * width, 0).setAlpha(slide);
 
     // Pergamentstreifen mit Verlauf, Goldkanten und Eckzierden.
     g.fillStyle(PALETTE.black, 0.35).fillRect(0, y + 4, width, height);

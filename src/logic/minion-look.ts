@@ -4,6 +4,7 @@
  */
 import { effectiveRange, type Explosion, LINE_LENGTH, MINION_RANGE, type Minion } from './combat';
 import type { FxEvent } from './fx-events';
+import { minionKey, type SquashRun, updateSquashes } from './juice';
 
 export type MinionShape = 'melee' | 'ranged' | 'healer' | 'destroyer';
 
@@ -61,7 +62,7 @@ export function flashStrength(remainingMs: number): number {
   return Math.min(1, Math.max(0, remainingMs / FLASH_MS));
 }
 
-export const flashKey = (owner: number, minionId: number): string => `${owner}:${minionId}`;
+export const flashKey = minionKey;
 
 /** Dauer eines Wegzyklus (zwei Schritte) in ms. */
 export const WALK_PERIOD_MS = 520;
@@ -130,9 +131,17 @@ export interface MinionAnim {
   /** Restzeit der Angriffsbewegung je Minion (`flashKey`). */
   attacks: ReadonlyMap<string, number>;
   ghosts: readonly MinionGhost[];
+  /** Laufende Squash-&-Stretch-Verformungen je Minion (`flashKey`, siehe `juice.ts`). */
+  squashes: ReadonlyMap<string, SquashRun>;
 }
 
-export const newMinionAnim = (): MinionAnim => ({ timeMs: 0, flashes: new Map(), attacks: new Map(), ghosts: [] });
+export const newMinionAnim = (): MinionAnim => ({
+  timeMs: 0,
+  flashes: new Map(),
+  attacks: new Map(),
+  ghosts: [],
+  squashes: new Map(),
+});
 
 type Side = { minions: readonly Minion[] };
 
@@ -232,6 +241,7 @@ export function advanceMinionAnim(
     flashes: updateFlashes(anim.flashes, events, deltaMs),
     attacks: updateAttacks(anim.attacks, events, current.players, deltaMs),
     ghosts: updateGhosts(anim.ghosts, events, previous.players, deltaMs),
+    squashes: updateSquashes(anim.squashes, events, deltaMs),
   };
 }
 

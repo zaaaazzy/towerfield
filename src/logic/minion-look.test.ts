@@ -300,6 +300,7 @@ describe('advanceMinionAnim', () => {
     expect(next.flashes.get(flashKey(0, 1))).toBe(FLASH_MS);
     expect(next.attacks.get(flashKey(1, 2))).toBe(ATTACK_MS);
     expect(next.ghosts).toHaveLength(1);
+    expect(next.squashes.get(flashKey(0, 1))?.ageMs).toBe(0);
   });
 });
 

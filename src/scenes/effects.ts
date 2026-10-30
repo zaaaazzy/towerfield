@@ -2,12 +2,15 @@
  * Treffer-, Tod- und Beschwörungseffekte: Partikel, Ringe (Tweens) und aufsteigende Schadenszahlen.
  * Je Schadensquelle ein eigener Treffer: Pfeile fliegen im Bogen heran, Nahkämpfer ziehen einen Schwerthieb, Blitze
  * schlagen zickzack ein. Tower splittern wie Holz, Gefallene hinterlassen Staub.
+ * Beschwörung steigt als Funkenfontäne auf, Heilung als grüne Lichter, Explosion und Turmzerstörung bekommen
+ * zusätzlich einen additiven Lichtfleck; Blitz-Türme glühen dauerhaft (`glowTowers`).
  * Die Szene übergibt die Ereignisse aus `logic/fx-events.ts`; hier entsteht nur Darstellung. Zeiten laufen über
  * `delta` bzw. Phaser-Tweens, Mengen sind begrenzt, damit viele gleichzeitige Treffer nicht bremsen.
+ * Wackeln, Blitz und Hit-Stop stehen in `logic/juice.ts` und werden in `main-scene.ts` angewendet.
  */
 import Phaser from 'phaser';
 import type { DamageSource, FxEvent } from '../logic/fx-events';
-import { FONTS, PALETTE, TEXT } from './theme';
+import { FONTS, FX_COLOR, LIGHT, PALETTE, TEAM_COLOR, TEXT } from './theme';
 import { TEXTURE_KEYS } from './textures';
 
 export interface Point {
@@ -47,16 +50,47 @@ const GLOW_SIZE = 64;
 /** Abstand (Lane-Einheiten), aus dem Pfeile heranfliegen – etwas unter der Reichweite des Bogenschützen (14). */
 const ARROW_DISTANCE = 12;
 const ARROW_FLIGHT_MS = 220;
-const WOOD = 0xa0703c;
-const DUST = 0x8a7a66;
-const STEEL = 0xdfe6ee;
-const BOLT = 0x9fd8ff;
+const WOOD = FX_COLOR.wood;
+const DUST = FX_COLOR.dust;
+const STEEL = FX_COLOR.steel;
+const BOLT = FX_COLOR.bolt;
+/** Größte Zahl gleichzeitiger Licht-Sprites (Glühen bei Blitz, Explosion, Heilung). */
+const MAX_LIGHTS = 16;
+/** Dauer eines Pulses des Dauerglühens am Blitz-Turm in Millisekunden. */
+const LIGHT_PULSE_MS = 900;
 
 const teamColor = (owner: number): number => (owner === 0 ? PALETTE.human : PALETTE.bot);
 
-/** Partikelarten: Leuchtfunken (`hit`, `death`, `down`, `summon`), Holzsplitter mit Schwerkraft und Staubwolken. */
+/**
+ * Partikelarten: Leuchtfunken (`hit`, `death`, `down`), aufsteigende Funken bei der Beschwörung (`summon`),
+ * langsam schwebende grüne Lichter bei der Heilung (`heal`), Holzsplitter mit Schwerkraft und Staubwolken.
+ */
 function emitterConfig(kind: string, color: number): Phaser.Types.GameObjects.Particles.ParticleEmitterConfig {
   const base = { tint: color, emitting: false } as const;
+  if (kind === 'summon') {
+    return {
+      ...base,
+      lifespan: { min: 380, max: 650 },
+      speed: { min: 35, max: 95 },
+      angle: { min: -130, max: -50 },
+      gravityY: 60,
+      scale: { start: 1, end: 0 },
+      alpha: { start: 1, end: 0 },
+      blendMode: 'ADD',
+    };
+  }
+  if (kind === 'heal') {
+    return {
+      ...base,
+      lifespan: { min: 600, max: 1000 },
+      speed: { min: 8, max: 28 },
+      angle: { min: -115, max: -65 },
+      gravityY: -45,
+      scale: { start: 0.8, end: 0 },
+      alpha: { start: 0.9, end: 0 },
+      blendMode: 'ADD',
+    };
+  }
   if (kind === 'splinter') {
     return {
       ...base,
@@ -94,6 +128,9 @@ export class Effects {
   private readonly pending = new Map<string, Pending>();
   private floaters = 0;
   private rings = 0;
+  private lights = 0;
+  /** Dauerglühen der Blitz-Türme (wiederverwendet). */
+  private readonly towerGlows: Phaser.GameObjects.Image[] = [];
   /** Lebende Pfeile, Hiebe und Blitze. */
   private strokes = 0;
 
@@ -108,8 +145,15 @@ export class Effects {
       switch (event.kind) {
         case 'summon': {
           const at = this.locate.minion(event.owner, event.line, event.position, event.minionId);
-          this.burst('summon', teamColor(event.owner), at, 10);
+          this.burst('summon', teamColor(event.owner), at, 12);
           this.ring(at, teamColor(event.owner), 1.1);
+          this.light(at, teamColor(event.owner), 1.2, 320, 0.5);
+          break;
+        }
+        case 'minion-heal': {
+          const at = this.locate.minion(event.owner, event.line, event.position, event.minionId);
+          this.burst('heal', FX_COLOR.heal, at, 4);
+          this.light(at, FX_COLOR.heal, 1, 420, 0.4);
           break;
         }
         case 'minion-damage':
@@ -135,6 +179,7 @@ export class Effects {
           this.burst('death', teamColor(event.owner), at, 14);
           this.ring(at, PALETTE.gold, size);
           this.ring(at, PALETTE.white, size * 0.6);
+          this.light(at, LIGHT.emberGlow, size * 1.4, 520, 0.8);
           break;
         }
         case 'tower-damage':
@@ -148,7 +193,7 @@ export class Effects {
           this.burst('splinter', WOOD, at, 30);
           this.burst('dust', DUST, at, 18);
           this.burst('down', teamColor(event.owner), at, 12);
-          this.scene.cameras.main.shake(220, 0.006);
+          this.light(at, LIGHT.emberCore, 2, 600, 0.7);
           break;
         }
       }
@@ -236,6 +281,7 @@ export class Effects {
       case 'lightning':
         this.bolt(at);
         this.burst('hit', BOLT, at, 4);
+        this.light(at, BOLT, 0.9, 200, 0.6);
         break;
       default:
         this.slash(at, entry.from);
@@ -373,6 +419,51 @@ export class Effects {
         glow.destroy();
         this.rings -= 1;
       },
+    });
+  }
+
+  /**
+   * Kurzes Licht: additiv gemischter Lichtfleck, der mit ease-out wächst und ausblendet. Sprites mit `ADD` statt
+   * Normal-Maps (siehe Abgrenzung des Auftrags).
+   */
+  private light(at: Point, color: number, size: number, durationMs: number, alpha: number): void {
+    if (this.lights >= MAX_LIGHTS) return;
+    this.lights += 1;
+    const glow = this.scene.add
+      .image(at.x, at.y, TEXTURE_KEYS.glow)
+      .setTint(color)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setDepth(18)
+      .setScale(size * 0.6)
+      .setAlpha(alpha);
+    this.scene.tweens.add({
+      targets: glow,
+      scale: size * 1.6,
+      alpha: 0,
+      duration: durationMs,
+      ease: 'Quad.easeOut',
+      onComplete: () => {
+        glow.destroy();
+        this.lights -= 1;
+      },
+    });
+  }
+
+  /**
+   * Dauerglühen an den Blitz-Türmen: ein weicher Lichtfleck je Turm, der mit der Szenenzeit pulsiert. `points` sind
+   * die Bildschirmpunkte der Blitz-Türme dieses Bilds; überzählige Sprites werden ausgeblendet.
+   */
+  glowTowers(points: readonly Point[], timeMs: number): void {
+    while (this.towerGlows.length < points.length) {
+      this.towerGlows.push(
+        this.scene.add.image(0, 0, TEXTURE_KEYS.glow).setTint(TEAM_COLOR.markLightning).setBlendMode(Phaser.BlendModes.ADD).setDepth(17),
+      );
+    }
+    const pulse = 0.5 + 0.5 * Math.sin((timeMs / LIGHT_PULSE_MS) * Math.PI * 2);
+    this.towerGlows.forEach((glow, index) => {
+      const point = points[index];
+      glow.setVisible(point !== undefined);
+      if (point) glow.setPosition(point.x, point.y).setScale(0.9 + 0.25 * pulse).setAlpha(0.25 + 0.2 * pulse);
     });
   }
 
