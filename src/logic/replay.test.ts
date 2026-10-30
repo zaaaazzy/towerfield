@@ -299,8 +299,24 @@ describe('describeEvent für Aufzeichnungen', () => {
       'already-specialized',
       'invalid-target',
       'lane-slot-taken',
+      'card-limit',
     ];
     for (const reason of reasons) expect(describeAbort({ reason, index: 4 }).length).toBeGreaterThan(10);
+  });
+
+  it('spielt den Verkauf einer Figur aus der Aufzeichnung ab und beschreibt ihn', () => {
+    const state = createRecordedReplay({
+      ...createRecord(3),
+      actions: [{ type: 'sell', round: 1, player: 0, minionId: 50 }],
+    });
+    state.match.players[0].minions.push({ id: 50, line: 0, slot: 0, position: 0, hp: 5, damage: 1, range: 4, speed: 10 });
+    const energy = state.match.players[0].energy;
+    const replay = stepReplay(state, PLAY_PAUSE_MS);
+    expect(replay.aborted).toBeNull();
+    expect(replay.match.players[0].minions).toEqual([]);
+    expect(replay.match.players[0].energy).toBe(energy + 1);
+    expect(replay.events[0]).toMatchObject({ action: 'sell', cardId: '', line: null });
+    expect(describeEvent(replay.events[0]!)).toBe('Runde 1 · Blau verkauft Einheit');
   });
 });
 

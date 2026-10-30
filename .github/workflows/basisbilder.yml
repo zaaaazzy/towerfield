@@ -1,0 +1,66 @@
+name: Basisbilder
+
+# Erzeugt die Linux-Basisbilder (*-chromium-linux.png) für e2e/grafik.spec.ts im selben Container wie ci.yml.
+# Nur manuell starten, z. B. nach einer bewussten Grafikänderung. ci.yml aktualisiert nie selbst Bilder.
+on:
+  workflow_dispatch:
+    inputs:
+      committen:
+        description: Erzeugte Bilder auf den gewählten Branch committen (sonst nur Artefakt)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: basisbilder-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  erzeugen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Tag muss zur gepinnten Version von @playwright/test in package.json passen (wie in ci.yml).
+    container: mcr.microsoft.com/playwright:v1.64.1-noble
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright test e2e/grafik.spec.ts --update-snapshots
+      - uses: actions/upload-artifact@v5
+        with:
+          name: basisbilder-linux
+          path: e2e/grafik.spec.ts-snapshots/*-chromium-linux.png
+          if-no-files-found: error
+          retention-days: 14
+
+  committen:
+    needs: erzeugen
+    if: inputs.committen
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Schreibrecht nur in diesem Job.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v5
+        with:
+          name: basisbilder-linux
+          path: e2e/grafik.spec.ts-snapshots
+      - name: Bilder committen
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add e2e/grafik.spec.ts-snapshots/*-chromium-linux.png
+          if git diff --cached --quiet; then
+            echo "Keine Änderung an den Basisbildern."
+          else
+            git commit -m "Linux-Basisbilder für Grafik-Tests aktualisieren"
+            git push
+          fi

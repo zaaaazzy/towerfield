@@ -21,7 +21,7 @@ export type ReplayActionType = RecordedAction['type'];
 
 /**
  * Eine im Replay ausgeführte Aktion. Ohne `action` ist es eine gespielte Karte. `line` ist 0-basiert, `null` bei Karten
- * ohne Zielline. Beim Verschieben ist `line` das Ziel und `slot` der Platz; beim Verschieben und Zurücknehmen ist
+ * ohne Zielline. Beim Verschieben ist `line` das Ziel und `slot` der Platz; beim Verschieben, Zurücknehmen und Verkaufen ist
  * `cardId` die Karte des Minions. Bei „bereit“ ist `cardId` leer.
  */
 export interface ReplayEvent {
@@ -106,6 +106,8 @@ function eventFor(before: MatchState, action: RecordedAction): ReplayEvent {
       return { ...base, action: 'move', cardId: placed(action.minionId), line: action.line, slot: action.slot };
     case 'undo':
       return { ...base, action: 'undo', cardId: placed(action.minionId), line: null };
+    case 'sell':
+      return { ...base, action: 'sell', cardId: placed(action.minionId), line: null };
     case 'discard':
       return { ...base, action: 'discard', cardId: action.cardId, line: null };
     case 'buy-lane':
@@ -199,6 +201,8 @@ export function describeEvent(event: ReplayEvent): string {
       return `${prefix} verschiebt ${name}${target}${event.slot === undefined ? '' : `, ${describeSlot(event.slot)}`}`;
     case 'undo':
       return `${prefix} nimmt ${name} zurück`;
+    case 'sell':
+      return `${prefix} verkauft ${name}`;
     case 'discard':
       return `${prefix} wirft ${name} ab`;
     default:
@@ -227,6 +231,7 @@ const ABORT_TEXT: Readonly<Record<ReplayAbortReason, string>> = {
   'hand-full': 'Die Hand ist voll.',
   'already-specialized': 'Der Tower ist schon spezialisiert.',
   'invalid-target': 'Der Ziel-Minion ist ungültig.',
+  'card-limit': 'In dieser Runde wurde schon eine Karte gespielt.',
 };
 
 /** Hinweistext zum Abbruch, z. B. „Replay abgebrochen bei Zug 7: Zu wenig Energie.“ */

@@ -123,6 +123,8 @@ export function slotPoint(line: number, towers: readonly Tower[], slot: number, 
 export interface SlotLane {
   towers: readonly Tower[];
   laneEffect?: LaneEffect;
+  /** `false`: Lane noch nicht gekauft; ihre Tower stehen, bieten aber keine Slots an. Fehlt das Feld, gilt die Lane als frei. */
+  bought?: boolean;
 }
 
 /**
@@ -135,7 +137,9 @@ export function freeSlotPoints(
   geometry: LineGeometry,
 ): SlotPoint[] {
   return lanes.flatMap((lane, line) =>
-    freeSlots(minions, line, lane.towers).map((slot) => slotPoint(line, lane.towers, slot, geometry)),
+    lane.bought === false
+      ? []
+      : freeSlots(minions, line, lane.towers).map((slot) => slotPoint(line, lane.towers, slot, geometry)),
   );
 }
 
@@ -153,7 +157,7 @@ export interface LaneSlotPoint extends Point {
 export function freeLaneSlotPoints(lanes: readonly SlotLane[], geometry: LineGeometry): LaneSlotPoint[] {
   const points: LaneSlotPoint[] = [];
   lanes.forEach((lane, line) => {
-    if (lane.laneEffect !== undefined || !lane.towers.some((tower) => tower.hp > 0)) return;
+    if (lane.bought === false || lane.laneEffect !== undefined || !lane.towers.some((tower) => tower.hp > 0)) return;
     points.push({ line, ...laneSlotPoint(line, geometry) });
   });
   return points;

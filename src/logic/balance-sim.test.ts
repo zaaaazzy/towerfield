@@ -1,9 +1,18 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { buildReport, type MatchResult, runSimulation, shuffledPriority, simulateMatch, strategiesForSeed } from './balance-sim';
-import { ECONOMY_ACTIONS } from './bot';
+import {
+  buildReport,
+  type MatchResult,
+  playEvent,
+  runSimulation,
+  shuffledPriority,
+  simulateMatch,
+  strategiesForSeed,
+} from './balance-sim';
+import { botStep, ECONOMY_ACTIONS } from './bot';
 import { CARD_DEFS } from './cards';
-import { MAX_ROUNDS } from './match';
+import { MAX_FIELD_LEVEL } from './lanes';
+import { createLaneTowers, createMatch, MAX_ROUNDS } from './match';
 import { EVENT_INTERVAL } from './round-events';
 
 const ids = CARD_DEFS.map((def) => def.id);
@@ -180,6 +189,152 @@ describe('buildReport', () => {
     expect(minion.deltaToBaseline).toBeCloseTo(0.5 - 3 / 8, 10);
     const unused = report.cards.find((card) => card.cardId === 'minion-upgrade-all')!;
     expect(unused).toMatchObject({ matchesWithCard: 0, plays: 0, winRate: 0, deltaToBaseline: 0 });
+  });
+});
+
+describe('Zeitpunkt der Karten (Runde und Level)', () => {
+  const fresh = () => createMatch(1);
+
+  describe('playEvent', () => {
+    it('zählt das Feld-Upgrade als Einsatz von line-upgrade mit Runde und Feldstufe', () => {
+      const state = fresh();
+      const move = botStep(state, 0, ['upgrade'])!;
+      expect(playEvent(state, 0, move)).toEqual({ cardId: 'line-upgrade', round: 1, fieldLevel: 1 });
+    });
+
+    it('liefert für Lane-Kauf und Ziehen keinen Eintrag', () => {
+      const state = fresh();
+      state.players[0].level = 2;
+      state.players[0].energy = 10;
+      const buy = botStep(state, 0, ['buy-lane'])!;
+      expect(buy.economy).toBe('buy-lane');
+      expect(playEvent(state, 0, buy)).toBeUndefined();
+      const draw = botStep(state, 0, ['draw'])!;
+      expect(draw.economy).toBe('draw');
+      expect(playEvent(state, 0, draw)).toBeUndefined();
+    });
+
+    it('nennt bei einer Karte mit Lane-Ziel das Lane-Level, bei einer Spezialisierung das der Ziel-Lane', () => {
+      const start = fresh();
+      start.players[0].hand = ['summon-minion'];
+      expect(playEvent(start, 0, botStep(start, 0, ['summon-minion'])!)).toEqual({
+        cardId: 'summon-minion',
+        round: 1,
+        fieldLevel: 1,
+        laneLevel: 1,
+      });
+
+      const grown = fresh();
+      const player = grown.players[0];
+      player.level = 2;
+      player.energy = 5;
+      player.hand = ['tower-lightning'];
+      player.lines[1] = { bought: true, towers: createLaneTowers(1), bonus: { hp: 0, damage: 0 } };
+      expect(playEvent(grown, 0, botStep(grown, 0, ['tower-lightning'])!)).toEqual({
+        cardId: 'tower-lightning',
+        round: 1,
+        fieldLevel: 2,
+        laneLevel: 2,
+      });
+    });
+
+    it('lässt das Lane-Level bei Karten ohne Lane-Ziel weg', () => {
+      const state = fresh();
+      state.players[0].energy = 5;
+      state.players[0].hand = ['minion-upgrade-all'];
+      const event = playEvent(state, 0, botStep(state, 0, ['minion-upgrade-all'])!)!;
+      expect(event).toEqual({ cardId: 'minion-upgrade-all', round: 1, fieldLevel: 1 });
+      expect('laneLevel' in event).toBe(false);
+    });
+
+    it('markiert einen Abwurf und nennt kein Lane-Level', () => {
+      const state = fresh();
+      state.players[0].energy = 1;
+      state.players[0].hand = ['tower-lightning', 'summon-brute'];
+      const move = botStep(state, 0, ['summon-brute'])!;
+      expect(move.discard).toBe(true);
+      expect(playEvent(state, 0, move)).toEqual({ cardId: 'tower-lightning', round: 1, fieldLevel: 1, discard: true });
+    });
+  });
+
+  describe('simulateMatch', () => {
+    it('führt Protokoll und Handreste, die zu played passen', () => {
+      for (const seed of [1, 2, 3]) {
+        const match = simulateMatch(seed, strategiesForSeed(seed));
+        for (const index of [0, 1] as const) {
+          const log = match.log![index];
+          expect(log.filter((entry) => !entry.discard).map((entry) => entry.cardId)).toEqual(match.played[index]);
+          for (const entry of log) {
+            expect(entry.round).toBeGreaterThanOrEqual(1);
+            expect(entry.round).toBeLessThanOrEqual(match.rounds);
+            expect(entry.fieldLevel).toBeGreaterThanOrEqual(1);
+            expect(entry.fieldLevel).toBeLessThanOrEqual(MAX_FIELD_LEVEL);
+            if (entry.laneLevel !== undefined) expect(entry.laneLevel).toBeGreaterThanOrEqual(1);
+          }
+          for (let i = 1; i < log.length; i += 1) expect(log[i]!.round).toBeGreaterThanOrEqual(log[i - 1]!.round);
+          for (const id of match.held![index]) expect(ids).toContain(id);
+        }
+      }
+    });
+
+    it('zählt das Feld-Upgrade als Einsatz von line-upgrade', () => {
+      const match = simulateMatch(1, strategiesForSeed(1));
+      const upgrades = match.log!.flat().filter((entry) => entry.cardId === 'line-upgrade');
+      expect(upgrades.length).toBeGreaterThan(0);
+      expect(upgrades.every((entry) => entry.laneLevel === undefined && !entry.discard)).toBe(true);
+    });
+  });
+
+  describe('buildReport', () => {
+    const logged = buildReport(
+      [
+        result({
+          outcome: 'player0',
+          rounds: 6,
+          played: [['tower-lightning', 'tower-lightning'], []],
+          log: [
+            [
+              { cardId: 'tower-lightning', round: 3, fieldLevel: 2, laneLevel: 2 },
+              { cardId: 'tower-lightning', round: 4, fieldLevel: 3, discard: true },
+              { cardId: 'tower-lightning', round: 5, fieldLevel: 3, laneLevel: 3 },
+            ],
+            [],
+          ],
+          held: [['tower-lightning'], ['summon-minion']],
+        }),
+      ],
+      1,
+    );
+    const lightning = logged.cards.find((card) => card.cardId === 'tower-lightning')!.timing;
+
+    it('zählt Einsätze je Runde, Lane-Level und Feldstufe sowie die mittlere Runde', () => {
+      expect(lightning.playsByRound).toEqual([0, 0, 1, 0, 1, 0, 0, 0]);
+      expect(lightning.playsByLaneLevel).toEqual([0, 1, 1]);
+      expect(lightning.playsByFieldLevel).toEqual([0, 1, 1]);
+      expect(lightning.avgPlayRound).toBe(4);
+    });
+
+    it('zählt Abwürfe getrennt von Einsätzen und die Hand am Ende', () => {
+      expect(lightning.discards).toBe(1);
+      expect(lightning.discardsByRound).toEqual([0, 0, 0, 1, 0, 0, 0, 0]);
+      expect(lightning.held).toBe(1);
+      expect(logged.cards.find((card) => card.cardId === 'summon-minion')!.timing.held).toBe(1);
+    });
+
+    it('liefert ohne Protokoll leere Zähler und die mittlere Runde 0', () => {
+      const timing = buildReport([result({ outcome: 'draw', rounds: 3 })], 1).cards[0]!.timing;
+      expect(timing.playsByRound).toEqual(Array(MAX_ROUNDS).fill(0));
+      expect(timing.playsByLaneLevel).toEqual(Array(MAX_FIELD_LEVEL).fill(0));
+      expect(timing).toMatchObject({ avgPlayRound: 0, discards: 0, held: 0 });
+    });
+
+    it('weist line-upgrade im Messlauf als gespielt aus (Feld-Upgrade), mit Runde ab 1', () => {
+      const report = runSimulation({ startSeed: 1, count: 30 });
+      const upgrade = report.cards.find((card) => card.cardId === 'line-upgrade')!;
+      expect(upgrade.matchesWithCard).toBeGreaterThan(0);
+      expect(upgrade.timing.playsByRound.reduce((sum, n) => sum + n, 0)).toBe(upgrade.plays);
+      expect(upgrade.timing.playsByRound[0]).toBeGreaterThan(0);
+    });
   });
 });
 

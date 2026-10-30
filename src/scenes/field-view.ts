@@ -237,10 +237,12 @@ export function drawMinionBody(
   x: number,
   baseY: number,
   owner: number,
-  minion?: { hp: number; maxHp?: number; heals?: boolean; explodes?: Explosion; range: number },
-  alpha = 1,
+  minion?: { hp: number; maxHp?: number; heals?: boolean; explodes?: Explosion; range: number; source?: 'card' | 'tower' },
+  baseAlpha = 1,
   look?: MinionLook,
 ): void {
+  // Spawn-Minions der Türme sind blasser als beschworene Figuren, damit man sie auf einen Blick unterscheidet.
+  const alpha = minion?.source === 'tower' ? baseAlpha * 0.65 : baseAlpha;
   const team = teamOf(owner);
   const maxHp = minion ? (minion.maxHp ?? minion.hp) : 0;
   const r = minion ? minionRadius(maxHp) : MINION_RADIUS;
@@ -390,7 +392,9 @@ export function drawBoard(g: Phaser.GameObjects.Graphics, label: LabelFn, state:
         center,
         { size: 10, color: buyable ? TEXT.gold : TEXT.dim },
       );
+      // Die Tower stehen auch auf nicht gekauften Lanes (beide Seiten) und werden dort angegriffen und spawnen.
       for (const tower of bot.lines[line]!.towers) drawTower(g, label, lineX(BOT, tower.offset ?? 0), center, tower, BOT, timeMs);
+      for (const tower of human.lines[line]!.towers) drawTower(g, label, lineX(HUMAN, tower.offset ?? 0), center, tower, HUMAN, timeMs);
       continue;
     }
     if (highlight) {

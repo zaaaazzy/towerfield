@@ -2,11 +2,12 @@
  * Lokaler Gegner mit festen Regeln. Er liest nur den eigenen Spieler (kein Blick auf die Karten des Gegners)
  * und entscheidet ohne Zufall.
  */
-import { getCardDef } from './cards';
+import { CARD_DEFS, getCardDef } from './cards';
 import { laneUnlockLevel } from './lanes';
 import type { Minion } from './combat';
 import {
   buyLane,
+  CARDS_PER_ROUND,
   DISCARD_ENERGY,
   discardCard,
   DRAW_COST,
@@ -124,6 +125,10 @@ export interface BotMove {
   state: MatchState;
 }
 
+/** Karten-IDs der Tower-Spezialisierungen (Blitz- und Schild-Turm). */
+const SPECIALIZATION_IDS: readonly string[] = CARD_DEFS.filter((def) => def.type === 'tower-specialize').map((def) => def.id);
+const isSpecialization = (id: string): boolean => SPECIALIZATION_IDS.includes(id);
+
 /**
  * Führt die Wirtschaftsaktion `id` aus, falls sie in `priority` vorgesehen und jetzt sinnvoll und legal ist; sonst
  * `null`. Sinnvoll heißt: Upgrade und Lane-Kauf nur, solange ihr Preis bis zum Spielende wieder hereinkommt; Ziehen nur,
@@ -143,7 +148,8 @@ function tryEconomy(state: MatchState, playerIndex: PlayerIndex, id: string): Bo
       return lane < 0 ? null : done('buy-lane', buyLane(state, playerIndex, lane), lane);
     }
     case 'draw':
-      return player.energy > DRAW_COST && player.hand.length < HAND_LIMIT
+      // Ist die Karte der Runde schon gespielt, wäre eine gezogene Karte nutzlos: `setReady` legt die Hand ab.
+      return player.cardsPlayed < CARDS_PER_ROUND && player.energy > DRAW_COST && player.hand.length < HAND_LIMIT
         ? done('draw', drawCard(state, playerIndex))
         : null;
     default:
@@ -201,7 +207,10 @@ export function botStep(
   playerIndex: PlayerIndex,
   priority: readonly string[] = PRIORITY,
 ): BotMove | null {
-  for (const id of priority) {
+  // Spezialisierungen zuerst (nur, wenn `priority` sie enthält): Sie sind dauerhaft und brauchen eine Lane ab
+  // `SPECIALIZE_MIN_LEVEL`. Hat der Bot sie, nutzt er sie, bevor Beschwörungen die Energie verbrauchen. Ohne Ziel-Lane
+  // (`chooseLine` liefert nichts) fallen sie durch und stehen in der übrigen Reihenfolge weiter hinten.
+  for (const id of [...priority.filter(isSpecialization), ...priority]) {
     // Ziehen ist nur der Rückfall (siehe unten), egal wo es in der Liste steht.
     if (id === 'draw') continue;
     const move = tryEconomy(state, playerIndex, id) ?? tryPlay(state, playerIndex, id);

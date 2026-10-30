@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { getCardDef } from './cards';
+import { CARD_BALANCE, LANE_COST, MAX_ENERGY, MAX_FIELD_LEVEL, UPGRADE_COST } from './balance-config';
 import { type Minion, type Tower } from './combat';
+import { LANE_COUNT } from './lanes';
 import {
   buyLane,
   createMatch,
@@ -8,7 +9,7 @@ import {
   type MatchState,
   MOVE_COST,
   moveMinion,
-  playCard,
+  playCard as playCardRule,
   type PlayResult,
   setReady,
   undoSummon,
@@ -40,21 +41,30 @@ import {
   validSlots,
   xToPosition,
 } from './placement';
+import { createMatchWithDeck, handOf, towerOf, unitOf, withHand } from './test-fixtures';
+
+/** Wie `playCard`, aber ohne das Kartenlimit der Runde: Diese Tests setzen mehrere Karten in einer Runde. */
+const playCard: typeof playCardRule = (state, playerIndex, ...rest) => {
+  const free = structuredClone(state);
+  free.players[playerIndex].cardsPlayed = 0;
+  const result = playCardRule(free, playerIndex, ...rest);
+  return result.ok ? result : { ...result, state };
+};
+
+const SETUP_HAND = [...handOf('summon-minion', 4), 'summon-brute'];
 
 /** Match mit Beschwörungskarten und viel Energie, damit nur die Platzierung getestet wird; `level` = Ausbaustufe. */
 function setup(level = 1): MatchState {
-  const state = createMatch(1);
-  state.players[0].hand = ['summon-minion', 'summon-minion', 'summon-minion', 'summon-minion', 'summon-brute'];
-  state.players[0].energy = 8;
+  const state = withHand(createMatchWithDeck(SETUP_HAND), SETUP_HAND, MAX_ENERGY);
   state.players[0].level = level;
   return state;
 }
 
 function minion(line: number, slot: number, id = 1): Minion {
-  return { id, line, slot, position: 0, hp: 1, damage: 1, range: 4, speed: 10 };
+  return unitOf('summon-minion', { id, line, slot });
 }
 
-const tower = (offset: number, hp = 100): Tower => ({ offset, hp, maxHp: 100, damage: 8 });
+const tower = (offset: number, hp?: number): Tower => towerOf({ offset, ...(hp === undefined ? {} : { hp }) });
 
 /** Der Zustand nach einer erfolgreichen Aktion; wirft mit dem Ablehnungsgrund. */
 function unwrap(result: PlayResult): MatchState {
@@ -84,7 +94,7 @@ describe('Slots', () => {
     const player = createMatch(1).players[0];
     expect(laneSlotCounts(player)).toEqual([6, 0, 0, 0, 0]);
     let state = setup();
-    state.players[0].energy = 100;
+    state.players[0].energy = UPGRADE_COST * (MAX_FIELD_LEVEL - 1) + LANE_COST * (LANE_COUNT - 1);
     // Feldstufe 2 → obere und untere Lane kaufen, Feldstufe 3 → die beiden äußeren.
     state = unwrap(upgradeField(state, 0));
     for (const lane of [1, 2]) state = unwrap(buyLane(state, 0, lane));
@@ -169,9 +179,11 @@ describe('Beschwören auf Slots', () => {
 
   it('meldet bei voller Lane „line-full“ ohne Slot-Wunsch und „slot-taken“ mit Wunsch', () => {
     let state = setup();
-    state.players[0].hand = Array.from({ length: 8 }, () => 'summon-scout');
-    state.players[0].energy = 20;
-    for (let slot = 0; slot < 6; slot += 1) state = playCard(state, 0, 0, 0, slot).state;
+    const slotCount = validSlots(state.players[0].lines[0]!.towers).length;
+    // Zwei Karten Reserve, damit die letzten Züge nicht an der Hand scheitern.
+    state.players[0].hand = handOf('summon-scout', slotCount + 2);
+    state.players[0].energy = CARD_BALANCE['summon-scout'].cost * (slotCount + 2);
+    for (let slot = 0; slot < slotCount; slot += 1) state = playCard(state, 0, 0, 0, slot).state;
     expect(playCard(state, 0, 0, 0, 0)).toMatchObject({ ok: false, reason: 'slot-taken' });
     expect(playCard(state, 0, 0, 0)).toMatchObject({ ok: false, reason: 'line-full' });
   });
@@ -210,14 +222,13 @@ describe('Beschwören auf Slots', () => {
 });
 
 describe('Verschieben auf einen anderen Turm-Slot', () => {
-  it('kostet genau 1 Energie und setzt das Minion auf den neuen Slot', () => {
+  it('kostet MOVE_COST Energie und setzt das Minion auf den neuen Slot', () => {
     const placed = playCard(setup(), 0, 0, 0, 0).state;
     const id = placed.players[0].minions[0]!.id;
     const moved = moveMinion(placed, 0, id, 0, 5);
     expect(moved.ok).toBe(true);
     expect(moved.state.players[0].minions[0]).toMatchObject({ line: 0, slot: 5, position: 16 });
     expect(moved.state.players[0].energy).toBe(placed.players[0].energy - MOVE_COST);
-    expect(MOVE_COST).toBe(1);
   });
 
   it('versetzt auch auf einen Tower einer anderen Lane', () => {
@@ -239,7 +250,7 @@ describe('Verschieben auf einen anderen Turm-Slot', () => {
 
   it('verschiebt auch Überlebende früherer Runden', () => {
     const state = setup();
-    state.players[0].minions.push({ id: 50, line: 0, slot: 4, position: 16, hp: 5, damage: 1, range: 4, speed: 10 });
+    state.players[0].minions.push(unitOf('summon-minion', { id: 50, slot: 4, position: 16, hp: 5 }));
     const moved = moveMinion(state, 0, 50, 0, 0);
     expect(moved.ok).toBe(true);
     expect(moved.state.players[0].minions.find((m) => m.id === 50)).toMatchObject({ slot: 0, position: 0 });
@@ -267,8 +278,8 @@ describe('Verschieben auf einen anderen Turm-Slot', () => {
 
   it('verschiebt und nimmt auch für Spieler 1 zurück, ohne die Statistik des eigenen Spielers zu berühren', () => {
     const state = setup();
-    state.players[1].hand = ['summon-minion', 'summon-minion'];
-    state.players[1].energy = 8;
+    state.players[1].hand = handOf('summon-minion', 2);
+    state.players[1].energy = MAX_ENERGY;
     const placed = playCard(state, 1, 0, 0, 0);
     if (!placed.ok) throw new Error(placed.reason);
     const id = placed.state.players[1].minions[0]!.id;
@@ -323,8 +334,8 @@ describe('Verschieben auf einen anderen Turm-Slot', () => {
 describe('Rückgängig machen vor „Bereit“', () => {
   it('nimmt die Beschwörung zurück, erstattet Energie und gibt die Karte zurück', () => {
     const before = setup();
-    const placed = playCard(before, 0, 4, 0, 0).state; // Brocken, Kosten 2
-    expect(placed.players[0].energy).toBe(before.players[0].energy - getCardDef('summon-brute').cost);
+    const placed = playCard(before, 0, 4, 0, 0).state; // Brocken
+    expect(placed.players[0].energy).toBe(before.players[0].energy - CARD_BALANCE['summon-brute'].cost);
     const undone = undoSummon(placed, 0, placed.players[0].minions[0]!.id);
     expect(undone.ok).toBe(true);
     const player = undone.state.players[0];
@@ -342,7 +353,7 @@ describe('Rückgängig machen vor „Bereit“', () => {
 
   it('gilt nicht für Minions aus früheren Runden', () => {
     const state = setup();
-    state.players[0].minions.push({ id: 50, line: 0, slot: 0, position: 60, hp: 5, damage: 1, range: 4, speed: 10 });
+    state.players[0].minions.push(unitOf('summon-minion', { id: 50, slot: 0, position: 60, hp: 5 }));
     expect(undoSummon(state, 0, 50)).toMatchObject({ ok: false, reason: 'no-such-minion' });
   });
 });
