@@ -62,6 +62,27 @@ Die Tests setzen die Hand selbst, hängen also nicht an der Deck-Reihenfolge ein
 `npm run typecheck`, `npx vitest run src/logic/bot.test.ts` (33 Tests) und `npm run test:smoke` waren grün. Der Review
 war freigegeben, ohne blockierende Befunde.
 
+## Spezialisierungen: Vorrang (Auftrag „Bot spielt Spezialisierungen sinnvoll“)
+
+`botStep` probiert die Karten `tower-lightning` und `tower-shield` **vor** der übrigen Reihenfolge, sofern `priority`
+sie enthält. Der Bot nutzt sie damit, solange er die Energie noch nicht für Beschwörungen ausgegeben hat. Die Lane-Wahl
+bleibt (`chooseLine`: nur Lanes mit `laneUnlockLevel ≥ SPECIALIZE_MIN_LEVEL` und freiem Tower, höchstes Level zuerst).
+Findet `chooseLine` keine Lane oder reicht die Energie nicht, fällt die Karte durch und der Bot spielt wie bisher.
+
+Tests im Block „Spezialisierung › Vorrang vor Beschwörungen“ in `bot.test.ts`:
+
+| Fall | Erwartung |
+| --- | --- |
+| Beschwörung steht in `priority` vor der Spezialisierung | Spezialisierung zuerst, danach die Beschwörung |
+| Keine Lane ab Lvl 2 (kein passendes Ziel) | Beschwörung zuerst |
+| Alle Tower der Lanes ab Lvl 2 sind schon spezialisiert | Beschwörung zuerst |
+| Spezialisierung fehlt in `priority` | bleibt auf der Hand |
+| Energie reicht nicht für die Spezialisierung | Beschwörung zuerst |
+
+Wirkung im Messlauf (Seed 1, 1000 Matches): mittlere Spielrunde von 5,1 auf 4,7. Die Abweichung zur Basis ändert das
+kaum (siehe `anwendung-balance-cli.md`, „Ursache der Abweichung“). Der Lane-Kauf bleibt unverändert; ihn an eine
+Spezialisierung zu koppeln, wurde gemessen und verworfen.
+
 ## Worauf zu achten ist
 
 - **`PRIORITY` ist im Test kopiert:** Sie ist in `bot.ts` nicht exportiert. Ändert sich die Reihenfolge dort, schlagen

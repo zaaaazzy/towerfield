@@ -51,6 +51,39 @@ function renderRows(rows: readonly (readonly string[])[]): string[] {
   );
 }
 
+/** Karten, deren Spielzeitpunkt der Bericht ausweist (Spezialisierungen und Upgrades). */
+export const TIMING_CARD_IDS = ['tower-lightning', 'tower-shield', 'line-upgrade', 'minion-upgrade-elite'] as const;
+
+/** Zeitpunkt der Zielkarten: Einsätze je Runde (R1…) und je Lane-Level (L1…), mittlere Runde, Abwürfe, Hand am Ende. */
+export function formatTimingRows(report: BalanceReport): string[] {
+  const rounds = report.cards[0]?.timing.playsByRound.length ?? 0;
+  const levels = report.cards[0]?.timing.playsByLaneLevel.length ?? 0;
+  const head = [
+    'timing',
+    ...Array.from({ length: rounds }, (_, i) => `R${i + 1}`),
+    ...Array.from({ length: levels }, (_, i) => `L${i + 1}`),
+    'avgRound',
+    'discards',
+    'held',
+  ];
+  const rows = TIMING_CARD_IDS.flatMap((id) => {
+    const card = report.cards.find((c) => c.cardId === id);
+    if (!card) return [];
+    const { timing } = card;
+    return [
+      [
+        id,
+        ...timing.playsByRound.map(String),
+        ...timing.playsByLaneLevel.map(String),
+        timing.avgPlayRound.toFixed(2),
+        String(timing.discards),
+        String(timing.held),
+      ],
+    ];
+  });
+  return renderRows([head, ...rows]);
+}
+
 /** Lesbare Tabelle: Kopfwerte, eine Zeile je Karte (sortiert) und die Ereigniszähler. */
 export function formatBalanceTable(report: BalanceReport): string {
   const header = [
@@ -76,7 +109,9 @@ export function formatBalanceTable(report: BalanceReport): string {
     ]),
   ];
   const eventRows = [['event', 'count'], ...Object.entries(report.eventCounts).map(([id, n]) => [id, String(n)])];
-  return [...header, '', ...renderRows(cardRows), '', ...renderRows(eventRows)].join('\n');
+  return [...header, '', ...renderRows(cardRows), '', ...formatTimingRows(report), '', ...renderRows(eventRows)].join(
+    '\n',
+  );
 }
 
 function parseInteger(name: string, raw: string, min: number, max: number): number | string {

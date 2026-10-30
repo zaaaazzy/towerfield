@@ -5,13 +5,15 @@ import {
   formatBalanceTable,
   formatPercent,
   formatSignedPercent,
+  formatTimingRows,
   MAX_BALANCE_COUNT,
   parseBalanceArgs,
   sortCardsByDelta,
+  TIMING_CARD_IDS,
 } from './balance-format';
-import { buildReport, type CardStats } from './balance-sim';
+import { buildReport, type CardStats, type CardTiming } from './balance-sim';
 
-const card = (cardId: string, deltaToBaseline: number): CardStats => ({
+const card = (cardId: string, deltaToBaseline: number, timing: Partial<CardTiming> = {}): CardStats => ({
   cardId,
   matchesWithCard: 10,
   plays: 12,
@@ -19,6 +21,16 @@ const card = (cardId: string, deltaToBaseline: number): CardStats => ({
   drawRate: 0,
   lossRate: 0.5 - deltaToBaseline,
   deltaToBaseline,
+  timing: {
+    playsByRound: [0, 0, 5, 4, 3, 0, 0, 0],
+    playsByLaneLevel: [0, 12, 0],
+    playsByFieldLevel: [0, 7, 5],
+    avgPlayRound: 3.833,
+    discards: 9,
+    discardsByRound: [0, 0, 0, 0, 9, 0, 0, 0],
+    held: 4,
+    ...timing,
+  },
 });
 
 describe('Prozentdarstellung', () => {
@@ -81,6 +93,35 @@ describe('Tabelle', () => {
   it('enthält die Ereigniszähler, auch mit 0', () => {
     expect(lines.some((line) => line.startsWith('event'))).toBe(true);
     expect(lines.some((line) => /^energy\s+0$/.test(line))).toBe(true);
+  });
+});
+
+describe('Zeitpunkt der Zielkarten', () => {
+  const report = {
+    ...buildReport([], 1),
+    cards: [
+      card('tower-lightning', -0.29),
+      card('line-upgrade', 0.005, { playsByRound: [6, 6, 0, 0, 0, 0, 0, 0], avgPlayRound: 1.5, discards: 0, held: 0 }),
+      card('summon-minion', 0.01),
+    ],
+  };
+
+  it('nennt die vier Zielkarten', () => {
+    expect([...TIMING_CARD_IDS]).toEqual(['tower-lightning', 'tower-shield', 'line-upgrade', 'minion-upgrade-elite']);
+  });
+
+  it('listet je vorhandener Zielkarte eine Zeile mit Runden, Lane-Leveln, mittlerer Runde, Abwürfen und Hand', () => {
+    const rows = formatTimingRows(report);
+    expect(rows[0]).toMatch(/^timing\s+R1\s+R2\s+R3\s+R4\s+R5\s+R6\s+R7\s+R8\s+L1\s+L2\s+L3\s+avgRound\s+discards\s+held$/);
+    expect(rows[1]).toMatch(/^tower-lightning\s+0\s+0\s+5\s+4\s+3\s+0\s+0\s+0\s+0\s+12\s+0\s+3\.83\s+9\s+4$/);
+    expect(rows[2]).toMatch(/^line-upgrade\s+6\s+6\s+0\s+0\s+0\s+0\s+0\s+0\s+0\s+12\s+0\s+1\.50\s+0\s+0$/);
+    expect(rows).toHaveLength(3);
+  });
+
+  it('erscheint in der Tabelle, auch ohne Zielkarten und ohne Karten (kein Absturz)', () => {
+    expect(formatBalanceTable(report).split('\n').some((line) => line.startsWith('tower-lightning') && line.endsWith('4'))).toBe(true);
+    expect(formatTimingRows({ ...report, cards: [card('summon-minion', 0)] })).toHaveLength(1);
+    expect(formatTimingRows({ ...report, cards: [] })).toEqual(['timing  avgRound  discards  held']);
   });
 });
 
