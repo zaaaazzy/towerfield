@@ -37,4 +37,20 @@ Berichte und Doku verwenden nur diese drei Namen:
 | **Szenen-E2E** | Playwright-Specs unter `e2e/` mit Szenenabläufen | Playwright, keine Coverage; läuft über `npm run test:smoke` bzw. `npx playwright test`, nie über `vitest run` („No test files found", Exit-Code 1) |
 | **Smoke** | `e2e/smoke.spec.ts` | Canvas zeichnet, keine Konsolenfehler; `npm run test:smoke`. Neue Szenen dort aufnehmen, wenn sie ohne Eingabe erreichbar sind |
 
+### Berichtsvorlage
+
+Jeder Coverage-Bericht besteht aus genau diesen drei Zeilen, in dieser Reihenfolge:
+
+```text
+Logik: Zeilen <x,x> %, Zweige <x,x> %, Funktionen <x,x> %, Anweisungen <x,x> %
+Szenen-E2E: <n> Tests
+Smoke: <n> Tests
+```
+
+- Die Logik-Werte stammen aus `total` in `coverage/coverage-summary.json` (frisch nach `npm run test:coverage`), mit
+  einer Dezimalstelle und Dezimalkomma. Ältere Zahlen nicht als aktuell ausgeben.
+- Szenen-E2E und Smoke nennen nur die Testanzahl, keine Coverage.
+- Erzeugen: `npm run coverage:report -- <Szenen-E2E-Tests> <Smoke-Tests>` (Logik: `src/logic/coverage-report.ts`).
+  Bei fehlenden oder ungültigen Werten gibt der Aufruf eine Fehlermeldung aus statt Zeilen.
+
 - Keine Konsolenausgaben mit `console.error` für erwartete Fälle – der Smoke-Test wertet sie als Fehler.
