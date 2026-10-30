@@ -424,7 +424,10 @@ export class MainScene extends Phaser.Scene {
     camera.postFX.clear();
     if (!this.juiceSettings.postFx) return;
     camera.postFX.addVignette(0.5, 0.5, POST_FX.vignette.radius, POST_FX.vignette.strength);
-    camera.postFX.addColorMatrix().colorMatrix.saturate(POST_FX.saturation).contrast(POST_FX.contrast);
+    // Das FX-Objekt ist selbst die Farbmatrix; der zweite Aufruf multipliziert, statt die Sättigung zu ersetzen.
+    const grade = camera.postFX.addColorMatrix();
+    grade.saturate(POST_FX.saturation);
+    grade.contrast(POST_FX.contrast, true);
     camera.postFX.addBloom(PALETTE.white, 1, 1, POST_FX.bloom.blur, POST_FX.bloom.strength);
   }
 
